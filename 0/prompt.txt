@@ -1,0 +1,15 @@
+veya arkadaş düzeltiyor streamler j üzdrinden yapılacak
+
+---
+
+<task-notification>
+<task-id>bh51yemqv</task-id>
+<tool-use-id>toolu_01ESgWoNQjTZXDGeWdFns5ov</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/bh51yemqv.output</output-file>
+<status>completed</status>
+<summary>Background command "Change the working documents so that Julien starts all sandbox test runs, commit on stream-o and push" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+Julien’inki geçerli olsun. O zaman söyle, benim commit’imi geri alırım. böyle yap

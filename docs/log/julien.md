@@ -2,6 +2,22 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 22:30 · Branch stream-j-simple: the board concept (best test run 51.2)
+
+- Changed: new branch `stream-j-simple` (from `stream-j` at `31f8933`). One browsing agent per website, connected
+  only by a shared board of typed facts (`board.py`, `simple.py` as the entry point); no lead model, no recorder, no
+  hand-offs. The engine always bids every position with what is known. Details: `docs/branch-stream-j-simple.md`
+  (on `main` via pull request #10).
+- Why: every earlier state scored 10; the information was lost or late at the hand-offs between models.
+- Checked: 215 unit tests pass (1 skipped). Test runs: `run_930993c7fb3173ed` (`91893e5`) quality 5 (ERP never
+  answered, groups wrongly marked as searched, fixed in `92456f6`); `run_9b8aee1022f379bc` (`92456f6`) quality 51.2
+  (every position with material, quantity and lead time; prices mostly missing). Two local runs signed a bid.
+- Learned: one session per website ends the logins that threw each other out; a fact recorded at once reaches the
+  other agents immediately.
+- For the others: O, I: this branch replaces the lead and the recorder for its runs; `agent.py` and the engine are
+  reused. Nothing is merged into `main` except the notes file.
+- Next: prices (every page of the conditions, price units, discount), investigating longer.
+
 ## 2026-10-10 20:15 · Test run run_a1424b6668fbc7f4; the submission no longer goes round in a circle
 
 - Test run `run_a1424b6668fbc7f4`, package `stream-j` at `8b7a460`: quality 10 (decision 5, tender reference 5),

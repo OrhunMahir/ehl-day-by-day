@@ -116,12 +116,14 @@ def _qa_rank(entry):
 
 def withdrawn_numbers(facts: Facts) -> set[str]:
     """Rule 13: numbers of Q&A answers withdrawn by a later answer."""
-    return {norm_key(w.withdraws) for w in facts.withdrawals if not_after(_date(w), facts.scenario_date)}
+    return {norm_key(w.withdraws) for w in facts.withdrawals
+            if norm_key(w.withdraws) and not_after(_date(w), facts.scenario_date)}
 
 
 def _live(entries, facts: Facts):
     gone = withdrawn_numbers(facts)
-    return [e for e in entries if norm_key(e.qa_number) not in gone and not_after(_date(e), facts.scenario_date)]
+    return [e for e in entries
+            if not (norm_key(e.qa_number) and norm_key(e.qa_number) in gone) and not_after(_date(e), facts.scenario_date)]
 
 
 def assignment(facts: Facts, position: str, kind: AssignmentKind) -> Assignment | None:
@@ -138,7 +140,7 @@ def stated_quantity(facts: Facts, pos: TenderPosition) -> Decimal:
 
 def has_withdrawn_change(facts: Facts, pos: TenderPosition) -> bool:
     gone = withdrawn_numbers(facts)
-    return any(norm_key(c.qa_number) in gone for c in facts.quantity_changes
+    return any(norm_key(c.qa_number) and norm_key(c.qa_number) in gone for c in facts.quantity_changes
                if norm_key(c.position) == norm_key(pos.position))
 
 

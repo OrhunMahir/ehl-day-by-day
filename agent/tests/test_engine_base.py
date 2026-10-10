@@ -60,8 +60,8 @@ def core_facts() -> Facts:
             TenderPosition("2", D(3), Unit.SET, "B"),
         ],
         quantity_changes=[
-            QuantityChange("Q1", "1", D(12), at("2030-02-01")),
-            QuantityChange("Q2", "1", D(20), at("2030-02-05")),
+            QuantityChange("1", D(12), "Q1", at("2030-02-01")),
+            QuantityChange("1", D(20), "Q2", at("2030-02-05")),
         ],
         withdrawals=[Withdrawal("Q3", "Q2", at("2030-02-10"))],
         revisions=[

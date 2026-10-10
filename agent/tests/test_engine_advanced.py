@@ -29,7 +29,7 @@ def one_position(**material_kw) -> Facts:
 
 
 def assign(f: Facts, kind, key, position="1", qa="Q9", day="2030-02-01"):
-    f.assignments.append(Assignment(qa, position, kind, key, at(day)))
+    f.assignments.append(Assignment(position, kind, key, qa, at(day)))
 
 
 def index(key="IX-1", day="2030-03-01", ref=REF, windows=None, sender="kalkulation"):
@@ -291,9 +291,9 @@ class UsableTravel(unittest.TestCase):
         f.revisions[1].requirements[0] = replace(f.revisions[1].requirements[0], stroke_mm=D(280),
                                                  usable_travel=True, end_reserve_key="E-1")
         f.amendments = [
-            TechnicalAmendment("Q6", "R-2", "A", Attr.STROKE, "285", at("2030-02-02")),
-            TechnicalAmendment("Q7", "R-2", "A", Attr.STROKE, "290", at("2030-02-03")),
-            TechnicalAmendment("Q8", "R-1", "A", Attr.STROKE, "999", at("2030-02-04")),
+            TechnicalAmendment("R-2", "A", Attr.STROKE, "285", "Q6", at("2030-02-02")),
+            TechnicalAmendment("R-2", "A", Attr.STROKE, "290", "Q7", at("2030-02-03")),
+            TechnicalAmendment("R-1", "A", Attr.STROKE, "999", "Q8", at("2030-02-04")),
         ]
         f.end_reserves = [EndReserve(REF, "E-1", "R-2", D(5), mail("technik", "2030-03-01")),
                           EndReserve(REF, "E-1", "R-1", D(50), mail("technik", "2030-03-02"))]
@@ -311,12 +311,12 @@ class UsableTravel(unittest.TestCase):
 
     def test_amendment_changes_only_named_attribute(self):                             # rule 14
         f = core_facts()
-        f.amendments = [TechnicalAmendment("Q6", "R-2", "A", Attr.PRESSURE, "170", at("2030-02-02"))]
+        f.amendments = [TechnicalAmendment("R-2", "A", Attr.PRESSURE, "170", "Q6", at("2030-02-02"))]
         self.assertEqual(build_bid(f)["positions"][0]["material_number"], "M-A3")
 
     def test_withdrawn_amendment_ignored(self):                                         # rule 13
         f = core_facts()
-        f.amendments = [TechnicalAmendment("Q6", "R-2", "A", Attr.PRESSURE, "170", at("2030-02-02"))]
+        f.amendments = [TechnicalAmendment("R-2", "A", Attr.PRESSURE, "170", "Q6", at("2030-02-02"))]
         f.withdrawals.append(Withdrawal("Q10", "Q6", at("2030-02-12")))
         self.assertEqual(build_bid(f)["positions"][0]["material_number"], "M-A1")
 

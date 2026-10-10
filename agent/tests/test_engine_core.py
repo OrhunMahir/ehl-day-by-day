@@ -46,7 +46,7 @@ class Quantity(unittest.TestCase):
 
     def test_all_changes_withdrawn_falls_back_to_tender(self):         # rule 13
         f = core_facts()
-        f.quantity_changes = [QuantityChange("Q2", "1", D(20), at("2030-02-05"))]
+        f.quantity_changes = [QuantityChange("1", D(20), "Q2", at("2030-02-05"))]
         self.assertEqual(pos(build_bid(f), "1")["quantity"], 10)
 
     def test_set_converted_with_governing_spec(self):                  # rule 17
@@ -54,7 +54,7 @@ class Quantity(unittest.TestCase):
 
     def test_set_change_in_q_and_a_is_in_sets(self):                   # rule 17
         f = core_facts()
-        f.quantity_changes.append(QuantityChange("Q4", "2", D(5), at("2030-02-20")))
+        f.quantity_changes.append(QuantityChange("2", D(5), "Q4", at("2030-02-20")))
         self.assertEqual(pos(build_bid(f), "2")["quantity"], 20)
 
     def test_set_without_pieces_per_set_leaves_position_out(self):
@@ -133,7 +133,7 @@ class Price(unittest.TestCase):
         f = core_facts()
         f.withdrawals = []          # 20 pieces: still scale 10
         self.assertEqual(pos(build_bid(f), "1")["base_unit_price"], 90)
-        f.quantity_changes.append(QuantityChange("Q5", "1", D(50), at("2030-02-25")))
+        f.quantity_changes.append(QuantityChange("1", D(50), "Q5", at("2030-02-25")))
         self.assertEqual(pos(build_bid(f), "1")["base_unit_price"], 80)
 
     def test_price_unit_normalised(self):                              # rules 4, 22

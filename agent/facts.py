@@ -56,13 +56,14 @@ def norm_text(text: str | None) -> str:
     return clean(text or "").casefold()
 
 
-def dec(value, locale: str | None = None) -> Decimal:
+def dec(value, locale: str | None = None, strict: bool = False) -> Decimal:
     """Parse a number to Decimal.
 
     `locale` is "de" (1.234,56) or "en" (1,234.56); prefixes like "de-DE" or "en-US" work too. Without it the format
     is inferred: with both separators the last one is the decimal mark; a lone comma is a decimal mark; a lone dot
     followed by exactly three digits more than once (1.234.567) is a thousands separator. Units and currency symbols
-    around the number are ignored. Ambiguous text such as "1.234" without a locale is read as 1.234.
+    around the number are ignored. Ambiguous text such as "1.234" without a locale is read as 1.234, or raises with
+    `strict`.
     """
     if isinstance(value, Decimal):
         return value
@@ -76,6 +77,8 @@ def dec(value, locale: str | None = None) -> Decimal:
         raise ValueError(f"no number in {value!r}")
     num = match.group(0)
     loc = (locale or "").lower()[:2]
+    if strict and not loc and re.fullmatch(r"-?[1-9]\d{0,2}[.,]\d{3}", num):
+        raise ValueError(f"{value!r} is ambiguous (thousands or decimals?); send a JSON number or state the format")
     if loc == "de":
         num = num.replace(".", "").replace(",", ".")
     elif loc == "en":
@@ -152,7 +155,8 @@ def unit(text: str | None) -> Unit | None:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Tender portal: positions and bidder Q&A
+# The tender: positions and what changes them. On the public sites these come from the tender portal's bidder Q&A;
+# elsewhere they may sit on another site. `qa_number` is the Q&A answer's number when there is one, else "".
 
 
 @dataclass
@@ -167,10 +171,10 @@ class TenderPosition:
 
 @dataclass
 class QuantityChange:
-    """A Q&A answer that sets a position's quantity, in the position's stated unit (rule 1, 17)."""
-    qa_number: str
+    """A clarification that sets a position's quantity, in the position's stated unit (rule 1, 17)."""
     position: str
     quantity: Decimal
+    qa_number: str = ""
     source: Source | None = None
 
 
@@ -193,13 +197,13 @@ class Attr(str, Enum):
 
 @dataclass
 class TechnicalAmendment:
-    """A Q&A answer that changes one attribute of one requirement in one named revision (rule 14). For a requirement
-    marked as usable travel, a stroke amendment states the usable travel (rule 20)."""
-    qa_number: str
+    """A clarification that changes one attribute of one requirement in one named revision (rule 14). For a
+    requirement marked as usable travel, a stroke amendment states the usable travel (rule 20)."""
     revision: str
     requirement: str
     attribute: Attr
     value: Decimal | str
+    qa_number: str = ""
     source: Source | None = None
 
 
@@ -213,11 +217,11 @@ class AssignmentKind(str, Enum):
 
 @dataclass
 class Assignment:
-    """A Q&A answer that assigns a key to a position."""
-    qa_number: str
+    """A key assigned to a position (by a Q&A answer, the ERP or wherever the site states it)."""
     position: str
     kind: AssignmentKind
     key: str
+    qa_number: str = ""
     source: Source | None = None
 
 
@@ -502,13 +506,13 @@ def _convert(tp, value):
     if origin is dict:
         return {str(k): _convert(typing.get_args(tp)[1], v) for k, v in value.items()}
     if tp is Decimal:
-        return dec(value)
+        return dec(value, strict=True)
     if tp is bool:
         if isinstance(value, bool):
             return value
         return norm_text(str(value)) in {"true", "yes", "ja", "1", "aktiv", "active"}
     if tp is int:
-        number = dec(value)
+        number = dec(value, strict=True)
         if number != number.to_integral_value():
             raise ValueError(f"{value!r} is not a whole number")
         return int(number)
@@ -529,6 +533,35 @@ def _convert(tp, value):
     raise TypeError(f"unsupported type {tp}")
 
 
+# What a model filling the facts must know beyond the field name.
+FIELD_DOCS = {
+    "Source.date": "when the record was issued (mail date and time, revision date, Q&A date)",
+    "Source.sender": "the sender's full mail address, for mails",
+    "Facts.scenario_date": "the scenario date (Stichtag) from the brief or the sites, with time if given",
+    "Facts.bidder_domain": "domain of our own mailbox, e.g. the part after @ of the sales inbox",
+    "Facts.director_address": "the sales director's mail address as the brief names it",
+    "Facts.searched_groups": "every Kataloggruppe searched in the ERP, also searches that found nothing",
+    "TenderPosition.quantity": "the tender's quantity in the position's own unit (before any clarification)",
+    "TechnicalAmendment.value": "the new value as stated; for a usable-travel requirement the usable travel",
+    "Requirement.stroke_mm": "as stated; for a usable-travel requirement the usable travel (reserves are added later)",
+    "Requirement.certification": "as stated; null or empty when no certification is required",
+    "Requirement.pieces_per_set": "pieces in one Satz/set, when the requirement defines it",
+    "Material.active": "true only when the ERP status says the material is active/released",
+    "Material.surcharge_mass_kg": "Zuschlagsmasse per piece in kg (625 g = 0.625)",
+    "Material.allocation_mass_kg": "Umlagegewicht per piece in kg (3100 g = 3.1)",
+    "Material.stock": "pieces in stock",
+    "Material.setup_fee_eur": "ordinary setup fee (Rüstkosten) for the whole position, if the ERP states one",
+    "PriceCondition.price_unit": "number of pieces the price refers to (price per 100 pieces -> 100)",
+    "PriceCondition.fx_key": "the FX key the condition names when its currency is not EUR",
+    "Scale.min_quantity": "the scale starts at this many pieces",
+    "DiscountApproval.percent": "approved percent; 0 when the message refuses or withdraws the discount",
+    "DiscountApproval.min_order_value": "minimum undiscounted net order value in EUR, if the approval has one",
+    "IndexWindow.rate_eur_per_kg": "index rate in EUR per kg",
+    "DeliveryCommitment.max_quantity": "inclusive ceiling on the total pieces of that material over all positions",
+    "BonusBand.percent": "percent for the part of the total between lower and upper",
+}
+
+
 def json_schema(cls=None) -> dict:
     """JSON Schema of a facts dataclass (default `Facts`) for a model's tool definition."""
     cls = cls or Facts
@@ -536,9 +569,14 @@ def json_schema(cls=None) -> dict:
     props, required = {}, []
     for f in fields(cls):
         props[f.name] = _schema(hints[f.name])
+        doc = FIELD_DOCS.get(f"{cls.__name__}.{f.name}")
+        if doc:
+            props[f.name] = {**props[f.name], "description": doc}
         if f.default is MISSING and f.default_factory is MISSING:
             required.append(f.name)
     schema = {"type": "object", "properties": props, "additionalProperties": False}
+    if cls.__doc__ and not cls.__doc__.startswith(cls.__name__ + "("):
+        schema["description"] = " ".join(cls.__doc__.split())
     if required:
         schema["required"] = required
     return schema
@@ -558,7 +596,8 @@ def _schema(tp) -> dict:
         elif origin is dict:
             out = {"type": "object", "additionalProperties": _schema(typing.get_args(tp)[1])}
         elif tp is Decimal:
-            out = {"type": ["number", "string"]}
+            out = {"type": ["number", "string"],
+                   "description": "a JSON number, or text with a format that is not ambiguous (1.250 is ambiguous)"}
         elif tp is bool:
             out = {"type": "boolean"}
         elif tp is int:

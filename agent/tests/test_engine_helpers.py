@@ -92,7 +92,7 @@ class Json(unittest.TestCase):
             {"requirement": "A", "bore_mm": "50", "stroke_mm": "300", "pressure_bar": "160", "mounting": "Flansch",
              "certification": "keine gefordert", "catalogue_group": "G-A"}]}],
         "materials": [{"material_number": "M-A1", "active": "aktiv", "catalogue_group": "G-A", "bore_mm": 50, "stroke_mm": "300,0",
-                       "pressure_bar": "160", "mounting": "Flansch", "stock": "1.250", "pieces_per_carton": "1,250", "stock_lead_weeks": "1",
+                       "pressure_bar": "160", "mounting": "Flansch", "stock": "1250", "pieces_per_carton": "2,5", "stock_lead_weeks": "1",
                        "conditions": [{"valid_from": "01.01.2030, 00:00:00 UTC", "valid_to": "31.12.2030",
                                        "price_unit": "1", "scales": [{"min_quantity": "1", "price": "1.234,50"}]}]}],
         "discount_approvals": [{"reference": "T-TEST-1", "percent": "4", "min_order_value": "3.000,00",
@@ -111,8 +111,8 @@ class Json(unittest.TestCase):
         self.assertEqual((f.amendments[0].attribute, f.amendments[0].value), (Attr.STROKE, "300"))
         self.assertEqual(f.assignments[0].kind, AssignmentKind.PACKAGING)
         m = f.materials[0]
-        self.assertEqual((m.active, m.stroke_mm, m.stock, m.stock_lead_weeks), (True, D("300.0"), D("1.250"), 1))
-        self.assertEqual(m.pieces_per_carton, D("1.250"))   # a lone separator is a decimal mark; pass a locale
+        self.assertEqual((m.active, m.stroke_mm, m.stock, m.stock_lead_weeks), (True, D("300.0"), D(1250), 1))
+        self.assertEqual(m.pieces_per_carton, D("2.5"))
         self.assertEqual(m.conditions[0].scales[0].price, D("1234.50"))
         self.assertEqual(f.discount_approvals[0].min_order_value, D(3000))
         self.assertIsNone(f.metal_indices[0].windows[0].valid_to)
@@ -136,6 +136,17 @@ class Json(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             from_dict(Facts, bad)
         self.assertIn("quantity", str(ctx.exception))
+
+    def test_ambiguous_number_text_rejected(self):
+        from facts import Facts, from_dict
+        for text in ("1.250", "1,250", "-12.500"):
+            bad = {**self.DATA, "materials": [{"material_number": "M", "stock": text}]}
+            with self.assertRaises(ValueError, msg=text) as ctx:
+                from_dict(Facts, bad)
+            self.assertIn("Material.stock", str(ctx.exception))
+        ok = {**self.DATA, "materials": [{"material_number": "M", "stock": 1.25, "pieces_per_carton": "0,250"}]}
+        m = from_dict(Facts, ok).materials[0]
+        self.assertEqual((m.stock, m.pieces_per_carton), (D("1.25"), D("0.250")))
 
     def test_schema_covers_every_field(self):
         import json

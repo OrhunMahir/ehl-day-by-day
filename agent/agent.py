@@ -33,7 +33,9 @@ Approach:
    investigations (e.g. one catalogue group each) instead of one long one. Give each a precise
    task: what to find, which exact reference, which details (dates, units, status, validity, senders), and to report
    verbatim. Their first pass should survey their site for everything the rules might need; information may sit on
-   any site, so ask each assistant to report anything relevant it sees.
+   any site, so ask each assistant to report anything relevant it sees. Keep each task short, at most about 80 words
+   plus at most one sentence of what an earlier report taught about that site: the assistants sign in, handle
+   cookie walls and gates, page through lists and note sources by themselves. Long tasks cost minutes of writing.
 3. Time allows two rounds of investigations. The first round is short (about {first_minutes} minutes per
    investigation): give every assistant one narrow job, the one the other sites depend on. Typical first jobs: the
    tender's positions with their requirement identifiers and all clarifications; the current specification
@@ -85,11 +87,14 @@ FIRST_ROUND_SECONDS = 180  # the first round is cut shorter, so the follow-ups t
 TABS_PER_SITE = 4
 # How much each role's model thinks before it answers; None leaves the provider's default. Qwen writes about 40
 # tokens per second: at "xhigh" one lead answer took 12,000 tokens and 339 s, and browsing steps that thought took
-# about 50 s instead of 3 s. The lead keeps some thinking within a token and time limit; the sub-agents (browsing,
-# submission) and the recording of facts are routine steps without thinking.
-LEAD_REASONING: str | None = "low"
-LEAD_MAX_TOKENS = 4000
-LEAD_CALL_SECONDS = 120  # a lead call that has not answered by then is dropped and asked again
+# about 50 s instead of 3 s. The sub-agents (browsing, submission) and the recording of facts are routine steps
+# without thinking. The lead thinks neither: at "low" with 4000 tokens its turn after the first round took 118 s and
+# was cut off inside its tool calls, three turns in a row, so the second round never started. The engine's `needed`
+# list is its plan; its answer is only the tool calls.
+LEAD_REASONING: str | None = None
+LEAD_THINKING = False
+LEAD_MAX_TOKENS = 8000  # six investigation tasks of a few hundred tokens each fit
+LEAD_CALL_SECONDS = 180  # a lead call that has not answered by then is dropped and asked again
 RECORDER_REASONING: str | None = None  # the calls that turn a report into facts
 RECORDER_THINKING = False
 RECORD_MAX_TOKENS = 8000  # the facts of one report as JSON
@@ -114,8 +119,10 @@ the scenario date, the sales director's address and our own mailbox domain from 
 - Do not record guesses, and nothing the report says was not checked.
 - If the report states nothing that fits, call `add_facts` with an empty object.
 """
-RECORD_SECONDS = 150  # one report's facts must be recorded within this
-RECORD_CALL_SECONDS = 75  # a recording call that has not answered by then is dropped and asked again
+RECORD_SECONDS = 240  # one report's facts must be recorded within this
+# A recording call that has not answered by then is dropped and asked again. Without thinking the recorder writes
+# about 40 tokens per second: a report with many records needs 3000-4000 tokens, which 75 s cut off every time.
+RECORD_CALL_SECONDS = 120
 RECORD_WAIT_SECONDS = 20  # how long the lead's next turn waits for reports that are still being recorded
 SUBMISSION_RESERVE_SECONDS = 420  # recording never eats into this much time for entering and signing the bid
 
@@ -609,7 +616,7 @@ async def open_site(site: str, url: str, page) -> Tab:
 async def main() -> int:
     started = time.time()
     task, token = contract.load_run()
-    model = Model(reasoning_effort=LEAD_REASONING, max_tokens=LEAD_MAX_TOKENS)
+    model = Model(reasoning_effort=LEAD_REASONING, thinking=LEAD_THINKING, max_tokens=LEAD_MAX_TOKENS)
     worker_model = Model(reasoning_effort=WORKER_REASONING, thinking=WORKER_THINKING)
     recorder_model = Model(reasoning_effort=RECORDER_REASONING, thinking=RECORDER_THINKING, max_tokens=RECORD_MAX_TOKENS)
 

@@ -48,10 +48,16 @@ TOOLS = [
 SOURCE_FIELDS = ("document", "date", "sender", "revision", "status", "reference")
 OPTIONAL = {"enter", "offset", "source", "max_pages", *SOURCE_FIELDS}
 WRAP_UP_SECONDS = 90  # the wrap-up report may take at most this long
-WRAP_UP_TOKENS = 2000  # and at most this many tokens, so it cannot run on
+# and at most this many tokens: Qwen writes about 40 tokens per second, so 1000 tokens fit into WRAP_UP_RESERVE
+# (2000 took about 50 s and were cut off); the notes themselves are appended to the report anyway
+WRAP_UP_TOKENS = 1000
 WRAP_UP_RESERVE = 45  # seconds before the deadline at which browsing stops, so the wrap-up fits inside it
 CALL_SECONDS = 75  # one model call may take at most this long before it is retried
-CALL_ATTEMPTS = 3
+# a model without thinking answers a step in 2-3 s, so a call still open after this long has stalled
+QUICK_CALL_SECONDS = 30
+CALL_ATTEMPTS = 5  # attempts per step, as far as the deadline allows
+UNNOTED_KEPT = 2  # results of the last actions without a note after them, kept for a report written in a hurry
+UNNOTED_CHARS = 5000  # of each of them
 ACTION_SECONDS = 60  # one browser action may take at most this long
 PREVIOUS_VIEW_CHARS = 4000  # the page view before the newest one is cut to this length
 SHORTENED = "\n... (older page view shortened to save space; your notes keep what mattered)"
@@ -164,6 +170,10 @@ class BrowsingAgent:
         self.relogins = 0
         self.stalls = 0  # model calls that hit CALL_SECONDS
         self.multi = len(tabs) > 1
+        # what the last actions showed, since the last note: when time runs out before the agent noted it, the
+        # report carries it instead of losing it
+        self.unnoted: list[str] = []
+        self.finished = False
 
     def _tab(self, args: dict) -> Tab:
         if not self.multi:
@@ -329,6 +339,7 @@ class BrowsingAgent:
                     args = {}
                 if call.function.name == "finish":
                     report = args.get("report", "")
+                    self.finished = True
                     self.log(f"[{self.name}] finished after {step + 1} steps")
                     return self._report(report)
                 self.log(f"[{self.name}] {call.function.name} {json.dumps(args, ensure_ascii=False)[:200]}")
@@ -344,7 +355,10 @@ class BrowsingAgent:
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
                 if call.function.name == "note":
                     since_note = 0
+                    self.unnoted = []
                 else:
+                    if call.function.name != "login" and not result.startswith(("Error", "Refused")):
+                        self.unnoted = [*self.unnoted, f"{call.function.name} -> {result[:UNNOTED_CHARS]}"][-UNNOTED_KEPT:]
                     since_note += 1
                     url = self.last_tab.page.url
                     if url not in self.visited:
@@ -356,11 +370,12 @@ class BrowsingAgent:
     async def _ask(self, messages: list[dict], tools: list[dict]):
         """One model step. A call can stall for minutes (a full queue, a stuck request); a fresh attempt usually
         returns quickly, so each attempt is capped and retried while the deadline allows. None: no answer in time."""
+        cap = QUICK_CALL_SECONDS if getattr(self.model, "thinking", None) is False else CALL_SECONDS
         for attempt in range(1, CALL_ATTEMPTS + 1):
             budget = self.deadline - WRAP_UP_RESERVE - time.time()
             if budget < 10:
                 return None
-            limit = min(CALL_SECONDS, budget)
+            limit = min(cap, budget)
             try:
                 return await asyncio.wait_for(self.model.chat(messages, tools, temperature=0.2), timeout=limit)
             except asyncio.TimeoutError:
@@ -373,14 +388,18 @@ class BrowsingAgent:
         lead model learns what was found and, as important, what was not checked."""
         notes = "\n".join(f"- {n}" for n in self.notes) or "(none)"
         pages = "\n".join(f"- {u}" for u in self.visited[-40:]) or "(none)"
+        unnoted = "\n\n".join(self.unnoted) or "(none)"
         prompt = (f"# Task\n{self.task}\n\n# Notes you saved\n{notes}\n\n# Pages you visited\n{pages}\n\n"
-                  "You ran out of steps or time before finishing. Write your final report from the notes only, in "
-                  "four parts. FOUND: each fact the task asked for that your notes contain, as `value (unit) — "
-                  "source`. SUPERSEDED / LOOK-ALIKE: noted records that do not apply, with why. CHECKED, NOT "
-                  "PRESENT: only what the notes show was searched completely and does not exist, with the evidence. "
-                  "NOT CHECKED: everything else the task asked for, including newer versions, other folders, "
-                  "further pages and unopened results, so nobody mistakes it for absent. Do not add facts that are "
-                  "not in the notes. One short line per fact; no introduction.")
+                  f"# What your last actions showed, not noted yet\n{unnoted}\n\n"
+                  "You ran out of steps or time before finishing. Write your final report from the notes and the "
+                  "not-yet-noted results above only, in four parts. FOUND: each fact the task asked for, one line "
+                  "each; for a fact from the notes give only what it is and its document (the notes are appended to "
+                  "this report word for word), for a fact from the not-yet-noted results write it out in full as "
+                  "`value (unit) — source`. SUPERSEDED / LOOK-ALIKE: records that do not apply, with why. CHECKED, "
+                  "NOT PRESENT: only what was searched completely and does not exist, with the evidence. NOT "
+                  "CHECKED: everything else the task asked for, including newer versions, other folders, further "
+                  "pages and unopened results, so nobody mistakes it for absent. Do not add facts that are not "
+                  "above. One short line per fact; no introduction.")
         timeout = min(WRAP_UP_SECONDS, max(30.0, self.deadline - time.time()))
         try:
             message = await asyncio.wait_for(
@@ -408,8 +427,14 @@ class BrowsingAgent:
         return ""
 
     def _report(self, report: str) -> str:
+        """The report as the lead gets it: the agent's own words, then every note. An agent that did not finish
+        (out of steps or time, or cut off) also passes on what its last actions showed and it had not noted yet."""
         notes = "\n".join(f"- {n}" for n in self.notes)
-        return f"REPORT:\n{report}\n\nNOTES TAKEN WHILE BROWSING:\n{notes or '(none)'}"
+        text = f"REPORT:\n{report}\n\nNOTES TAKEN WHILE BROWSING:\n{notes or '(none)'}"
+        if self.unnoted and not self.finished:
+            text += ("\n\nLAST PAGES READ, NOT NOTED YET (verbatim, possibly cut; check the source before using a "
+                     "value):\n" + "\n\n".join(self.unnoted))
+        return text
 
     @staticmethod
     def _forget_old_views(messages: list[dict], keep: int = 2):

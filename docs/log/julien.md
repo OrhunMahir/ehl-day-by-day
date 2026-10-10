@@ -2,6 +2,46 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 18:45 · Test-run state: stream-o and exp-speed merged; reports keep what was read last
+
+- Changed:
+  - Merged `stream-o` (up to `3a0362e`, the hand-over) and Ivan's `exp-speed` (`a6ef420`) into `stream-j` for
+    the next sandbox test run. The only conflict was `agent/agent.py`: both branches gave the recorder a model of
+    its own. Kept stream O's names (`recorder_model`, `RECORDER_REASONING`, `open_site`) and exp-speed's settings:
+    sub-agents, submission agent and recorder without thinking; the lead at "low" with 4000 tokens and 120 s per
+    call, asked again on a stall.
+  - `agent/agent.py` (stream O's file, for Orhun to confirm):
+    - A recording call may take 120 s instead of 75 s, a whole recording 240 s instead of 150 s. Without thinking
+      the recorder writes about 40 tokens per second; a report with many records needs 3000–4000 tokens, which 75 s
+      cut off on every attempt.
+    - The lead without thinking, up to 8000 tokens and 180 s per call, and told to keep each investigation task to
+      about 80 words. In a local run with exp-speed's lead setting ("low", 4000 tokens, 120 s) the turn after the
+      first round took 118 s and was cut off inside its tool calls (an empty `add_facts`, an `investigate` without a
+      task), the next one hit 120 s, and the second round was sent at 560 s, after investigations had ended.
+  - `browsing.py`: a model call without thinking counts as stalled after 30 s (75 s with thinking) and is retried
+    up to five times while the deadline allows. The wrap-up report is limited to 1000 tokens and names noted facts
+    instead of repeating them (the notes are appended anyway); 2000 tokens took about 50 s and the 45 s reserve
+    cut 3 of 8 wrap-ups off. An agent that stops without `finish` passes on the results of its last two actions
+    after its last note, so a page read just before the deadline is not lost.
+  - Tests in `tests/test_browser_scope.py` for all three.
+- Why: in the two quality-10 runs every one of 17 investigations stopped without `finish`; in one of them the
+  specification's requirement table was read at the last step and never reached the facts.
+- Checked:
+  - 192 unit tests pass (1 skipped). The three new stream-J tests fail on the previous `browsing.py`.
+  - Local run with the scouting logins and exp-speed's lead setting:
+    - First round: about 135 s on each site. All four wrap-up reports were written in time, and the ERP report
+      used the new "not noted yet" part.
+    - All four reports were recorded, the largest in 123 s.
+    - Failure: the lead's turns are what is described above, and the bid would again have had no positions.
+  - Second local run with the lead without thinking: its first turn took 14 s instead of 65 s. Stopped there, to
+    test in the sandbox instead.
+  - Sandbox test run: see the next entry.
+- Learned: see the analysis of the two runs in this session; the time goes into thinking tokens and into rounds
+  that wait for each other.
+- For the others: O: the merged settings above are on `stream-j`; please confirm the recorder time limits. I:
+  nothing changed in your files beyond exp-speed.
+- Next: the score breakdown of this state's sandbox test run.
+
 ## 2026-10-10 20:45 · Review fixes from stream I
 
 - Changed: all seven findings from Ivan's review (`docs/log/ivan.md`, 16:29):

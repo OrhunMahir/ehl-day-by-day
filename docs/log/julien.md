@@ -2,6 +2,78 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 19:10 · Versions, look-alikes, and two kinds of "not found"
+
+- Changed: `browsing.py`:
+  - `note` takes structured source fields shaped like `facts.Source`: `document`, `date`, `sender`, `revision`,
+    `status` and `reference` (free `source` text stays optional).
+  - Reports and the wrap-up now have four parts: FOUND; SUPERSEDED / LOOK-ALIKE; CHECKED, NOT PRESENT (with
+    search evidence); NOT CHECKED.
+  - Prompt rules:
+    - Find all versions and say which one is marked current and on what basis.
+    - Check every record's reference character for character, its sender and its date against the scenario date.
+    - Report something as absent only after a complete search.
+  - Test for the source fields in `tests/test_browser_scope.py`.
+- Why: a sandbox test run scored 5 of 100 because the lead answered no_bid after the ERP data never arrived; "not
+  found" was read as "does not exist". The bid engine's `resolve.searched()` also counts a catalogue group as
+  searched as soon as one candidate is known, so reports must say how complete a search was.
+- Checked:
+  - 13 scope tests pass.
+  - Live survey with Qwen on the mailbox and the supplier portal, compared with what is on the websites:
+    - The governing record is under FOUND with all source fields.
+    - Look-alike references, drafts and a record dated after the scenario date are under SUPERSEDED /
+      LOOK-ALIKE.
+    - The current revision is named with its basis, and the older revisions are listed as superseded.
+    - Every note has a source.
+- Not checked: the mail sub-agent ran out of steps before the archive and the second result page. It listed the
+  result page under NOT CHECKED but not the archive folder.
+- Learned: a record dated after the scenario date is easy to miss without an explicit date check; with the rule
+  the model rejected one.
+- For the others:
+  - O: use the four parts. Only CHECKED, NOT PRESENT supports a no_bid; NOT CHECKED means unknown.
+  - I: `resolve.searched()` would be safer if a group counted as searched only when a report confirms the search
+    was complete.
+- Next: Step 5 (generalisation check), then Step 6 (fewer steps per report).
+
+## 2026-10-10 18:30 · Paged lists, documents, model stalls, wrap-up inside the deadline
+
+- Changed:
+  - `browser.py`:
+    - New `collect_pages`: follows a "next page" or "load more" control the model chose, and returns the views
+      joined.
+    - Frames that load late (e.g. after a collapsed section opens) are waited for, at most 3 s.
+    - `download` now fetches inside the page (same cookies, proxy and network as the browser), with Playwright's
+      own client only as a fallback.
+  - `browsing.py`:
+    - The `collect_pages` tool.
+    - Each model call is capped at 75 s and retried up to 3 times while the deadline allows.
+    - Browsing stops 45 s before the deadline, so the wrap-up report fits inside it; the wrap-up is shorter.
+    - Prompt rules: use `collect_pages` for lists; refine a search that shows nothing; open a record's tabs or
+      registers before reporting a value as missing.
+  - Tests: `test_browser_pages.py` covers paging, "load more", a late frame, and ZIP and PDF downloads;
+    `test_browser_scope.py` covers a stalled model call.
+- Why: in a full local run of `agent.py` the lead submitted with every position omitted. The ERP sub-agent lost
+  about five minutes to a single stalled Qwen call and hit the deadline. Two wrap-up reports timed out because they
+  started after the deadline. The download fix came out of a test: Playwright's own HTTP client does not go through
+  the page's network, so in the sandbox it would probably miss the browser's proxy.
+- Checked:
+  - 21 stream-J tests pass.
+  - ERP-only survey with Qwen: one stall was cut at 75 s and the retry answered in 2.5 s. The sub-agent passed the
+    ERP's entry gate (slider, checkbox, receipt number, acknowledgement) and reached materials, stock and
+    conditions.
+  - Every ERP note has a source.
+  - Re-login confirmed live in the full run: after the session expired the mail sub-agent signed in again, cleared
+    the consent page and went back to the archive page it was reading.
+- Not fixed: the ERP sub-agent still runs out of steps before opening every sub-view. Prices sit in a separate
+  register of each condition record. The new prompt rule is not yet checked live.
+- Learned:
+  - Some websites gate the whole application behind a notice page that needs several controls. A model gets past
+    it when it is given the time.
+  - Price amounts can be one click deeper than the record that names them.
+- For the others: O: a sub-agent now always returns within its deadline. The full run showed the submission
+  sub-agent ending after 2 steps for a bid without positions. I: nothing.
+- Next: Step 4 (versions and look-alikes in reports), then fewer steps per report.
+
 ## 2026-10-10 17:40 · Sessions, errors, dialogs, no more hangs
 
 - Changed:

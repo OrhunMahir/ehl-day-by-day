@@ -70,12 +70,24 @@ def file_to_text(name: str, data: bytes) -> str:
     return text
 
 
+def origin(url: str) -> str:
+    """scheme://host[:port] of a URL, lower-cased; "" for about:blank and the like."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url or "")
+    return f"{parts.scheme}://{parts.netloc}".lower() if parts.scheme in ("http", "https") and parts.netloc else ""
+
+
 class Tab:
     """One website in one browser page."""
+
+    homes: dict[str, str] = {}  # site id -> the origin its tab started on, for every tab of this run
 
     def __init__(self, site_id: str, page, log=print):
         self.site_id = site_id
         self.page = page
+        self.home = origin(page.url)
+        if self.home:
+            Tab.homes[site_id] = self.home
         self.log = log
         self.files: dict[str, str] = {}  # downloaded file name -> text
         self.events: list[str] = []  # dialogs, downloads, new tabs since the last observation

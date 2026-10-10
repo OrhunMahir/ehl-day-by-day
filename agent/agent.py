@@ -36,11 +36,16 @@ Approach:
    is ended after about {round_minutes} minutes, so give each assistant one clear job. Use the follow-up round for
    what depends on another site's answer (e.g. a catalogue group found in the specification must then be searched
    in the ERP by that group, reading every result; amendments must be applied to the right revision).
-4. Put the facts from the reports into the facts JSON of `price_bid` and call it. It applies the bid rules in code
-   and returns the priced answer, `issues` (what is missing or ambiguous), `incomplete` positions and `omitted`
-   positions. Do not price anything yourself. On a later call pass only the top-level fields that are new or
-   changed: a list you pass replaces that list, fields you leave out stay as they were.
-5. Call `submit_bid`. It submits the last answer `price_bid` returned; you only add hints for filling the form.
+4. After every round, call `add_facts` with what the new reports contain. It keeps the facts, applies the bid
+   rules in code and returns the priced answer, `issues` (what is missing or ambiguous), `needed` (what to find or
+   verify next, and on which site), `incomplete` and `omitted` positions. Pass only records that are new or
+   changed: lists grow, and a record with the same identity replaces the earlier one. Do not price anything
+   yourself. When you send follow-up investigations, call `add_facts` in the same turn.
+5. Work through the `needed` entries of kind "find" in the order given: each names the site by its role, what to
+   read, the rule and the positions; turn them into investigation tasks. Entries of kind "verify" are checks, not
+   blockers. If the answer is a no bid, have the values named after "closest:" in `issues` re-read once.
+6. Call `submit_bid` when `complete` is true or the time is up. It submits the last priced answer; you only add
+   hints for filling the form.
 
 Filling the facts JSON:
 - Copy values exactly as reported; a fact you never saw stays out. Do not invent values.
@@ -55,10 +60,10 @@ Filling the facts JSON:
   `assignments`, wherever they were read.
 - Set a setup pool's `allocation` from the wording of the message that defines the pool.
 
-`calculate` is only for checks of your own; the numbers of the bid come from `price_bid`.
+`calculate` is only for checks of your own; the numbers of the bid come from the engine.
 
-The clock: about {minutes} minutes to investigate. Then you are asked for `price_bid` and the priced answer is
-submitted; entering and signing the bid takes the rest of the time."""
+The clock: about {minutes} minutes to investigate. Then the answer priced from the facts you added is submitted;
+entering and signing the bid takes the rest of the time."""
 
 # Appended to every investigation task, so each reported value can be turned into a fact with its source.
 PROVENANCE = ("For every value you report, say where it is from: the website, the page or document, its date, the "
@@ -71,13 +76,13 @@ SUBMIT_SHARE = 0.45  # from here on the lead has to price and submit
 # One investigation may take this long, so that a round of follow-ups fits before the investigations end.
 INVESTIGATION_SECONDS = 240
 # How much each role's model thinks before it answers; None leaves the provider's default.
-LEAD_REASONING: str | None = None
-WORKER_REASONING: str | None = None  # browsing sub-agents and the submission agent
+LEAD_REASONING: str | None = "xhigh"
+WORKER_REASONING: str | None = "xhigh"  # browsing sub-agents and the submission agent
 # A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
 INVESTIGATION_GRACE_SECONDS = 30
 FORCE_SUBMIT = {"type": "function", "function": {"name": "submit_bid"}}
-FORCE_PRICE = {"type": "function", "function": {"name": "price_bid"}}
-PRICE_ATTEMPTS = 2  # forced price_bid calls that may fail before the lead has to hand in an answer of its own
+FORCE_ADD = {"type": "function", "function": {"name": "add_facts"}}
+ADD_ATTEMPTS = 2  # forced add_facts calls that may fail before the lead has to hand in an answer of its own
 
 
 class Orchestrator:
@@ -94,9 +99,9 @@ class Orchestrator:
         self.submit_from = now + left * SUBMIT_SHARE
         self.deadline = now + left
         self.locks = {site: asyncio.Lock() for site in tabs}
-        self.facts_data: dict = {}  # the facts JSON as the lead has built it up so far
+        self.builder = facts.FactsBuilder()  # the facts as the lead has added them so far
         self.priced: engine.BidResult | None = None  # what the bid engine made of the latest facts
-        self.price_failures = 0
+        self.add_failures = 0
         self.submitted = None  # the last answer a submission was attempted with
         self.sent_without_lead = False
         self.accepted = False  # the platform took the bid; nothing more to do
@@ -125,18 +130,21 @@ class Orchestrator:
                 "parameters": {"type": "object", "properties": {"expression": {"type": "string"}},
                                "required": ["expression"]}}},
             {"type": "function", "function": {
-                "name": "price_bid",
-                "description": "Apply the bid rules to the collected facts in code. Returns the priced answer, "
-                               "`issues` (what is missing or ambiguous), `incomplete` and `omitted` positions. "
-                               "The first call needs tender_reference and scenario_date; a later call may pass "
-                               "only the top-level fields that changed.",
+                "name": "add_facts",
+                "description": "Add facts read from the reports and price the bid from all facts so far. Returns "
+                               "the priced answer, `issues`, `needed` (what to find or verify next), `incomplete` "
+                               "and `omitted` positions, and `complete`. Pass only new or changed records.",
                 "parameters": {"type": "object", "properties": {"facts": facts_schema()},
                                "required": ["facts"]}}},
             {"type": "function", "function": {
+                "name": "price_bid",
+                "description": "Price the bid again from the facts added so far, without adding any.",
+                "parameters": {"type": "object", "properties": {}, "required": []}}},
+            {"type": "function", "function": {
                 "name": "submit_bid",
-                "description": "Have an assistant enter and sign the last answer price_bid returned on the "
-                               "submission website. Give any form hints you learned. Pass `answer` only if "
-                               "price_bid could not be made to return one.",
+                "description": "Have an assistant enter and sign the last priced answer on the submission "
+                               "website. Give any form hints you learned. Pass `answer` only if add_facts "
+                               "could not be made to return one.",
                 "parameters": {"type": "object", "properties": {
                     "hints": {"type": "string"},
                     "answer": {"type": "object"}}, "required": []}}},
@@ -157,49 +165,58 @@ class Orchestrator:
                 self.log(f"[{site}] cut off: a step did not return in time")
                 return agent._report("(cut off: out of time; only the notes below were saved)")
 
-    def price(self, data) -> str:
-        if not isinstance(data, dict):
-            self.price_failures += 1
-            return "price_bid needs the facts as a JSON object."
-        merged = {**self.facts_data, **{key: value for key, value in data.items() if key in FACT_FIELDS}}
+    def add(self, update) -> str:
+        """Adds an update to the facts and prices the bid; a bad update is rejected whole and named."""
+        if isinstance(update, dict):
+            update = {key: value for key, value in update.items() if key != "authority"}  # the engine's default
         try:
-            collected = facts.from_dict(facts.Facts, merged)
-            result = engine.evaluate(collected)
-            result = self.without_hasty_no_bid(collected, result)
+            summary = self.builder.add(update)
         except Exception as error:  # noqa: BLE001 - a ValueError names the bad field; the model corrects it
-            self.price_failures += 1
-            return f"The facts could not be priced: {error}. Correct this and call price_bid again."
-        self.facts_data, self.priced = merged, result
-        self.log("[lead] facts " + json.dumps(merged, ensure_ascii=False))
+            self.add_failures += 1
+            return f"The update was not added: {error}. Correct this and call add_facts again; earlier facts are kept."
+        return summary + "\n" + self.price()
+
+    def price(self) -> str:
+        """Prices the bid from the facts added so far and remembers the result for the submission."""
+        if not self.builder.data.get("tender_reference"):
+            return "No facts yet: call add_facts first, starting with tender_reference and scenario_date."
+        try:
+            collected = self.builder.facts()
+            result = self.without_hasty_no_bid(collected, engine.evaluate(collected))
+        except Exception as error:  # noqa: BLE001
+            return f"The facts could not be priced: {error}."
+        self.priced = result
+        self.log("[lead] facts " + json.dumps(self.builder.data, ensure_ascii=False, default=str))
         try:
             self.log("[lead] engine working:\n" + result.explain())
         except Exception as error:  # noqa: BLE001 - the explanation is for the log only
             self.log(f"[lead] engine working not available: {error}")
-        return json.dumps({"answer": result.answer, "issues": result.issues, "incomplete": result.incomplete,
-                           "omitted": result.omitted}, ensure_ascii=False)
+        return json.dumps({"answer": result.answer, "issues": result.issues, "needed": result.needed(),
+                           "incomplete": result.incomplete, "omitted": result.omitted,
+                           "complete": result.complete}, ensure_ascii=False, default=str)
 
     def without_hasty_no_bid(self, collected: facts.Facts, result: engine.BidResult) -> engine.BidResult:
-        """A "no bid" is final only when the engine has nothing else to report and every position without a
-        material had its catalogue group searched on purpose. While facts are still missing, the positions without
-        a material are left out instead and the others are bid."""
+        """A "no bid" is final only when every position without a material had its catalogue group searched on
+        purpose and the engine asks for nothing more about it. Otherwise those positions are left out and the
+        others are bid: a candidate that happens to be known is not a completed search."""
         if result.answer.get("decision") != "no_bid":
             return result
         unresolved = [line.position for line in result.lines if line.material is None]
         searched = {facts.norm_key(group) for group in collected.searched_groups}
+        still_to_find = {position for need in result.needed() if need.get("kind") == "find"
+                         for position in need.get("positions", [])}
 
         def conclusive(position: facts.TenderPosition) -> bool:
             groups = {facts.norm_key(requirement.catalogue_group)
                       for revision in collected.revisions for requirement in revision.requirements
                       if facts.norm_key(requirement.requirement) == facts.norm_key(position.requirement)}
-            return bool(groups) and groups <= searched
+            return bool(groups) and groups <= searched and position.position not in still_to_find
 
-        # the engine's own remarks about the unmatched positions do not count as open questions
-        open_questions = [issue for issue in result.issues if "no active material matches" not in issue]
-        if not open_questions and all(conclusive(p) for p in collected.positions if p.position in unresolved):
+        if all(conclusive(p) for p in collected.positions if p.position in unresolved):
             return result
         kept = [position for position in collected.positions if position.position not in unresolved]
         partial = engine.evaluate(dataclasses.replace(collected, positions=kept))
-        note = ("no bid was not taken as final: facts are missing or a catalogue group was not searched completely; "
+        note = ("no bid was not taken as final: a catalogue group was not searched completely or facts are missing; "
                 "position(s) " + ", ".join(unresolved) + " are left out instead")
         return dataclasses.replace(partial, issues=[*result.issues, note], omitted=[*partial.omitted, *unresolved])
 
@@ -271,8 +288,11 @@ class Orchestrator:
         return await self.model.chat(messages, tools, temperature=0.2)
 
     async def time_is_up(self, messages: list[dict]) -> dict | None:
-        """What happens once the time to investigate is over: the engine's answer is submitted without asking the
-        lead; without one the lead is made to price, and after that to submit. Returns the tool to force."""
+        """What happens once the time to investigate is over: the answer priced from the facts is submitted without
+        asking the lead; without any facts the lead is made to add them, and after that to submit. Returns the tool
+        to force."""
+        if self.priced is None and self.builder.data.get("tender_reference"):
+            self.price()
         if self.priced and self.submitted is None and not self.sent_without_lead:
             self.sent_without_lead = True
             self.log("[lead] time to submit: sending the last priced answer")
@@ -282,15 +302,15 @@ class Orchestrator:
                              "was submitted for you. The result:\n\n" + report})
         if self.accepted:
             return None
-        if self.priced or self.price_failures >= PRICE_ATTEMPTS:
+        if self.priced or self.add_failures >= ADD_ATTEMPTS:
             if self.submitted is None:
                 messages.append({"role": "user", "content": "Investigation time is over: call submit_bid now" + (
                     "." if self.priced else ", passing your best answer yourself. Leave out positions you could not "
                     "complete.")})
             return FORCE_SUBMIT
-        messages.append({"role": "user", "content": "Investigation time is over: call price_bid now with every fact "
+        messages.append({"role": "user", "content": "Investigation time is over: call add_facts now with every fact "
                          "you have."})
-        return FORCE_PRICE
+        return FORCE_ADD
 
     async def run(self):
         minutes = round((self.submit_from - time.time()) / 60)
@@ -322,7 +342,7 @@ class Orchestrator:
             if not calls:
                 messages.append({"role": "user", "content": (
                     "No bid has been accepted yet: call submit_bid again." if self.submitted
-                    else "Continue: investigate, price_bid, or submit_bid.")})
+                    else "Continue: investigate, add_facts, or submit_bid.")})
                 continue
 
             async def execute(call):
@@ -336,13 +356,15 @@ class Orchestrator:
                         return await self.investigate(args["site"], args["task"])
                     if call.function.name == "calculate":
                         return calculate(args["expression"])
+                    if call.function.name == "add_facts":
+                        return self.add(args.get("facts", args))
                     if call.function.name == "price_bid":
-                        return self.price(args.get("facts"))
+                        return self.price()
                     if call.function.name == "submit_bid":
                         answer = self.answer_to_submit(args.get("answer"))
                         if answer is None:
-                            return ("There is no priced answer yet: call price_bid first. Pass `answer` yourself "
-                                    "only if price_bid cannot be made to return one.")
+                            return ("There is no priced answer yet: call add_facts first. Pass `answer` yourself "
+                                    "only if add_facts cannot be made to return one.")
                         return await self.submit(answer, args.get("hints", ""))
                     return f"Unknown tool {call.function.name}"
                 except Exception as error:  # noqa: BLE001
@@ -354,13 +376,10 @@ class Orchestrator:
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
 
 
-# The facts the lead fills in. Which sender may decide what is the engine's own default, not the model's to set.
-FACT_FIELDS = {f.name for f in dataclasses.fields(facts.Facts)} - {"authority"}
-
-
 def facts_schema() -> dict:
-    schema = facts.json_schema()
-    return {**schema, "properties": {name: rule for name, rule in schema["properties"].items() if name in FACT_FIELDS}}
+    """What the lead may add. Which sender may decide what is the engine's own default, not the model's to set."""
+    schema = facts.update_schema()
+    return {**schema, "properties": {name: rule for name, rule in schema["properties"].items() if name != "authority"}}
 
 
 def validate(answer: dict, schema: dict) -> list[str]:
@@ -403,6 +422,8 @@ async def main() -> int:
     model = Model(reasoning_effort=LEAD_REASONING)
     worker_model = Model(reasoning_effort=WORKER_REASONING)
     print(f"Run {task.get('run_id') or '(local scouting run)'}; model {model.provider}/{model.model}; "
+          f"reasoning lead={model.reasoning_effort or 'provider default'}, "
+          f"workers={worker_model.reasoning_effort or 'provider default'}; "
           f"sites: {', '.join(a['siteId'] for a in task['access'])}", flush=True)
     async with async_playwright() as playwright:
         tabs = {}

@@ -2,6 +2,35 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 16:43 · Stream I's review of stream O: facts builder, no-bid check, checklist, tests
+
+- Changed: merged `main` (PR #5 of stream J, PR #6 of stream I). `agent/agent.py`: the lead's facts are kept in a
+  `facts.FactsBuilder`; the tool `add_facts` (schema `facts.update_schema()` without `authority`) adds records and
+  prices at once, `price_bid` takes no parameters; every result carries `needed` and `complete`, and the prompt
+  tells the lead to work through the "find" entries. A "no bid" is final when every unmatched position's group is
+  in `searched_groups` and `needed()` has no "find" entry for it; other issues no longer matter. When the time is
+  up, the facts added so far are priced in code and submitted. `agent/run.py`: a 200 answer that is not JSON is
+  retried. `agent/tests/test_kit.py`: the three tests for the removed `solve()` are deleted; new
+  `agent/tests/test_lead.py` (10 tests).
+- Why: stream I's review (docs/log/ivan.md, 16:29): merging facts by top-level field lost earlier list items, and
+  counting every issue as an open question would turn a correct "no bid" into a partial bid.
+- Checked: all 163 unit tests pass (1 skipped). With invented facts and a stand-in model: a later update keeps
+  earlier materials; a bad update is named and changes nothing; the three no-bid cases; four time-up situations
+  end in an accepted answer. Not checked: no sandbox run of this state yet (Orhun postponed test runs until after
+  the merge). Test runs since the last entry, all of earlier states: `run_d48922acb05fd66c` (lead "low") and
+  `run_a56a648467053fe6` (lead and sub-agents "low") both eligible with quality 10, a bid with all five positions
+  left out: decision 5, reference 5, everything else 0. `run_eb07518a30a4477d` and `run_de6c7f380e198960` (default)
+  priced two positions each and ran out of time before the signature.
+- Learned: thinking "low" did not shorten the lead's writing (3.1 and 3.5 minutes) or the sub-agents' steps (about
+  4 s). In the two "low" runs no material reached the lead; the ERP sub-agent did not get through the groups in 4
+  minutes. Runs with 0 or 1 priced positions signed in time, runs with 2 did not.
+- For the others: I — one deviation from the review: with a near-miss candidate of a group that is not in
+  `searched_groups`, the engine still answers "no bid" and `needed()` has no "find" entry for that position, so I
+  keep my own check on `searched_groups` in front of the checklist (test:
+  `test_a_known_candidate_of_an_unsearched_group_is_not_a_search`). J — one ERP tab does not get through five
+  catalogue groups in a round; I plan to give the ERP several tabs, one sub-agent per group.
+- Next: merge `stream-o` into `main`; then sandbox runs of the merged state.
+
 ## 2026-10-10 16:27 · Submission start hardened: one site read up front, stalled calls dropped sooner
 
 - Changed: `agent/submission.py`: at its start the submission agent reads only the submission website, with a

@@ -52,7 +52,10 @@ def load_run(env=os.environ) -> tuple[dict, str | None]:
         except (URLError, OSError) as error:
             status, body = 0, str(error)
         if status == 200:
-            return json.loads(body), token
+            try:
+                return json.loads(body), token
+            except ValueError:  # an answer that is not the run, e.g. a page from the edge: ask again
+                status, body = 0, body[:300]
         if status in (401, 403, 404):  # the run is over, or the token is wrong: no point in asking again
             break
         time.sleep(2 * (attempt + 1))

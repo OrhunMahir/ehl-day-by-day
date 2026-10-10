@@ -14,12 +14,13 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
 
 1. `agent.py` reads the run (`run.py`: the brief with the bid rules, each website's address and login, the answer
    schema, the expiry time) and opens one browser tab per website (`browsers.py`, `browser.py`).
-2. A **lead model** (`Orchestrator` in `agent.py`) reads the brief. It cannot browse. It has four tools:
+2. A **lead model** (`Orchestrator` in `agent.py`) reads the brief. It cannot browse. It has five tools:
    - `investigate(site, task)` sends a **browsing sub-agent** (`BrowsingAgent` in `browsing.py`) to one website with
      a task in plain language. The sub-agent drives the browser through a text view of the page (`observe.js`,
      `Tab` in `browser.py`), takes notes, and returns one text report. Several sites run in parallel.
-   - `price_bid(facts)` puts the collected facts (`facts.py`) through the bid engine (`engine/`) and returns the
-     priced answer and what is still missing. Later calls pass only the fields that changed.
+   - `add_facts(facts)` adds records to a `facts.FactsBuilder` (lists grow, a record with the same identity
+     replaces the earlier one), runs the bid engine (`engine/`) and returns the priced answer, what is missing
+     (`issues`, `needed`) and whether the facts are `complete`. `price_bid()` prices again without adding.
    - `calculate(expression)` does exact decimal arithmetic (`calc.py`); a fallback since the engine exists.
    - `submit_bid(answer, hints)` checks the answer against the schema, then sends the submission agent
      (`submission.py`) to enter the bid in the tender website's form, fetch the signing code from the mailbox, sign
@@ -132,6 +133,7 @@ them, and one signed bid is submitted before the clock ends, every time.
 
 **Files only this stream edits.** `agent/agent.py`, `agent/submission.py`, `agent/llm.py`, `agent/models.py`, `agent/run.py`,
 `agent/calc.py`, `agent/agent.json`, `agent/pyproject.toml`, `agent/uv.lock`, `agent/tests/test_kit.py`,
+`agent/tests/test_lead.py`,
 `README.md`, `AGENTS.md`, `CLAUDE.md`, `.gitignore`, `docs/` (except the other two push logs).
 
 **Work, in this order.**
@@ -150,8 +152,8 @@ them, and one signed bid is submitted before the clock ends, every time.
 6. `llm.py`: when a provider's environment variable is missing it falls back to the provider's public address.
    Model calls must only go through the platform's proxy, so remove these fallbacks.
 7. Dependencies requested by the other streams (`pypdf` for stream J is in).
-8. `tests/test_kit.py`: three tests still target the starter kit's `solve()` and fail; rewrite them for the
-   current `agent.py`.
+8. Tests: the three starter-kit tests for the removed `solve()` are gone; `tests/test_lead.py` covers the
+   schedule, adding facts and the no-bid rule. Not covered by tests: the lead's loop and the submission agent.
 9. Test runs for all streams, every `atira submit`, Entire and the repository.
 10. Later, once a bid with positions is signed reliably: try an OpenAI model in place of Qwen (Orhun's idea,
     Sat 16:05; the team has OpenAI credits from the event, about 70 USD). What is known: `llm.py` already switches

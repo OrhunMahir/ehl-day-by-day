@@ -1,0 +1,97 @@
+bu valueya 70 mi yazayım
+
+---
+
+secretı düzelttim koşuyu başlatmadan önce her şey hazır mı openai çalışacak mı ve han gi modeli kullanacaksın
+
+---
+
+tamam gpt 6.1 sol iyi çalışırsa ama pahalı olursa gpt 6 lunayı deneriz bunlar diyatlar  ve limitlergpt 
+
+<pasted_content id="f5a2">
+Model	Token limits	Request and other limits	Batch queue limits
+gpt-6-astra
+1,000,000 TPM
+5,000 RPM
+1,350,000 TPD
+gpt-6.1-sol
+1,000,000 TPM
+5,000 RPM
+1,350,000 TPD
+gpt-6-luna
+2,000,000 TPM
+5,000 RPM
+20,000,000 TPD
+</pasted_content id="f5a2">
+
+---
+
+ama dur başlatma beni bekle
+
+---
+
+tamam runlamak için hazır mısın daha runlama
+
+---
+
+<bash-input>cd /Users/orhun/Developer/hackathon/ehl/.worktrees/openai && atira test-run agent</bash-input><bash-stdout>Test run reh_993ca4b2bb042b02 queued as run_9482f4f55a082374: 38 files, 136.6 KB compressed.
+Watch it: https://ehl-challenge.atira.ai/runs/run_9482f4f55a082374
+Logs: atira logs run_9482f4f55a082374 --follow</bash-stdout><bash-stderr></bash-stderr>
+
+---
+
+failladı neden
+
+---
+
+<task-notification>
+<task-id>bbcs3tzpl</task-id>
+<tool-use-id>toolu_01MPpwAwyxEp8rrqrRFMwQrZ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bbcs3tzpl.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait until the run makes its first model calls or reports a model error, then show only error lines and the start-up line" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<bash-input>cd /Users/orhun/Developer/hackathon/ehl/.worktrees/openai && atira test-run agent</bash-input><bash-stdout>Test run reh_d4367b48b8d163e6 queued as run_c059f6e6457b8063: 38 files, 138.6 KB compressed.
+Watch it: https://ehl-challenge.atira.ai/runs/run_c059f6e6457b8063
+Logs: atira logs run_c059f6e6457b8063 --follow</bash-stdout><bash-stderr></bash-stderr>
+
+---
+
+<task-notification>
+<task-id>bb65p15t6</task-id>
+<tool-use-id>toolu_01Mb9CrMDvDr5p7jrsM4k74f</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bb65p15t6.output</output-file>
+<status>completed</status>
+<summary>Background command "Follow the run's log into a scratch file until the run ends, then show its final status, model-error lines and a structure-only summary" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+astra 6 yı da runla
+
+---
+
+41 skor aldık şimdi senden istediğim aynı kodu astra 6 ile runlaman modeli değiştir sadece bi de bana effort olarak neyi kullandığını söyle
+
+---
+
+<task-notification>
+<task-id>bgh0nhlvl</task-id>
+<tool-use-id>toolu_01HZinq1fdvMsfQnPh3cicnU</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bgh0nhlvl.output</output-file>
+<status>completed</status>
+<summary>Background command "Fetch the finished run's full log into a scratch file, summarize it by structure only, and read the score breakdown as points per field" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b0kgd1s07</task-id>
+<tool-use-id>toolu_01M3SPphTn6a5vpFAMUWUALm</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/b0kgd1s07.output</output-file>
+<status>completed</status>
+<summary>Background command "Copy the openai package to a scratch folder, change only the model name to gpt-6-astra there, and start one sandbox test run from that copy" completed (exit code 0)</summary>
+</task-notification>

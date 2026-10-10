@@ -1,5 +1,6 @@
 """The kit's plumbing against fakes: reading the run, submitting the answer, the local scouting mode, the browsers'
 CDP URLs, one call to each hosted model, and an entry point that exits cleanly without an answer."""
+import asyncio
 import io
 import json
 import os
@@ -15,8 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import agent  # noqa: E402
 import browsers  # noqa: E402
+import llm  # noqa: E402
 import models  # noqa: E402
 import run as contract  # noqa: E402
+import simple  # noqa: E402
 
 RUN = {
     "run_id": "run_test", "brief": "Prepare the bid.", "answer_schema": {"type": "object"},
@@ -162,6 +165,160 @@ class TheModels(Case):
         [request] = clef.requests
         self.assertEqual(request["body"]["questions"], {"q": {"type": "noul", "instructions": "Is the bid in?"}})
         self.assertEqual(request["headers"]["Authorization"], "Bearer local")
+
+
+async def _no_sleep(seconds):
+    return None
+
+
+class TheProviderOfARun(Case):
+    """The callers speak chat completions and pass the same parameters for every model; `llm.Model` sends what the
+    provider takes."""
+
+    REPLY = {"id": "c1", "object": "chat.completion", "created": 0, "model": "m", "choices": [
+        {"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}]}
+    ANSWER = {"id": "r1", "object": "response", "created_at": 0, "model": "m", "status": "completed", "output": [
+        {"type": "reasoning", "id": "rs1", "summary": []},
+        {"type": "message", "id": "m1", "role": "assistant", "status": "completed",
+         "content": [{"type": "output_text", "text": "ok", "annotations": []}]}],
+        "usage": {"input_tokens": 7, "output_tokens": 3, "total_tokens": 10}}
+    TOOL_CALL = {**ANSWER, "output": [{"type": "function_call", "id": "f1", "call_id": "call_2", "name": "look",
+                                       "arguments": "{\"tab\": 1}", "status": "completed"}]}
+    NO_SUCH_EFFORT = {"error": {"message": "Unsupported value: 'reasoning.effort' does not support 'xhigh' with this "
+                                           "model.", "type": "invalid_request_error", "param": "reasoning.effort"}}
+    NOT_THIS_WAY = {"error": {"message": "Invalid request.", "type": "invalid_request_error", "param": None}}
+    LOOK = {"type": "function", "function": {"name": "look", "description": "Read a tab.", "parameters": {
+        "type": "object", "properties": {"tab": {"type": "integer"}}}}}
+
+    def openai(self, replies: dict, effort: str | None = None) -> tuple[llm.Model, FakeServer]:
+        server = self.serve(replies)
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": server.url + "/v1", "OPENAI_API_KEY": "sk-invented"}):
+            return llm.Model(provider="openai", model="m", reasoning_effort=effort), server
+
+    async def test_a_conversation_with_tools_goes_through_the_responses_interface(self):
+        model, server = self.openai({"/v1/responses": [(200, self.TOOL_CALL)]}, effort="low")
+        conversation = [
+            {"role": "system", "content": "You work one website."},
+            {"role": "user", "content": "Read the first tab."},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "look", "arguments": "{\"tab\": 0}"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "a page"}]
+        message = await model.chat(conversation, [self.LOOK], temperature=0.2,
+                                   tool_choice={"type": "function", "function": {"name": "look"}})
+        [call] = message.tool_calls
+        self.assertEqual((message.content, call.id, call.function.name, call.function.arguments),
+                         (None, "call_2", "look", "{\"tab\": 1}"))
+        body = server.requests[0]["body"]
+        self.assertEqual(body["input"], [
+            {"role": "system", "content": "You work one website."},
+            {"role": "user", "content": "Read the first tab."},
+            {"type": "function_call", "call_id": "call_1", "name": "look", "arguments": "{\"tab\": 0}"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "a page"}])
+        self.assertEqual(body["tools"], [{"type": "function", "strict": False, **self.LOOK["function"]}])
+        self.assertEqual((body["tool_choice"], body["reasoning"], body["store"]),
+                         ({"type": "function", "name": "look"}, {"effort": "low"}, False))
+        self.assertNotIn("temperature", body)
+        self.assertEqual(model.usage(), "1 calls, 7 prompt + 3 completion tokens")
+
+    async def test_a_limited_answer_gets_room_to_think_and_the_lowest_effort(self):
+        model, server = self.openai({"/v1/responses": [(200, self.ANSWER)]}, effort="medium")
+        message = await model.chat([{"role": "user", "content": "report"}], temperature=0.2, max_tokens=2000)
+        body = server.requests[0]["body"]
+        self.assertEqual((message.content, message.tool_calls), ("ok", None))
+        self.assertEqual((body["max_output_tokens"], body["reasoning"]),
+                         (2000 + llm.REASONING_HEADROOM_TOKENS, {"effort": "low"}))
+
+    async def test_a_refused_effort_is_lowered_at_once_and_for_the_calls_after(self):
+        model, server = self.openai({"/v1/responses": [(400, self.NO_SUCH_EFFORT), (200, self.ANSWER),
+                                                       (200, self.ANSWER)]}, effort="xhigh")
+        self.assertEqual((await model.chat([{"role": "user", "content": "one"}])).content, "ok")
+        await model.chat([{"role": "user", "content": "two"}])
+        self.assertEqual([request["body"]["reasoning"]["effort"] for request in server.requests],
+                         ["xhigh", "high", "high"])
+
+    async def test_a_refused_responses_request_is_asked_through_chat_completions_without_thinking(self):
+        model, server = self.openai({"/v1/responses": [(400, self.NOT_THIS_WAY)],
+                                     "/v1/chat/completions": [(200, self.REPLY), (200, self.REPLY)]}, effort="low")
+        self.assertEqual((await model.chat([{"role": "user", "content": "one"}], [self.LOOK])).content, "ok")
+        await model.chat([{"role": "user", "content": "two"}], [self.LOOK], temperature=0.2, max_tokens=500)
+        self.assertEqual([request["path"] for request in server.requests],
+                         ["/v1/responses", "/v1/chat/completions", "/v1/chat/completions"])
+        first, second = server.requests[1]["body"], server.requests[2]["body"]
+        self.assertEqual((first["reasoning_effort"], second["reasoning_effort"]), ("none", "none"))
+        self.assertEqual(first["tools"], [self.LOOK])
+        self.assertNotIn("temperature", second)
+
+    async def test_the_hosted_model_is_sent_what_the_caller_passed(self):
+        server = self.serve({"/v1/chat/completions": [(200, self.REPLY)]})
+        with patch.dict(os.environ, {"QWEN_BASE_URL": server.url + "/v1", "QWEN_API_KEY": "rt_secret"}):
+            model = llm.Model(provider="qwen", reasoning_effort="xhigh")
+        await model.chat([{"role": "user", "content": "step"}], temperature=0.2, max_tokens=2000)
+        [request] = server.requests
+        self.assertEqual((request["body"]["temperature"], request["body"]["max_tokens"],
+                          request["body"]["reasoning_effort"]), (0.2, 2000, "xhigh"))
+
+    async def test_the_hosted_model_without_thinking_keeps_its_switch_and_its_answer_limit(self):
+        server = self.serve({"/v1/chat/completions": [(200, self.REPLY)]})
+        with patch.dict(os.environ, {"QWEN_BASE_URL": server.url + "/v1", "QWEN_API_KEY": "rt_secret"}):
+            model = llm.Model(provider="qwen", thinking=False, max_tokens=4000, reasoning_effort="low")
+        await model.chat([{"role": "user", "content": "step"}], temperature=0.2)
+        body = server.requests[0]["body"]
+        self.assertEqual((body["chat_template_kwargs"], body["max_tokens"]), ({"enable_thinking": False}, 4000))
+        self.assertNotIn("reasoning_effort", body)
+
+    async def test_a_key_the_provider_turns_down_hands_the_run_to_the_hosted_model(self):
+        no_credit = {"error": {"message": "You exceeded your current quota.", "type": "insufficient_quota",
+                               "code": "insufficient_quota"}}
+        server = self.serve({"/v1/responses": [(429, no_credit)],
+                             "/v1/chat/completions": [(200, self.REPLY), (200, self.REPLY)]})
+        with patch.dict(os.environ, {"QWEN_BASE_URL": server.url + "/v1", "QWEN_API_KEY": "rt_secret",
+                                     "OPENAI_BASE_URL": server.url + "/v1", "OPENAI_API_KEY": "sk-invented"}):
+            hosted = llm.Model(provider="qwen", thinking=False)
+            model = llm.Model(provider="openai", model="m", reasoning_effort="low", fallback=hosted)
+        self.assertEqual((await model.chat([{"role": "user", "content": "one"}], [self.LOOK], temperature=0.2)).content, "ok")
+        await model.chat([{"role": "user", "content": "two"}], [self.LOOK], temperature=0.2)
+        self.assertEqual([request["path"] for request in server.requests],
+                         ["/v1/responses", "/v1/chat/completions", "/v1/chat/completions"])
+        self.assertEqual(server.requests[2]["body"]["model"], hosted.model)
+        self.assertEqual(server.requests[2]["body"]["temperature"], 0.2)
+        self.assertIn("then qwen/", model.usage())
+
+    def test_the_websites_are_read_by_the_larger_model_only_where_its_key_is_set(self):
+        with patch.dict(os.environ, {"QWEN_BASE_URL": "http://127.0.0.1:9/v1", "QWEN_API_KEY": "rt_secret"}):
+            os.environ.pop("OPENAI_API_KEY", None)
+            hosted = llm.Model(provider="qwen", thinking=False)
+            self.assertIs(simple.reading_model(hosted), hosted)
+            with patch.dict(os.environ, {"OPENAI_BASE_URL": "http://127.0.0.1:9/v1", "OPENAI_API_KEY": "sk-invented"}):
+                reader = simple.reading_model(hosted)
+        self.assertEqual((reader.provider, reader.model, reader.reasoning_effort, reader.fallback),
+                         (simple.READER_PROVIDER, simple.READER_MODEL, simple.READER_REASONING, hosted))
+        self.assertEqual((reader.client.timeout, hosted.client.timeout),
+                         (simple.READER_CALL_SECONDS, llm.CALL_TIMEOUT_SECONDS))
+        self.assertIn("reasoning low", simple.described(reader))
+        self.assertIn("without thinking", simple.described(hosted))
+
+    async def test_a_call_that_hangs_is_given_up_and_sent_again(self):
+        server = self.serve({"/v1/responses": [(200, self.ANSWER), (200, self.ANSWER)]})
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": server.url + "/v1", "OPENAI_API_KEY": "sk-invented"}):
+            model = llm.Model(provider="openai", model="m", call_seconds=0.3)
+        create, hung = model.client.responses.create, []
+
+        async def first_one_hangs(**request):
+            if not hung:
+                hung.append(request)
+                await asyncio.sleep(0)
+                raise llm.APITimeoutError(request=None)
+            return await create(**request)
+        with patch.object(model.client.responses, "create", first_one_hangs), patch("llm.asyncio.sleep", new=_no_sleep):
+            self.assertEqual((await model.chat([{"role": "user", "content": "one"}])).content, "ok")
+        self.assertEqual((len(hung), len(server.requests)), (1, 1))
+
+    async def test_outside_a_run_the_developers_platform_token_goes_in_a_header(self):
+        with patch.dict(os.environ, {"ATIRA_TEAM_KEY": "token-invented"}):
+            model, server = self.openai({"/v1/responses": [(200, self.ANSWER)]})
+        await model.chat([{"role": "user", "content": "one"}])
+        self.assertEqual(server.requests[0]["headers"]["x-atira-team-key"], "token-invented")
+        self.assertEqual(server.requests[0]["headers"]["Authorization"], "Bearer sk-invented")
 
 
 if __name__ == "__main__":

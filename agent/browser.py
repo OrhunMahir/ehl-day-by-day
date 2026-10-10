@@ -5,6 +5,7 @@ elements, driven by element numbers. Nothing here knows any particular website; 
 import asyncio
 import io
 import re
+import time
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
@@ -22,7 +23,12 @@ FETCH_JS = """async (url) => {
 READ_PAGES_MAX = 6  # pages per read_pages call
 READ_PAGES_EACH = 8000  # characters kept per page in read_pages
 FRAME_READ_SECONDS = 10  # reading one frame may take at most this long
+PENDING_READ_SECONDS = 2  # and this long while a page load is still waiting for the website's answer
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
+# One attempt of a page load may take this long; `goto` makes two, which stays under the browsing agent's limit for
+# one action. Reading a page never requests a load again: while one hangs, the view says so and stays quick, and a
+# website that keeps not answering gets a fresh session (Tab.reopen) from the agent.
+LOAD_SECONDS = 20
 
 
 class _HtmlText(HTMLParser):
@@ -108,9 +114,12 @@ class Tab:
         self.last_status = 0  # HTTP status of the last page load in the main frame
         self.scratch_pages: set = set()
         self.previous: list = []  # pages below the active popup, newest last
+        self.loading: tuple[str, str, float] | None = None  # the page request in flight: address, method, since
         self._attach(page)
 
     def _attach(self, page):
+        page.on("request", self._on_request)
+        page.on("requestfailed", self._on_request_failed)
         page.on("response", self._on_response)
         page.on("dialog", lambda dialog: asyncio.ensure_future(self._on_dialog(dialog)))
         page.on("download", lambda download: asyncio.ensure_future(self._on_download(download)))
@@ -182,6 +191,8 @@ class Tab:
         self.events.append("The active page had closed; opened the website again")
 
     def _attach_page_only(self, page):
+        page.on("request", self._on_request)
+        page.on("requestfailed", self._on_request_failed)
         page.on("response", self._on_response)
         page.on("dialog", lambda dialog: asyncio.ensure_future(self._on_dialog(dialog)))
         page.on("download", lambda download: asyncio.ensure_future(self._on_download(download)))
@@ -201,12 +212,37 @@ class Tab:
             except asyncio.TimeoutError:
                 pass
 
-    def _on_response(self, response):
+    def _main_document(self, request) -> bool:
         try:
-            if response.request.resource_type == "document" and response.frame == self.page.main_frame:
-                self.last_status = response.status
-        except Exception:  # noqa: BLE001
-            pass
+            return request.resource_type == "document" and request.frame == self.page.main_frame
+        except Exception:  # noqa: BLE001 - e.g. a service worker's request has no frame
+            return False
+
+    def _on_request(self, request):
+        if self._main_document(request):
+            self.loading = (request.url, request.method, time.time())
+
+    def _on_request_failed(self, request):
+        if self._main_document(request) and self.loading and self.loading[0] == request.url:
+            self.loading = None
+
+    def _on_response(self, response):
+        if self._main_document(response.request):
+            self.last_status = response.status
+            self.loading = None
+
+    async def reopen(self, browser=None) -> str:
+        """A fresh session for this website: a new browser context (no cookies, new connections) in `browser`, or in
+        the tab's own browser, opened at the website's home address. The Tab object stays the same for whoever holds
+        it. Raises when the website does not answer there either."""
+        browser = browser or self.page.context.browser
+        context = await browser.new_context()
+        page = await context.new_page()
+        self.page, self.previous, self.loading, self.last_status = page, [], None, 0
+        self._attach(page)
+        await page.goto(self.home or "about:blank", wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
+        self.events.append("The website had not answered; it is open again in a fresh session (sign in again)")
+        return await self.observe()
 
     async def _retry_server_error(self, attempts: int = 2):
         """Flaky server error pages usually work on a retry: reload, at most `attempts` times."""
@@ -229,24 +265,12 @@ class Tab:
         await self._ensure_open()
         await self.settle()
         await self._retry_server_error()
-        parts, start = [], 0
-        self.aid_frames = {}
-        for index, frame in enumerate(self.page.frames):
-            prefix = "" if index == 0 else f"f{index}."
-            try:
-                result = await asyncio.wait_for(  # a frame stuck mid-navigation must not block the whole view
-                    frame.evaluate(OBSERVE_JS, {"prefix": prefix, "start": start if index == 0 else 0, "full": True}),
-                    timeout=FRAME_READ_SECONDS)
-            except Exception as error:  # noqa: BLE001
-                reason = "it did not respond in time" if isinstance(error, asyncio.TimeoutError) else error
-                parts.append(f"--- frame {index} ({frame.url}) could not be read: {reason}")
-                continue
-            if index == 0:
-                start = result["next"]
-                parts.append(result["text"])
-            elif result["text"].strip():
-                parts.append(f"\n--- frame f{index} (url {frame.url}) ---\n{result['text']}")
-            self.aid_frames[prefix] = frame
+        # a frame in the middle of a load answers only once the load is done: with one pending, read briefly
+        parts, _ = await self._read_frames(PENDING_READ_SECONDS if self.loading else FRAME_READ_SECONDS)
+        if self.loading:  # a page load still waits for the website's answer: say so, never wait for it here
+            url, _, since = self.loading
+            parts.insert(0, f"(still loading {url} for {time.time() - since:.0f} s: the website has not answered yet; "
+                            "look again later, or goto the address to ask again)")
         text = "\n".join(parts)
         self.last_text = text
         header = f"[{self.site_id}] URL: {self.page.url}\nTitle: {await self._title()}\n"
@@ -259,6 +283,28 @@ class Tab:
         if offset + MAX_OBSERVATION < len(text):
             body += f"\n... (page continues: {len(text) - offset - MAX_OBSERVATION} more characters; call read_more with offset={offset + MAX_OBSERVATION})"
         return header + body
+
+    async def _read_frames(self, timeout: float = FRAME_READ_SECONDS) -> tuple[list[str], bool]:
+        """Every frame's text, and whether the main frame could be read."""
+        parts, start, main_read = [], 0, False
+        self.aid_frames = {}
+        for index, frame in enumerate(self.page.frames):
+            prefix = "" if index == 0 else f"f{index}."
+            try:
+                result = await asyncio.wait_for(  # a frame stuck mid-navigation must not block the whole view
+                    frame.evaluate(OBSERVE_JS, {"prefix": prefix, "start": start if index == 0 else 0, "full": True}),
+                    timeout=timeout)
+            except Exception as error:  # noqa: BLE001
+                reason = "it did not respond in time" if isinstance(error, asyncio.TimeoutError) else error
+                parts.append(f"--- frame {index} ({frame.url}) could not be read: {reason}")
+                continue
+            if index == 0:
+                start, main_read = result["next"], True
+                parts.append(result["text"])
+            elif result["text"].strip():
+                parts.append(f"\n--- frame f{index} (url {frame.url}) ---\n{result['text']}")
+            self.aid_frames[prefix] = frame
+        return parts, main_read
 
     async def _title(self):
         try:
@@ -274,9 +320,29 @@ class Tab:
         frame = self.aid_frames.get(prefix, self.page.main_frame)
         return frame.locator(f'[data-aid="{aid}"]').first
 
+    async def find(self, aid: str):
+        """The element the model named: by its number, or by its visible text. A text name means a button or link
+        with exactly that name first, then an element with exactly that text, and only then one containing it, so
+        that "Next" is the button and not a hint that mentions it."""
+        aid = aid.strip().strip("[]")
+        if re.fullmatch(r"(f\d+\.)?\d+", aid):
+            return self._locate(aid)
+        text = aid.strip('"')
+        page = self.page
+        for locator in (page.get_by_role("button", name=text, exact=True), page.get_by_role("link", name=text, exact=True),
+                        page.get_by_text(text, exact=True), page.get_by_role("button", name=text),
+                        page.get_by_role("link", name=text)):
+            try:
+                visible = locator.filter(visible=True)
+                if await visible.count():
+                    return visible.first
+            except Exception:  # noqa: BLE001 - try the next way of finding it
+                continue
+        return page.get_by_text(text, exact=False).first
+
     async def click(self, aid: str) -> str:
         await self._ensure_open()
-        locator = self._locate(aid)
+        locator = await self.find(aid)
         try:
             await locator.scroll_into_view_if_needed(timeout=3000)
         except Exception:  # noqa: BLE001
@@ -315,9 +381,9 @@ class Tab:
 
     async def goto(self, url: str) -> str:
         await self._ensure_open()
-        for attempt in range(3):
+        for attempt in range(2):
             try:
-                response = await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                response = await self.page.goto(url, wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
                 if response is None or response.status < 500:
                     break
             except Exception as error:  # noqa: BLE001

@@ -1,6 +1,236 @@
-# Push log · Orhun · stream O: lead, submission, runs
+# Push log · Orhun · stream O: lead, submission
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
+
+## 2026-10-11 01:43 · Test run run_f081cfe7e25825b6: quality 100; stream-o-board-openai goes to main by pull request
+
+- Test run `run_f081cfe7e25825b6` (`4cead00`): quality 100, eligible, 7:08, 176 model calls, $2.17.
+  - Every field of every position is right, and so are the net total and the dated metal-index check. The two
+    setup fees from the tender's Q&A were recorded as `setup_fees`; no position carried a free-text note any more.
+  - The bid was complete at second 164; the submission (Qwen) took the rest.
+  - One run only. The same evening other runs of the board concept ended without a bid when a website hung.
+  - After the bid was accepted the run closes; the Qwen call that was open then is refused and the program ends
+    with a traceback. It did not change the score. Not fixed yet.
+- Changed: merged `origin/main` (its notes file `docs/branch-stream-j-simple.md`). `AGENTS.md` and `CLAUDE.md` are
+  kept as they are on `main`, so this pull request changes no team rule; `docs/streams.md` is this branch's.
+- Checked: 237 unit tests pass (1 skipped) on the merged state.
+- For the others: J, I: after the merge `main` holds the board concept with your files as on this branch, including
+  the changes to `simple.py`, `facts.py` and `engine/` that the entries below describe. Please run
+  `git merge origin/main` on your branches.
+- Next: an experiment branch for cost and time (website agents start with Qwen and change to the OpenAI model when
+  they record prices; an agent that waits is woken only by new open items). No `atira submit` without Orhun's yes.
+
+## 2026-10-11 01:24 · Test run run_114af65c08546a0a: quality 84.8; a setup fee that a Q&A answer sets for a position (touches facts.py, engine/)
+
+- Test run `run_114af65c08546a0a` (`1270c38`, with the grams fix): quality 84.8, eligible, 7:22, 175 model calls,
+  $1.70. The bid was complete at second 206; all four agents were done within 200 s.
+  - Three positions have every field right (13 of 13). The grams fix did what it should: their surcharge and unit
+    price are right now.
+  - Two positions still have a wrong surcharge and unit price. The net total and the dated metal-index check are 0.
+- Cause: for exactly those two positions a Q&A answer on the tender portal states a one-off setup fee for the
+  position, to be spread over the final quantity and not discounted. The facts had no place for it (a setup fee
+  could only be recorded with an ERP material), the agent put it into a free-text note, and the engine assumed 0.
+  These two positions have never had a right surcharge in any run, the 73.1 run included.
+- Changed:
+  - `agent/facts.py` (Ivan's file, changed on Orhun's request; this line announces it): new `SetupFee` (position,
+    fee, Q&A number, source) and `Facts.setup_fees`, with its identity, its field description and a line in the
+    filling guide.
+  - `agent/engine/resolve.py`: `setup_fee(facts, position)`: the latest remaining answer, not withdrawn, not after
+    the scenario date. `agent/engine/bid.py`: a position's ordinary setup fee is that one, else the material's.
+    `agent/engine/needs.py`: "0 assumed" is no longer reported for such a position.
+  - `agent/simple.py`: the job text names one-off setup fees among the Q&A answers to record.
+  - `agent/tests/test_engine_advanced.py`: six tests with invented numbers. `agent/tests/test_engine_robust.py`:
+    the comparison of the total with the positions is limited to amounts a float holds to the cent (below about 90
+    trillion); the new field shifted the test's random damage onto such an amount.
+- Checked: 237 unit tests pass (1 skipped). Not run in the sandbox yet.
+- Not known: whether the dated metal-index check passes once every surcharge is right. The index windows are
+  recorded and the window that contains the scenario date is used; three surcharges are right with it.
+- For the others: I: please look at `SetupFee` and at the choice "the answer's fee replaces the material's" (no run
+  has shown a material with a fee of its own). J: one phrase in the job text.
+- Next: one test run of this state; Orhun starts it.
+
+## 2026-10-11 00:51 · Test run run_89557e681c1e8a71: quality 77; a mass recorded in grams is now read as grams (touches facts.py)
+
+- Test run `run_89557e681c1e8a71` (`64e82a1`, the merged state with `gpt-6.1-sol` reading the websites): quality
+  77, eligible, 9:32, 199 model calls, $1.65. The bid was complete at second 223; no model call hung.
+  - Right in all five positions: material, quantity, base price, packaging, project bonus, lead time. Right as
+    well: decision, tender reference, discount, total consistent with the positions, the withdrawn Q&A check.
+  - Wrong in all five positions: the metal surcharge and, with it, the unit price. Also 0: the net total and the
+    dated metal-index check.
+  - Compared with Julien's `run_e7b86a346e4fe041` (Qwen only, 73.1, $0.60, 13:29): there the base price was right
+    in three positions, the project bonus in two, the unit price in one, the surcharge in three.
+- Cause of the wrong surcharge: the agents record a mass as the page writes it, with its unit in grams, into a field
+  that holds kilograms, and `facts.from_dict` dropped the unit. The surcharge came out a thousand times too high.
+- Changed: `agent/facts.py` (Ivan's file, changed on Orhun's request; this line announces it): a field whose name
+  ends in `_mass_kg` reads text that names a mass unit ("625 g", "0,625 kg", "3100 Gramm") through the new
+  `mass_field_kg`; a number without a unit is kg as before. The two field descriptions say so.
+  `agent/tests/test_engine_helpers.py`: a test with invented masses.
+- Checked: 231 unit tests pass (1 skipped). Not run in the sandbox yet.
+- Not known: whether the unit price, the net total and the metal-index check are right once the surcharge is; they
+  depend on it, so the 77 run cannot show it.
+- For the others: I: `facts.py` changed as described; `mass_kg` is untouched. J: nothing.
+- Next: one test run of this state, started after the team's running test has ended.
+
+## 2026-10-11 00:26 · stream-o-board-openai: merged stream-j-tweaks (the 73.1 run's code); the OpenAI reading model on top
+
+- Changed (branch `stream-o-board-openai`): merged `stream-j-tweaks` at `7f5e89d`.
+  - Taken from Julien as they are: `browser.py`, `browsing.py`, `board.py`, `submission.py`, `agent.py`, his tests.
+    His fresh session for a website that hangs replaces the one this branch had built an hour earlier
+    (`agent/tests/test_browser_fresh.py` is removed with it); the time shares are his again (investigations until
+    minute 11 or until the bid is complete).
+  - Kept from this branch: `agent/llm.py` (OpenAI through the Responses interface, a hung call sent again after
+    `call_seconds`, fallback to the hosted model) and, in `agent/simple.py`, the choice of the reading model: the
+    four website agents use `gpt-6.1-sol` at reasoning "low" when the run has `OPENAI_API_KEY`, the brief call and
+    the submission stay with Qwen without thinking; the brief call gets 20 s.
+- Why: Julien's test run `run_e7b86a346e4fe041` scored 73.1 with Qwen only ($0.60, 13:29). The points still
+  missing there are price fields of single positions, the total and the metal-index check. Other runs of the same
+  evening scored 45.4 and 35.2 or ended without a bid, so one run says little.
+- Checked: 230 unit tests pass (1 skipped). Not run in the sandbox: no test run of the merged state yet; Orhun
+  starts it.
+- For the others: J: your files are unchanged by the merge except `simple.py` (model choice, brief limit).
+- Next: one test run of this state, to compare with the 73.1 run field by field.
+
+## 2026-10-10 23:39 · A website that stops answering its tab is opened again in a fresh session (touches browser.py)
+
+- Changed (branch `stream-o-board-openai`):
+  - `agent/browser.py` (Julien's file, changed on Orhun's request): a tab counts the page requests in a row that
+    were given up without an answer (25 s or more). After two, the next action opens the website's start page in a
+    fresh browser session: a new context without cookies, in another browser of the run where there is one. The
+    agent is told to sign in again. At most three fresh sessions per tab and run. One answered page request sets
+    the count back, so a single hung request is still only requested again, as before.
+  - `agent/simple.py`: the run's browsers are registered for this at the start.
+  - `agent/tests/test_browser_fresh.py` (new): the behaviour on an invented website.
+- Why: in `run_fed0a871a9729e24` the tender portal's tab got no page for ten minutes (every load and every
+  sign-in ran into its limit) while the other three websites answered in seconds, and the submission later used the
+  same tab and session. Requesting again inside the same session did not help. This is the second sandbox run of
+  the board concept that one unanswering website ended (`run_930993c7fb3173ed`: the ERP).
+- Checked: 229 unit tests pass (1 skipped). Not checked: whether a fresh session is answered on the real websites
+  when the first one is not. That is the assumption this change rests on; the log of the next run with a hanging
+  website will show it (`fresh browser session 1 of 3`).
+- Learned: nothing new about the websites yet; the log of the failed run does not show whether the website was down
+  for everyone or only for that session.
+- For the others: J: `browser.py` has `Tab.browsers`, `_fresh_session`, `_other_browser`, `_new_session_page`,
+  `unanswered`; `_ensure_open` calls `_fresh_session` first. Please check it against what you know of the hangs.
+- Next: one test run of this branch.
+
+## 2026-10-10 23:20 · Test run run_fed0a871a9729e24 ended without a bid: the tender portal hardly answered
+
+- Test run `run_fed0a871a9729e24` (`8118663`): failed, no answer submitted, 20 min, 141 model calls, $1.19.
+  - Three websites were read well by `gpt-6.1-sol`: by second 411 the board held 9 materials, 5 searched catalogue
+    groups, 3 revisions, 4 discount approvals, exchange rates, metal indices, a packaging tariff, a setup pool, a
+    project bonus and 5 delivery commitments. The ERP agent had nothing left to do from second 423 and waited.
+  - The tender portal's agent recorded nothing: every page load ran into the 60 s limit, it had to log in three
+    times, and three of its model calls hung for 75 s. So the board never held the bill of quantities.
+  - The submission works on the same website: in 593 s it filled three form steps and never reached the signature.
+  - The start: the brief call (Qwen) hung for its 60 s limit, so the agents started at second 101, not at about 10.
+  - 11 calls to the OpenAI model hung until the browsing agent's 75 s limit (about one call in twelve); the
+    answers that came took 2-5 s. Completion tokens were about 75 per call, so these were not long answers.
+- Changed after it: `agent/llm.py` `Model(call_seconds=...)`: a request still open after that long is given up and
+  sent again; `agent/simple.py`: the reading model gets 25 s per call, the brief call 20 s instead of 60 s;
+  `agent/tests/test_kit.py`: tests for both.
+- Why: the hung calls took a quarter of one agent's time; the hung brief call took 90 s from every agent.
+- Checked: 225 unit tests pass (1 skipped). Not checked in the sandbox.
+- Learned: one website that hardly answers ends the run when it is the one the bid is entered on: nothing in the
+  agent can replace it. Reading three websites completely took `gpt-6.1-sol` about five minutes with one agent per
+  website, so the ERP was not short of time in this run.
+- For the others: J: `simple.py` changed again (two time limits). Open: what an agent can do when its website
+  hangs (a fresh page or another browser), not built.
+- Next: one more test run of this branch to get its score.
+
+## 2026-10-10 23:10 · Branch stream-o-board-openai: the board concept with an OpenAI model reading the websites
+
+- Changed (branch `stream-o-board-openai`, from `stream-j-simple` at `0ae9257`):
+  - `agent/llm.py`: OpenAI's reasoning models are called through the Responses interface (request and reply are
+    translated inside `Model.chat`, the callers still speak chat completions); no `temperature` for them; a limited
+    answer gets room for the model's thinking; an effort the model refuses is lowered. A Responses request that is
+    refused is asked through chat completions without thinking. New `fallback`: when the provider turns the key
+    down or the credit is used up, the hosted model answers from that call on. `thinking=False` and `max_tokens`
+    from `stream-j-simple` are kept for Qwen.
+  - `agent/simple.py` (Julien's file, touched with Orhun's go-ahead): the four website agents use
+    `gpt-6.1-sol` at reasoning "low" when the run has `OPENAI_API_KEY`; the brief call and the submission stay with
+    Qwen without thinking. Without the key every role is Qwen, as before.
+  - `agent/agent.py`: investigations end at 50 % of the run instead of 45 %; the submission keeps 576 s.
+  - `agent/tests/test_kit.py`, `agent/tests/test_lead.py`: tests for the above; the submission-time test's margin
+    is 80 s instead of 120 s.
+- Why: the 51.2 run (`run_9b8aee1022f379bc`, Qwen without thinking) had every material, quantity and lead time but
+  almost no price field, and ended 8 minutes early. In stream O's test run with `gpt-6.1-sol` on the old lead
+  architecture (`run_c059f6e6457b8063`, quality 41, $1.51) the two positions that were priced had every price field
+  right. This branch puts that model where the prices are read.
+- Checked: 224 unit tests pass (1 skipped). Test runs of the OpenAI model layer on the old architecture,
+  all started from the `openai` branch's working copy, package not committed:
+  `run_9482f4f55a082374` failed at the first call (the model refuses tools together with thinking in chat
+  completions; this is what the Responses path fixes); `run_c059f6e6457b8063` `gpt-6.1-sol` low: quality 41, 19 min,
+  $1.51; `run_d1148747f595fab6` `gpt-6-astra` high: quality 10, a bid without positions (the lead's first call ran
+  into the 240 s limit, the first investigations started at 258 s); `run_9590c9e78615fde1` `gpt-6-luna` low:
+  quality 5 (wrong decision), $0.05; `run_c01ae3aec7290f62` `gpt-6-astra` low: cancelled at minute 7, $7.13 by then.
+  Not checked: this branch in the sandbox (a test run follows this push), and the fallback against the real provider.
+- Learned: the platform's proxy accepts the OpenAI model names `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-luna` and
+  refuses unknown ones before forwarding. A team secret cannot hold a provider or model name (too short), so the
+  entry point names them. Cost follows the number of calls, not the effort: `gpt-6-astra` cost about five times
+  `gpt-6.1-sol` per call. More thinking made every run worse, because the time went into the calls.
+- For the others: J: `simple.py` and `agent.py` changed as listed; `browsing.py`, `board.py` and the engine are
+  untouched. The stall limit of a browsing step is 75 s for the OpenAI model (its `thinking` is not `False`).
+  I: nothing. The scored final run would bill the team's OpenAI key; if the credit is gone the fallback keeps
+  the run on Qwen.
+- Next: one test run of this branch; compare its price fields with the 51.2 run.
+
+## 2026-10-10 18:26 · Julien starts all sandbox test runs; hand-over note
+
+- Changed: `AGENTS.md`, `CLAUDE.md` and `docs/streams.md`: sandbox test runs are started by Julien only, for all
+  three streams; a coding agent starts one only when its human is Julien and asks. Stream O is now "lead,
+  submission". New `docs/handover-stream-o.md`: what stream O changed, the settings, what the runs have shown
+  (points only), what to look at in the next run, what is not proven. Nothing under `agent/` changed.
+- Why: Orhun's decision: one person starts runs, so that no state is run twice and results stay comparable.
+- Checked: read the three documents again for other places that say who starts runs; none left. No run started.
+- Learned: nothing new about the sites.
+- For the others: J — you start the runs. The three commits `b54879f`, `d9c00ce`, `b98ce09` are on `stream-o`
+  only and not on `main`; merge `origin/stream-o` into your branch to have them in a run. Please note run ids
+  and points per field in your log. I — ask Julien for a run when you need a score.
+- Next: wait for the run's result and read its log.
+
+## 2026-10-10 18:12 · Short narrow first round, exact identifiers in the recording, recorder with its own model
+
+- Changed: `agent/agent.py`: an investigation of the first round is ended after 3 minutes (later ones after 4),
+  and the lead is told to give every site one narrow first job and to keep the ERP searches by catalogue group
+  for the second round. The lead's next turn waits 20 seconds for pending recordings (was 40). The recorder is
+  told to write identifiers character for character and to record every requirement's catalogue group, and it
+  has a model object of its own with reasoning effort "medium". Before this, in a commit of its own: the lead's
+  reasoning effort is "low". Two tests added.
+- Why: in `run_db0e16aac11819a1` the second round had 76 seconds; the specification's requirements were recorded
+  without catalogue groups and the positions' requirement identifiers did not match them (also named in a review
+  by another session).
+- Checked: all unit tests pass. Two recordings with the hosted model on invented tender and specification
+  reports took 19 seconds side by side: positions and requirements carry the same identifiers, every requirement
+  has its catalogue group, and the engine then asks for exactly the two ERP group searches. Not checked: no
+  sandbox run; one run of the "lead low" state alone was queued and cancelled at Orhun's request before it started.
+- Learned: the sub-agent stops browsing 45 seconds before its deadline to write its report, so a 3-minute
+  investigation has about 2 minutes and 15 seconds on the site.
+- For the others: J — first-round jobs are now narrow and 3 minutes long; a report that states each requirement's
+  catalogue group and the tender's requirement identifiers exactly is what unlocks the second round. I — nothing.
+- Next: one sandbox run of this state when Orhun says so.
+
+## 2026-10-10 17:48 · A website that does not answer at the start no longer ends the run
+
+- Changed: `agent/agent.py`: at the start every website is opened with a 20-second limit and up to three
+  attempts; a site that still does not open keeps its tab, and the sub-agent that works it opens the address
+  again. Two tests in `agent/tests/test_lead.py`. Correction to earlier entries: the reasoning setting in
+  `agent.py` has been "xhigh" for the lead and the sub-agents since the commit of 16:43, not "not sent"; the change
+  came from another session working in the same checkout and went into that commit unnoticed.
+- Why: `run_1401025c68a7e5d7` ended after 44 seconds with exit code 1 and no model call: opening the mailbox at
+  the start timed out, and nothing caught it.
+- Checked: all unit tests pass. Not checked in the sandbox (no new runs for now, at Orhun's request).
+- Test runs of `main` as merged in PR #9: `run_78afea5264793796` and `run_db0e16aac11819a1` were both accepted,
+  quality 10 each (a bid with all positions left out), in 15 and 16 minutes. Read from the second run's log: the
+  recordings ran (twelve), further tabs were opened and nine investigations ran side by side in the second round,
+  the submission took 17 seconds. No position was priced because the second round only had 76 seconds: the first
+  reports were back at 280 s, the lead's next turn started at 320 s (it waited 40 s for a recording that stalled)
+  and ended at 465 s, and investigations end at 540 s. The specification's requirements were recorded without a
+  catalogue group, and no material reached the facts.
+- Learned: with the facts written by the recorder, the lead's turn between the rounds is now the longest wait
+  before the second round (145 s with "xhigh"; in the earlier run with the lead on "low" the same turn took 42 s).
+- For the others: J — in the 4-minute first round the specification report named the requirements but no
+  catalogue group, and the ERP report no material; the second round is where the ERP is searched by group.
+- Next: Orhun decides: a lower reasoning setting for the lead, and how the time between the rounds is split.
 
 ## 2026-10-10 17:08 · Reports recorded in the background, a form step with later fields in one call
 

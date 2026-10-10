@@ -49,6 +49,8 @@ class FakeSite:
 
     def __init__(self):
         self.fail_next = 0
+        self.hang_next = 0  # requests of /slow that get no answer (the server leaves them hanging)
+        self.slow_sign_in = 0.0  # seconds the sign-in takes to answer
         self.hits: dict[str, int] = {}
 
     async def handle(self, route):
@@ -56,10 +58,20 @@ class FakeSite:
         path = request.url[len(SITE):] or "/"
         self.hits[path] = self.hits.get(path, 0) + 1
         signed_in = "session=ok" in (await request.all_headers()).get("cookie", "")
+        if path.startswith("/login") and request.method == "POST" and self.slow_sign_in:
+            await asyncio.sleep(self.slow_sign_in)
         if path.startswith("/login") and request.method == "POST":
             # answered in place: Chromium does not follow redirects fulfilled for a form POST
             return await route.fulfill(status=200, content_type="text/html", headers={"set-cookie": "session=ok; Path=/"},
                                        body='<h1>Orders</h1><a href="/orders/2">Order 2</a>')
+        if path.startswith("/slow") and self.hang_next:
+            self.hang_next -= 1
+            await asyncio.sleep(20)
+            try:
+                await route.fulfill(status=200, content_type="text/html", body="<h1>Too late</h1>")
+            except Exception:  # noqa: BLE001 - the page has moved on
+                pass
+            return
         if path.startswith("/flaky") and self.fail_next:
             self.fail_next -= 1
             return await route.fulfill(status=503, content_type="text/html", body="<h1>Service unavailable</h1>")
@@ -74,6 +86,11 @@ class FakeSite:
             "/popup": '<h1>Catalogue</h1><p>Item list</p><div role="dialog" aria-modal="true"><p>Quick survey</p>'
                       '<button>Close</button></div>',
             "/flaky": "<h1>Report</h1><p>All good</p>",
+            "/slow": "<h1>Inbox</h1><p>3 messages</p>",
+            "/to-slow": '<h1>Start</h1><a href="/slow">Inbox</a>',
+            "/steps": '<h1>Step 1</h1><p>Changes are only saved with "Next".</p><button onclick="document.body.'
+                      'innerHTML = \'<h1>Step 2</h1>\'">Next</button><button onclick="document.body.innerHTML = '
+                      '\'<h1>Step 0</h1>\'">Back</button>',
             "/secret": '<h1>Profile</h1><label>Password <input type="password" name="pw" value="hunter2-invented"></label>'
                        '<label>Other <input type="password" name="pw2"></label>',
             "/sign": '<h1>Sign the offer</h1><form><label>Signing code <input type="password" name="code"></label>'
@@ -162,6 +179,80 @@ class BrowserPagesTest(unittest.TestCase):
             return await tab.goto(f"{SITE}/flaky")
         view = self.run_async(check)
         self.assertIn("All good", view)
+
+    def test_a_hung_load_never_holds_a_page_view_and_goto_asks_again(self):
+        import browser
+
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            site.hang_next = 1
+            started = time.time()
+            by_goto = await tab.goto(f"{SITE}/slow")  # the first attempt hangs, the second is answered
+            took = time.time() - started
+            site.hang_next = 1
+            await tab.goto(f"{SITE}/to-slow")
+            await tab.page.click("text=Inbox", no_wait_after=True)  # the click starts a load that never answers
+            await asyncio.sleep(1.5)
+            started = time.time()
+            view = await tab.observe()
+            look_took = time.time() - started
+            again = await tab.goto(f"{SITE}/slow")
+            return by_goto, took, view, look_took, again
+        old = browser.LOAD_SECONDS
+        browser.LOAD_SECONDS = 3
+        try:
+            by_goto, took, view, look_took, again = self.run_async(check)
+        finally:
+            browser.LOAD_SECONDS = old
+        self.assertIn("3 messages", by_goto)
+        self.assertLess(took, 12)
+        self.assertIn("(still loading", view)  # said, not waited for
+        self.assertLess(look_took, 5)
+        self.assertIn("3 messages", again)
+
+    def test_a_slow_sign_in_is_never_cut_short(self):
+        # the page is read while a form submission still waits for its answer: it must not be thrown away
+        async def check(tab, site, context):
+            site.slow_sign_in = 3
+            await tab.page.fill("input[name=u]", "me")
+            await tab.page.fill("input[name=p]", "secret")
+            await tab.page.evaluate("document.querySelector('form').submit()")  # does not wait for the answer
+            await asyncio.sleep(1.5)
+            await tab.observe()
+            await asyncio.sleep(3)
+            return await tab.observe()
+        view = self.run_async(check)
+        self.assertIn("Orders", view)
+        self.assertNotIn("requested again", view)
+
+    def test_a_website_that_stops_answering_is_opened_again_in_a_fresh_session(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            site.hang_next = 10 ** 6  # this session gets no answer any more
+            browser = context.browser
+            fresh = FakeSite()  # a new context gets a working route, as a fresh connection would
+            original = browser.new_context
+
+            async def new_context(*args, **kwargs):
+                created = await original(*args, **kwargs)
+                await created.route(f"{SITE}/**", fresh.handle)
+                return created
+            browser.new_context = new_context
+            Tab.homes["shop"] = SITE
+            tab.home = f"{SITE}/slow"
+            view = await tab.reopen()
+            return view, tab.page.context is not context
+        view, new_context = self.run_async(check)
+        self.assertTrue(new_context)
+        self.assertIn("fresh session", view)
+        self.assertIn("Sign in", view)  # a fresh session: not signed in yet
+
+    def test_a_button_named_by_its_text_is_the_button_not_a_hint(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            await tab.goto(f"{SITE}/steps")
+            return await tab.click("Next")
+        self.assertIn("Step 2", self.run_async(check))
 
     def test_expired_session_signs_in_again_and_returns(self):
         async def check(tab, site, context):

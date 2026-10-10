@@ -2,6 +2,36 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 18:10 · Branch exp-speed: less model thinking, bounded lead calls, fewer ERP page views
+
+Branch `exp-speed`, not `stream-i`: it changes two of stream O's files at Ivan's request, as an experiment for
+Orhun to review. Nothing here is merged without Orhun's yes.
+
+- Changed (stream O's files): `llm.py`: `Model(thinking=False)` switches Qwen's thinking off
+  (`extra_body.chat_template_kwargs.enable_thinking`), `Model(max_tokens=...)` caps an answer. `agent.py`: the
+  browsing and submission sub-agents run without thinking (was `xhigh`); the lead runs at `low` with at most 4000
+  tokens per answer and 120 s per call, a stalled lead call is asked again instead of waiting until the end of the
+  run; recording a report's facts uses its own model without thinking (it used the lead's `xhigh` model). New
+  `tests/test_llm_thinking.py`.
+- Changed (stream I): `FILLING_GUIDE` and the checklist's ERP search entry: record every search result with the
+  attributes the result list shows, open the details only of results that match the requirement.
+- Why: in run `run_78afea5264793796` (current main) the 119 model calls show the time goes into thinking: Qwen
+  writes about 40 tokens/s, calls under 300 tokens took 3.3 s (median), calls over 1000 tokens 49 s, one lead call
+  wrote 11,930 tokens in 339 s and used up the follow-up round; recording calls took 146 s and 166 s. The ERP agent
+  made 29 steps in 190 s and found 1 of 5 materials. Opening every candidate costs about three page views each.
+- Checked: all 184 tests pass. Measured on the hosted Qwen through `atira models proxy` (free, unranked), the same
+  browsing step: thinking `xhigh` 10.3 s / 12.8 s, thinking off 2.2 s / 3.0 s, lead setting (`low`, 4000) 5.8 s /
+  5.6 s; every variant chose the right tool call. Not checked yet: a sandbox test run of this branch; whether the
+  lead decides as well at `low` as at `xhigh`.
+- Learned: `GET /v1/runs/{run_id}/llm-calls` lists every model call with latency, queue time and tokens; the best
+  tool to see where a run's time goes. Two test runs at the same time share the team's 32 parallel Qwen calls (33
+  calls waited over 5 s in the queue in that run).
+- For the others: O: please review `llm.py` and the constants at the top of `agent.py` (LEAD_REASONING,
+  LEAD_MAX_TOKENS, LEAD_CALL_SECONDS, WORKER_THINKING, RECORD_MAX_TOKENS) and the re-ask on a stalled lead call;
+  merge into stream-o if a test run confirms it. J: nothing changed in your files; `read_pages` is the tool that
+  saves most ERP steps.
+- Next: one test run of exp-speed (after the running one), points per field and the llm-calls timing.
+
 ## 2026-10-10 16:29 · Code review of the whole package: fixes in stream I, findings for J and O
 
 - Changed (stream I only): a requirement without a Kataloggruppe no longer counts as searched, so it cannot cause

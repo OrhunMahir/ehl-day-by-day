@@ -121,6 +121,21 @@ def mass_kg(text, unit_name: str | None = None) -> Decimal:
     return dec(text) * _MASS_FACTORS[found.group(1)]
 
 
+_MASS_WORDS = {**_MASS_FACTORS, "gramm": Decimal("0.001"), "gram": Decimal("0.001"), "grams": Decimal("0.001"),
+               "kilogramm": Decimal(1), "kilogram": Decimal(1), "kilograms": Decimal(1), "kilo": Decimal(1)}
+
+
+def mass_field_kg(value) -> Decimal:
+    """The value of a field that holds a mass in kg. The agents record a mass as the page writes it, so text that
+    names its unit ("625 g", "625g/Stück", "0,625 kg") is converted; a number without a unit is taken as kg."""
+    number = dec(value, strict=True)
+    if not isinstance(value, str):
+        return number
+    found = re.search(r"(?<![a-zäöüß])(" + "|".join(sorted(_MASS_WORDS, key=len, reverse=True)) + r")\b",
+                      clean(value).lower())
+    return number * _MASS_WORDS[found.group(1)] if found else number
+
+
 def when(value) -> datetime | date:
     """Parse a date or timestamp. ISO forms (2030-02-01, 2030-02-01T10:00:00Z) and German dates (01.02.2030,
     01.02.2030 10:00) are read; a timestamp without a zone is taken as UTC."""
@@ -183,6 +198,16 @@ class QuantityChange:
     """A clarification that sets a position's quantity, in the position's stated unit (rule 1, 17)."""
     position: str
     quantity: Decimal
+    qa_number: str = ""
+    source: Source | None = None
+
+
+@dataclass
+class SetupFee:
+    """A clarification that sets a one-off setup fee (Rüstkosten) for a position: EUR net for the whole position. The
+    engine spreads it over the position's final pieces and does not discount it (rules 25, 27)."""
+    position: str
+    fee_eur: Decimal
     qa_number: str = ""
     source: Source | None = None
 
@@ -456,6 +481,7 @@ class Facts:
 
     positions: list[TenderPosition] = field(default_factory=list)
     quantity_changes: list[QuantityChange] = field(default_factory=list)
+    setup_fees: list[SetupFee] = field(default_factory=list)
     withdrawals: list[Withdrawal] = field(default_factory=list)
     amendments: list[TechnicalAmendment] = field(default_factory=list)
     assignments: list[Assignment] = field(default_factory=list)
@@ -493,7 +519,10 @@ def from_dict(cls, data: dict):
     kwargs = {}
     for name, value in data.items():
         try:
-            kwargs[name] = _convert(hints[name], value)
+            if name.endswith("_mass_kg") and isinstance(value, str) and value.strip():
+                kwargs[name] = mass_field_kg(value)
+            else:
+                kwargs[name] = _convert(hints[name], value)
         except (ValueError, TypeError) as exc:
             raise ValueError(f"{cls.__name__}.{name}: {exc}") from exc
     return cls(**kwargs)
@@ -585,10 +614,14 @@ FIELD_DOCS = {
     "Requirement.certification": "as stated; null or empty when no certification is required",
     "Requirement.pieces_per_set": "pieces in one Satz/set, when the requirement defines it",
     "Material.active": "true only when the ERP status says the material is active/released",
-    "Material.surcharge_mass_kg": "Zuschlagsmasse per piece in kg (625 g = 0.625)",
-    "Material.allocation_mass_kg": "Umlagegewicht per piece in kg (3100 g = 3.1)",
+    "Material.surcharge_mass_kg": "Zuschlagsmasse per piece: a number in kg (0.625), or the text with its unit as "
+                                  "the page writes it (\"625 g\")",
+    "Material.allocation_mass_kg": "Umlagegewicht per piece: a number in kg (3.1), or the text with its unit as the "
+                                   "page writes it (\"3100 g\")",
     "Material.stock": "pieces in stock",
     "Material.setup_fee_eur": "ordinary setup fee (Rüstkosten) for the whole position, if the ERP states one",
+    "SetupFee.fee_eur": "the one-off setup fee (Rüstkosten) a Q&A answer states for this position, in EUR net for "
+                        "the whole position, as the answer writes it",
     "PriceCondition.price_unit": "number of pieces the price refers to (price per 100 pieces -> 100)",
     "PriceCondition.fx_key": "the FX key the condition names when its currency is not EUR",
     "Scale.min_quantity": "the scale starts at this many pieces",
@@ -670,14 +703,18 @@ FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you 
   documents their revision.
 - Quantities stay in the unit the tender or Q&A states (sets stay sets); the engine converts with the requirement's
   pieces_per_set. A Q&A answer that withdraws an earlier one goes into withdrawals with that answer's number.
+- A Q&A answer that states a one-off setup fee (Rüstkosten) for a position goes into setup_fees, with the position,
+  the amount and the answer's number and date. A setup fee the ERP states for a material stays with the material.
 - Requirements come from every revision you saw; mark the one the site marks as current/valid with current=true.
   A technical amendment names the revision and requirement it applies to; record it with that revision even if it
   is not the current one. For usable travel (nutzbarer Weg) enter the stated travel as stroke_mm, set
   usable_travel=true and the end-reserve key; the reserve comes from the matching Technikfreigabe record.
-- Materials: every candidate from the ERP search, also inactive ones and near misses, with status, attributes,
-  stock, lead times, carton size, masses in kg (625 g = 0.625), metal index code, setup fee and every price
-  condition with its validity, currency, FX key, price unit and all quantity scales. List every Kataloggruppe you
-  searched in searched_groups, also when the search found nothing.
+- Materials: every result of the ERP search by Kataloggruppe, with the attributes the result list already shows
+  (material number, bore, stroke, pressure, mounting, certification, group); that is enough for candidates that
+  do not match. Open the details only of candidates whose attributes match the requirement, and record for them
+  the status, stock, lead times, carton size, masses in kg (625 g = 0.625), metal index code, setup fee and every
+  price condition with its validity, currency, FX key, price unit and all quantity scales. List every
+  Kataloggruppe you searched in searched_groups, also when the search found nothing.
 - Keys that tie a position to a rule record (Konditionsgruppe, packaging tariff, delivery commitment, setup pool,
   project bonus) go into assignments, wherever you read them.
 - Mail rule records: one record per key per mail. Konditionsgruppe wording -> scope base / base_and_surcharge /
@@ -697,6 +734,7 @@ FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you 
 _IDENTITY: dict[str, tuple[str, ...]] = {
     "positions": ("position",),
     "quantity_changes": ("position", "qa_number", "source.date"),
+    "setup_fees": ("position", "qa_number", "source.date"),
     "withdrawals": ("qa_number", "withdraws"),
     "amendments": ("revision", "requirement", "attribute", "qa_number", "source.date"),
     "assignments": ("position", "kind", "qa_number", "source.date"),

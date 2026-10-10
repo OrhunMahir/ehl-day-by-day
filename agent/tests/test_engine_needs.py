@@ -75,6 +75,22 @@ class Needs(unittest.TestCase):
                          ("find", "ERP", ["2"], 10))
         self.assertTrue(any(w.startswith("price conditions of M-A1") for w in needs))
 
+    def test_catalogue_groups_are_searched_before_positions_are_known(self):
+        f = core_facts()
+        f.positions, f.materials, f.searched_groups = [], [], []
+        f.end_reserves.clear()  # a requirement with usable travel is not complete yet; its group is still searched
+        searches = [n for n in evaluate(f).needed() if n["what"].startswith("search Kataloggruppe")]
+        groups = sorted(n["what"].split()[2].rstrip(":") for n in searches)
+        self.assertEqual(groups, sorted({r.catalogue_group for v in f.revisions if v.current
+                                         for r in v.requirements if r.catalogue_group}))
+        self.assertTrue(all(n["kind"] == "find" and n["site"] == "ERP" for n in searches))
+
+    def test_a_group_search_lists_its_positions_once_they_are_known(self):
+        f = core_facts()
+        f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
+        searches = [n for n in evaluate(f).needed() if n["what"].startswith("search Kataloggruppe")]
+        self.assertEqual([(n["what"].split()[2], n["positions"]) for n in searches], [("G-B:", ["2"])])
+
     def test_no_bid_asks_for_a_recheck(self):
         f = core_facts()
         f.materials = [m for m in f.materials if m.material_number != "M-B1"]

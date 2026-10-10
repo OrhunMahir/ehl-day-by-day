@@ -148,6 +148,12 @@ def assignment(facts: Facts, position: str, kind: AssignmentKind) -> Assignment 
     return max(found, key=_qa_rank) if found else None
 
 
+def setup_fee(facts: Facts, position: str) -> Decimal | None:
+    """Rules 13 and 25: the one-off setup fee the latest remaining Q&A answer sets for the position, if any."""
+    found = [s for s in _live(facts.setup_fees, facts) if norm_key(s.position) == norm_key(position)]
+    return max(found, key=_qa_rank).fee_eur if found else None
+
+
 def stated_quantity(facts: Facts, pos: TenderPosition) -> Decimal:
     """Rules 1 and 13: the tender quantity, overridden by the latest remaining Q&A change, in the stated unit."""
     changes = [c for c in _live(facts.quantity_changes, facts) if norm_key(c.position) == norm_key(pos.position)]
@@ -304,6 +310,21 @@ def searched(facts: Facts, req: Requirement) -> bool:
         return False
     return (group in {norm_key(g) for g in facts.searched_groups}
             or any(norm_key(m.catalogue_group) == group for m in facts.materials))
+
+
+def best_candidate(facts: Facts, req: Requirement) -> Material | None:
+    """The material nearest to the requirement when none matches exactly (yet): a bid with it scores more than one
+    without the position, since every answer field counts on its own. Only candidates of the requirement's
+    catalogue group, or recorded without a group; fewest differing attributes first, then an active or unknown
+    status before an inactive one. None when no candidate is recorded."""
+    group = norm_key(req.catalogue_group)
+    pool = [m for m in facts.materials
+            if not norm_key(m.catalogue_group) or (group and norm_key(m.catalogue_group) == group)]
+    if not pool:
+        return None
+    status = {True: 0, None: 1, False: 2}
+    return min(pool, key=lambda m: (len(mismatches(m, req)), status.get(m.active, 1),
+                                    not norm_key(m.catalogue_group), norm_key(m.material_number)))
 
 
 def select_material(facts: Facts, req: Requirement, position: str, issues: list[str]) -> Material | None:

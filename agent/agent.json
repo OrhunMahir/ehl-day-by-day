@@ -1,6 +1,6 @@
 {
   "setup": ["uv", "sync"],
-  "run": ["uv", "run", "--no-sync", "python", "agent.py"],
+  "run": ["uv", "run", "--no-sync", "python", "simple.py"],
   "models": ["qwen"],
   "browsers": 4
 }

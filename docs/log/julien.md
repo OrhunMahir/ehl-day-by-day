@@ -2,6 +2,182 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 23:40 · stream-j-tweaks: a website that hangs gets a fresh session; the submission checks nothing
+
+- Test run `run_550974275152686b` (`0492559`) was cancelled at 12:43 (quality 0).
+  - The supplier portal never loaded during the whole run; every page view took over 60 s, because each one asked
+    for the hung load again.
+  - The submission agent then spent minutes in the mailbox checking a discount mail instead of entering the bid.
+- Changed:
+  - `browser.py`: a page view never asks for a load again; while one hangs it says "still loading … for N s" and
+    reads for 2 s only. `goto` makes 2 attempts of 20 s. `Tab.reopen` opens a website in a fresh session (new
+    browser context, in any browser).
+  - `browsing.py`: after 2 page loads in a row without an answer, the agent's website is opened in a fresh session,
+    in its own browser first, then in another of the run's browsers; at most twice. `simple.py` passes the run's
+    browsers.
+  - `submission.py` (stream O's file): the answer is final; the agent opens another website only for what the form
+    needs, such as the signing code.
+- Checked:
+  - 220 unit tests pass (1 skipped), among them: a page view returns in under 5 s while a load hangs; a website that
+    stops answering opens again in a new context; two unanswered loads bring the fresh session.
+  - Local run with Qwen:
+    - The bid was complete at 406 s (every rule mail recorded, all five positions with confirmed materials), so
+      investigations ended early.
+    - No website hung.
+    - Signed at 694 s; the mailbox was used only for the signing code.
+  - Still wrong in that run: one price copied as "64.853" (ambiguous) and a mass in grams read as kilograms.
+- For the others: nothing changes on `main`.
+- Next: sandbox test of this commit; then the two number errors.
+
+## 2026-10-10 22:55 · Branch stream-j-tweaks: prices as written, every rule mail, until minute 11
+
+- Changed (`stream-j-tweaks`, from `stream-j-simple`):
+  - `simple.py`: agents record every price, amount, rate and mass as text exactly as the page writes it; the facts
+    module reads the German format.
+  - The job names every kind of rule mail the bid needs (end reserves, exchange rates, metal-index windows,
+    packaging tariffs, setup pools, bonus bands, condition-group rules, delivery commitments).
+  - Every page and validity period of a material's price conditions is read.
+  - Investigations run until minute 11 at the latest (was 9) and end as soon as the engine has nothing left to
+    find.
+  - `board.py`: up to 30 open items per update; `complete()` for the early end.
+- Why: what the engine missed in the 51.2 run (`run_9b8aee1022f379bc`):
+  - no rule mail was recorded at all, so there was no exchange rate, metal index, packaging, setup pool, bonus or
+    condition-group rule;
+  - "186.615,00" per 100 pieces was recorded as 186.615, so four base prices were a thousand times too low;
+  - the run ended after 11:44 with 8 minutes unused.
+- Checked: 218 unit tests pass (1 skipped), among them a German price kept at its value and the early end. Local run
+  and sandbox test: see the next entry.
+- For the others: nothing changes on `main`.
+- Next: local run with Qwen, then a sandbox test if it looks better than the 51.2 run.
+
+## 2026-10-10 22:30 · Branch stream-j-simple: the board concept (best test run 51.2)
+
+- Changed: new branch `stream-j-simple` (from `stream-j` at `31f8933`). One browsing agent per website, connected
+  only by a shared board of typed facts (`board.py`, `simple.py` as the entry point); no lead model, no recorder, no
+  hand-offs. The engine always bids every position with what is known. Details: `docs/branch-stream-j-simple.md`
+  (on `main` via pull request #10).
+- Why: every earlier state scored 10; the information was lost or late at the hand-offs between models.
+- Checked: 215 unit tests pass (1 skipped). Test runs: `run_930993c7fb3173ed` (`91893e5`) quality 5 (ERP never
+  answered, groups wrongly marked as searched, fixed in `92456f6`); `run_9b8aee1022f379bc` (`92456f6`) quality 51.2
+  (every position with material, quantity and lead time; prices mostly missing). Two local runs signed a bid.
+- Learned: one session per website ends the logins that threw each other out; a fact recorded at once reaches the
+  other agents immediately.
+- For the others: O, I: this branch replaces the lead and the recorder for its runs; `agent.py` and the engine are
+  reused. Nothing is merged into `main` except the notes file.
+- Next: prices (every page of the conditions, price units, discount), investigating longer.
+
+## 2026-10-10 20:15 · Test run run_a1424b6668fbc7f4; the submission no longer goes round in a circle
+
+- Test run `run_a1424b6668fbc7f4`, package `stream-j` at `8b7a460`: quality 10 (decision 5, tender reference 5),
+  eligible, 18:38, $0.27.
+  - The ERP was searched by all four catalogue groups in the second round, and 7 materials and 4 searched groups
+    reached the facts.
+  - One position had a matching material. In the configurator the submission agent filled the conditions step,
+    then clicked a number it remembered from an earlier page. On that page the number was the back button. It
+    then pressed "leave position out" on the page before and arrived at the same step again, about 30 times,
+    until its time was up. The second attempt signed a bid without positions.
+  - The browser windows that looked stuck (the ERP at its sign-in page, the webmail behind its notice pop-up) were
+    investigations the lead started a few seconds before investigations ended. They opened a page and stopped.
+  - The platform's stored log of this run starts at 501 s; the earlier lines are gone.
+- Reproduced with the scouting logins, using a harness outside the repository that runs the agent's own
+  submission step:
+  - The configurator selects the material in a cascade: a selection, then a button that applies it, and only
+    then is the next selection enabled. The agent could not get past it and gave up after 7 minutes.
+  - The webmail sometimes leaves a page request unanswered for over 30 s; a new request is answered at once.
+- Changed:
+  - `browser.py`: a page request still unanswered after 8 s is made again, and a page that cannot be read at all
+    is loaded again. `goto` gives a load 15 s instead of 30 s. An element named by its text is a button or link
+    with exactly that name before any text that only contains it.
+  - `submission.py` (stream O's file, for Orhun to confirm):
+    - `fill_form` can press a button between fields (`{"click": "<text>"}`), so a cascade fits into one call.
+    - A disabled selection says what usually enables it.
+    - Every click result names the button it pressed.
+    - The same action that leads back to the same page a third time gets a note that the agent is going round in
+      a circle.
+    - The prompt says that element numbers belong to one page view, and that buttons and fields are best named by
+      their text.
+  - `agent.py` (stream O's file, for Orhun to confirm):
+    - No investigation starts with less than 120 s left.
+    - The submission task lists each position's material with its bore, stroke, pressure, mounting and
+      certification from the ERP, so the agent can choose them in such a cascade.
+  - Tests in `tests/test_browser_pages.py`, `tests/test_submission.py` and `tests/test_lead.py`. The new ones fail
+    on the previous code.
+- Checked:
+  - 202 unit tests pass (1 skipped).
+  - With the scouting logins, the agent's own submission step entered a bid with one fully priced position and
+    four left out. It chose the material through the cascade, signed with the TAN from the webmail and got the
+    receipt in 383 s. Before these changes, the same step stopped after 7 minutes without a signature.
+- For the others: O: please look at the `submission.py` and `agent.py` changes above. I: nothing.
+- Next: sandbox test run of this commit.
+
+## 2026-10-10 19:10 · Test run run_969ce72f14a980ac; the ERP search is asked for as soon as the groups are known
+
+- Test run `run_969ce72f14a980ac`, package `stream-j` at `2a030cd`: `main` + `stream-o` up to `3a0362e` +
+  `exp-speed` + the entry below. Quality 10 (decision 5, tender reference 5, every position 0), eligible, 11:48,
+  $0.17.
+  - The lead's turns took 20 s and about 30 s. The second round started at 231 s instead of after investigations
+    had ended, and got about 195 s on the sites.
+  - All 9 reports were recorded (the largest in 158 s, after one call over 75 s).
+  - At the end the facts held the positions, Q&A changes, withdrawals, 38 keys per position, the rule mails and
+    the discount approvals.
+  - No ERP search by catalogue group was ever sent. When the lead planned the second round (231 s), the
+    specification's groups were recorded, but the positions were not yet (343 s). The checklist asks for a group
+    search only per recorded position whose requirement is complete, which for usable travel also takes the
+    end-reserve mail, so `needed` had no ERP entry. The lead without thinking follows `needed`. At 613 s the
+    checklist named all four groups, after investigations had ended at 540 s.
+- Changed: `engine/needs.py` (stream I's file, for Ivan to confirm): as soon as the current specification revision
+  is recorded, every catalogue group of its requirements that has not been searched is a "find" entry for the ERP.
+  It does not wait for the positions or for every attribute of the requirement. Positions recorded later add
+  themselves to the same entry; with positions known, only the requirements they use count. Two tests in
+  `tests/test_engine_needs.py`; the first fails on the previous code.
+- Checked: 194 unit tests pass (1 skipped).
+- Learned: with the run's 20 minutes, the run ended after under 12 minutes. Signing a bid without positions took
+  97 s, so time is left over once positions are priced.
+- For the others: I: please look at the `needs.py` change. O: the second round now depends on `needed` naming the
+  ERP searches early; the prompt's "one ERP investigation per catalogue group" alone did not make the lead send
+  them.
+- Next: test run of this commit; the points per field and when the ERP investigations start.
+
+## 2026-10-10 18:45 · Test-run state: stream-o and exp-speed merged; reports keep what was read last
+
+- Changed:
+  - Merged `stream-o` (up to `3a0362e`, the hand-over) and Ivan's `exp-speed` (`a6ef420`) into `stream-j` for
+    the next sandbox test run. The only conflict was `agent/agent.py`: both branches gave the recorder a model of
+    its own. Kept stream O's names (`recorder_model`, `RECORDER_REASONING`, `open_site`) and exp-speed's settings:
+    sub-agents, submission agent and recorder without thinking; the lead at "low" with 4000 tokens and 120 s per
+    call, asked again on a stall.
+  - `agent/agent.py` (stream O's file, for Orhun to confirm):
+    - A recording call may take 120 s instead of 75 s, a whole recording 240 s instead of 150 s. Without thinking
+      the recorder writes about 40 tokens per second; a report with many records needs 3000–4000 tokens, which 75 s
+      cut off on every attempt.
+    - The lead without thinking, up to 8000 tokens and 180 s per call, and told to keep each investigation task to
+      about 80 words. In a local run with exp-speed's lead setting ("low", 4000 tokens, 120 s) the turn after the
+      first round took 118 s and was cut off inside its tool calls (an empty `add_facts`, an `investigate` without a
+      task), the next one hit 120 s, and the second round was sent at 560 s, after investigations had ended.
+  - `browsing.py`: a model call without thinking counts as stalled after 30 s (75 s with thinking) and is retried
+    up to five times while the deadline allows. The wrap-up report is limited to 1000 tokens and names noted facts
+    instead of repeating them (the notes are appended anyway); 2000 tokens took about 50 s and the 45 s reserve
+    cut 3 of 8 wrap-ups off. An agent that stops without `finish` passes on the results of its last two actions
+    after its last note, so a page read just before the deadline is not lost.
+  - Tests in `tests/test_browser_scope.py` for all three.
+- Why: in the two quality-10 runs every one of 17 investigations stopped without `finish`; in one of them the
+  specification's requirement table was read at the last step and never reached the facts.
+- Checked:
+  - 192 unit tests pass (1 skipped). The three new stream-J tests fail on the previous `browsing.py`.
+  - Local run with the scouting logins and exp-speed's lead setting:
+    - First round: about 135 s on each site. All four wrap-up reports were written in time, and the ERP report
+      used the new "not noted yet" part.
+    - All four reports were recorded, the largest in 123 s.
+    - Failure: the lead's turns are what is described above, and the bid would again have had no positions.
+  - Second local run with the lead without thinking: its first turn took 14 s instead of 65 s. Stopped there, to
+    test in the sandbox instead.
+  - Sandbox test run: see the next entry.
+- Learned: see the analysis of the two runs in this session; the time goes into thinking tokens and into rounds
+  that wait for each other.
+- For the others: O: the merged settings above are on `stream-j`; please confirm the recorder time limits. I:
+  nothing changed in your files beyond exp-speed.
+- Next: the score breakdown of this state's sandbox test run.
+
 ## 2026-10-10 20:45 · Review fixes from stream I
 
 - Changed: all seven findings from Ivan's review (`docs/log/ivan.md`, 16:29):

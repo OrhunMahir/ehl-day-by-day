@@ -57,12 +57,16 @@ class Quantity(unittest.TestCase):
         f.quantity_changes.append(QuantityChange("2", D(5), "Q4", at("2030-02-20")))
         self.assertEqual(pos(build_bid(f), "2")["quantity"], 20)
 
-    def test_set_without_pieces_per_set_leaves_position_out(self):
+    def test_set_without_pieces_per_set_is_bid_with_the_stated_figure(self):
+        # every answer field scores on its own: the position stays in the bid with its material, and the tender's
+        # own figure stands in for the pieces until the set size is read
         f = core_facts()
         f.revisions[1].requirements[1] = replace(f.revisions[1].requirements[1], pieces_per_set=None)
         result = evaluate(f)
-        self.assertEqual([p["position"] for p in result.answer["positions"]], ["1"])
-        self.assertEqual(result.omitted, ["2"])                                         # rule 9
+        self.assertEqual([p["position"] for p in result.answer["positions"]], ["1", "2"])
+        self.assertEqual(result.omitted, [])
+        self.assertIn("2", result.incomplete)
+        self.assertEqual(pos(result.answer, "2")["material_number"], "M-B1")
         self.assertTrue(any("pieces per set" in i for i in result.issues))
 
 
@@ -105,7 +109,9 @@ class RevisionAndMaterial(unittest.TestCase):
         f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
         result = evaluate(f)
         self.assertEqual(result.answer["decision"], "bid")
-        self.assertEqual([p["position"] for p in result.answer["positions"]], ["1"])
+        self.assertEqual([p["position"] for p in result.answer["positions"]], ["1", "2"])
+        self.assertEqual(pos(result.answer, "2")["material_number"], "")  # chosen in the form from the requirement
+        self.assertIn("2", result.incomplete)
         self.assertTrue(any("not searched" in i for i in result.issues))
 
     def test_searched_group_without_results_is_a_no_bid(self):  # rule 3
@@ -120,7 +126,8 @@ class RevisionAndMaterial(unittest.TestCase):
                                                  pressure_bar=D(999))
         result = evaluate(f)
         self.assertEqual(result.answer["decision"], "bid")
-        self.assertIn("2", result.omitted)
+        self.assertIn("2", result.incomplete)
+        self.assertEqual(result.omitted, [])
         self.assertTrue(any(n["what"].startswith("the Kataloggruppe of requirement B") for n in result.needed()))
 
     def test_certification_spacing_does_not_matter(self):
@@ -141,7 +148,8 @@ class RevisionAndMaterial(unittest.TestCase):
         f.revisions[1].requirements[0] = replace(f.revisions[1].requirements[0], bore_mm=None)
         result = evaluate(f)
         self.assertEqual(result.answer["decision"], "bid")
-        self.assertEqual([p["position"] for p in result.answer["positions"]], ["2"])
+        self.assertEqual([p["position"] for p in result.answer["positions"]], ["1", "2"])
+        self.assertIn("1", result.incomplete)
 
     def test_without_current_mark_latest_dated_revision(self):
         f = core_facts()
@@ -245,6 +253,44 @@ class Robustness(unittest.TestCase):
         f = core_facts()
         f.positions = [TenderPosition("10", D(1), Unit.PIECE, "A"), TenderPosition("9", D(1), Unit.PIECE, "A")]
         self.assertEqual([p["position"] for p in build_bid(f)["positions"]], ["9", "10"])
+
+
+class AlwaysACompleteAnswer(unittest.TestCase):
+    """Every answer field scores on its own, so every position is bid with what is known at any moment; a gap
+    costs only its own fields, never the position or the bid."""
+
+    def test_with_only_the_positions_known_every_position_is_bid_with_its_quantity(self):
+        f = core_facts()
+        f.materials, f.revisions, f.discount_approvals = [], [], []
+        result = evaluate(f)
+        self.assertEqual(result.answer["decision"], "bid")
+        self.assertEqual([(p["position"], p["quantity"], p["material_number"]) for p in result.answer["positions"]],
+                         [("1", 12, ""), ("2", 3, "")])  # Q2 is withdrawn, so Q1's 12 counts; 3 sets as stated
+        self.assertEqual(result.omitted, [])
+        self.assertEqual(sorted(result.incomplete), ["1", "2"])
+        self.assertEqual(result.answer["total_net"], 0)
+
+    def test_a_near_miss_is_bid_as_the_nearest_candidate_until_the_match_is_found(self):
+        f = core_facts()
+        f.materials = [m for m in f.materials if m.material_number not in ("M-A1", "M-A2")]  # only M-A3 (170 bar)
+        self.assertEqual(evaluate(f).answer["decision"], "no_bid")  # the group counts as searched: rule 3 ...
+        result = evaluate(f, allow_no_bid=False)  # ... unless the lead finds the search not conclusive yet
+        self.assertEqual(result.answer["decision"], "bid")
+        self.assertEqual(pos(result.answer, "1")["material_number"], "M-A3")
+        self.assertIn("1", result.incomplete)
+        self.assertTrue(any("nearest candidate M-A3" in i for i in result.issues))
+        searches = [n for n in result.needed() if n["what"].startswith("search Kataloggruppe G-A")]
+        self.assertEqual(searches, [])  # the group counts as searched (a candidate of it is known) ...
+        self.assertEqual(pos(result.answer, "2")["material_number"], "M-B1")  # ... and the other position is exact
+
+    def test_unknown_price_parts_count_as_zero_and_the_total_adds_up(self):
+        f = core_facts()
+        f.materials = [replace(m, conditions=[]) if m.material_number == "M-B1" else m for m in f.materials]
+        answer = evaluate(f).answer
+        total = sum(D(str(p["quantity"])) * D(str(p["unit_price"])) for p in answer["positions"])
+        self.assertEqual(D(str(answer["total_net"])), total.quantize(D("0.01")))
+        self.assertEqual(pos(answer, "2")["unit_price"], 0)
+        self.assertGreater(pos(answer, "1")["unit_price"], 0)
 
 
 if __name__ == "__main__":

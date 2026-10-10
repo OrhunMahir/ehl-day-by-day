@@ -145,7 +145,7 @@ class WrapUpTest(unittest.TestCase):
         model = FakeModel()
         self.run_agent(model, steps=8)
         last_browse = model.seen[-2]  # user messages the model saw on its last browsing call
-        self.assertTrue(any("without a note" in m for m in last_browse))
+        self.assertTrue(any("without saving" in m for m in last_browse))
         self.assertTrue(any("steps left" in m for m in last_browse))
 
 
@@ -290,6 +290,143 @@ class FinishLastTest(unittest.TestCase):
         self.assertIn("FOUND: see notes", report)
         self.assertIn("Bore 42 mm", report)
         self.assertIn("document: Spec C", report)
+
+
+class ReadsThenRunsOut:
+    """Reads a page, optionally notes it, reads on until the steps are used up, then writes the wrap-up."""
+
+    def __init__(self, note_after_first=False):
+        self.n, self.note_after_first, self.wrap_up = 0, note_after_first, None
+
+    async def chat(self, messages, tools=None, **kwargs):
+        self.n += 1
+        if tools is None:
+            self.wrap_up = (messages[0]["content"], kwargs)
+            return type("M", (), {"content": "FOUND:\n- stroke", "tool_calls": None})()
+        if self.n == 2 and self.note_after_first:
+            return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "note", '{"facts": "Stroke 77 mm"}')]})()
+        return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "read_more", '{"offset": 0}')]})()
+
+
+class UnnotedReadsTest(unittest.TestCase):
+    """What an agent read but had not noted when its time ran out still reaches the report."""
+
+    def run_agent(self, model, steps, pages):
+        import time
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/spec"))
+
+        async def observe(offset=0):
+            return "a page"
+        tab.observe = observe
+        tab.read_more = lambda offset=0: pages.pop(0) if pages else "end of page"
+        agent = BrowsingAgent(model, {"portal": tab}, {}, "Find the stroke", "context", name="t",
+                              deadline=time.time() + 600, max_steps=steps, log=lambda *_: None)
+        return agent, asyncio.run(agent.run())
+
+    def test_a_page_read_last_and_not_noted_is_passed_on(self):
+        model = ReadsThenRunsOut()
+        _, report = self.run_agent(model, 1, ["| Requirement | Stroke |\n| R-1 | 77 mm |"])
+        self.assertIn("LAST PAGES READ, NOT NOTED YET", report)
+        self.assertIn("| R-1 | 77 mm |", report)
+        prompt, kwargs = model.wrap_up
+        self.assertIn("| R-1 | 77 mm |", prompt)  # the wrap-up may report it as found
+        self.assertEqual(kwargs["max_tokens"], 1000)
+
+    def test_only_the_last_results_are_kept_and_a_note_clears_them(self):
+        _, report = self.run_agent(ReadsThenRunsOut(), 4, ["first", "second", "third", "fourth"])
+        tail = report.split("LAST PAGES READ, NOT NOTED YET")[1]
+        self.assertNotIn("second", tail)
+        self.assertIn("third", tail)
+        self.assertIn("fourth", tail)
+        _, report = self.run_agent(ReadsThenRunsOut(note_after_first=True), 2, ["| R-1 | 77 mm |"])
+        self.assertNotIn("LAST PAGES READ", report)  # read, then noted: the note carries it
+
+    def test_a_finished_report_carries_no_unnoted_pages(self):
+        Tab.homes.clear()
+        agent = agent_for(Tab("portal", FakePage("https://portal.example.test/")))
+        agent.unnoted = ["read_more -> something"]
+        agent.finished = True
+        self.assertNotIn("LAST PAGES READ", agent._report("FOUND: x"))
+
+
+class QuickStallTest(unittest.TestCase):
+    def test_a_model_without_thinking_is_retried_sooner(self):
+        import time
+        import browsing
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+
+        async def observe(offset=0):
+            return "a page"
+        tab.observe = observe
+
+        class QuickModel:
+            thinking = False
+
+            def __init__(self):
+                self.calls = 0
+
+            async def chat(self, messages, tools=None, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    await asyncio.sleep(3600)
+                return type("M", (), {"content": "", "tool_calls": [FakeCall(self.calls, "finish", '{"report": "FOUND: y"}')]})()
+        old = browsing.CALL_SECONDS, browsing.QUICK_CALL_SECONDS
+        browsing.CALL_SECONDS, browsing.QUICK_CALL_SECONDS = 600, 0.2
+        try:
+            agent = BrowsingAgent(QuickModel(), {"portal": tab}, {}, "task", "context", name="t",
+                                  deadline=time.time() + 900, log=lambda *_: None)
+            started = time.time()
+            report = asyncio.run(agent.run())
+        finally:
+            browsing.CALL_SECONDS, browsing.QUICK_CALL_SECONDS = old
+        self.assertLess(time.time() - started, 5)
+        self.assertEqual(agent.stalls, 1)
+        self.assertIn("FOUND: y", report)
+
+
+class FreshSessionTest(unittest.TestCase):
+    def test_two_unanswered_loads_in_a_row_bring_a_fresh_session(self):
+        import time
+        import browsing
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+        reopened = []
+
+        async def observe(offset=0):
+            return "[portal] URL: https://portal.example.test/\nTitle: t\na page"
+
+        async def goto(url):
+            await asyncio.sleep(3600)  # the website never answers
+
+        async def reopen(browser=None):
+            reopened.append(browser)
+            return "[portal] fresh page"
+        tab.observe, tab.goto, tab.reopen = observe, goto, reopen
+        tab.page.context.browser = "own browser"
+
+        class GoesTwice:
+            def __init__(self):
+                self.n, self.seen = 0, []
+
+            async def chat(self, messages, tools=None, **kwargs):
+                self.n += 1
+                self.seen = [m["content"] for m in messages if m["role"] == "user"]
+                if self.n <= 2:
+                    return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "goto", '{"url": "/x"}')]})()
+                return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "finish", '{"report": "done"}')]})()
+        model = GoesTwice()
+        old = browsing.ACTION_SECONDS
+        browsing.ACTION_SECONDS = 0.2
+        try:
+            agent = BrowsingAgent(model, {"portal": tab}, {}, "task", "context", name="t",
+                                  deadline=time.time() + 60, log=lambda *a: None, browsers=["another browser"])
+            asyncio.run(agent.run())
+        finally:
+            browsing.ACTION_SECONDS = old
+        self.assertEqual(reopened, ["own browser"])  # the own browser first; it answered, so no other was needed
+        self.assertTrue(any("fresh session" in m for m in model.seen))
 
 
 if __name__ == "__main__":

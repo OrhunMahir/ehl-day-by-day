@@ -1,0 +1,52 @@
+dur submit etmeden önce bir deneme runı daha yapalım 2 tane aynı şeyi runlayalımki şansa bağlı omasın sonrasındada submitleriz
+
+---
+
+birde kısaca cevap ver şimdi benim streamim bitti dimi
+
+---
+
+neden bi tanesi queued ve biri running kısaca açıkla
+
+---
+
+koşular bitince sonuçları söyle birde stream line bitti o zman değil mi kısaca
+
+---
+
+mesela 4 ajan var ya hepsi farklı bir işle uğraşyıor mesela bir tanesi en son kontrı deolduruyor dimi eğer öylese optimize etmek için atıyorum templatei hazırlar diğerleri çalışırken ve sonrada en son hızlıca en son değerleri girer bu hızlandırır mı işe yarar mı sadece bir fikir kod değ,iştirme
+
+---
+
+kısaca ingilzce yaz bunu
+
+---
+
+<task-notification>
+<task-id>bybxdq1fj</task-id>
+<tool-use-id>toolu_01QtZaxN4V3gHCRqdgYmmJmm</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/bybxdq1fj.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for both test runs to finish and print their results" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+şimdi sadece 1 test yap sadece 1 test olsun nasıl oluğunu görelim
+
+---
+
+biri direk failladı neden
+
+---
+
+<task-notification>
+<task-id>beg1eqejj</task-id>
+<tool-use-id>toolu_01XSqdzqjAEX6m3965z5o3Ya</tool-use-id>
+<status>killed</status>
+<summary>Task "Wait for the single test run to finish and print its result" was stopped by the user</summary>
+</task-notification>
+
+---
+
+yeni run başlatma şimdili

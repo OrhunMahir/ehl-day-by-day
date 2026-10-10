@@ -1,0 +1,35 @@
+<task-notification>
+<task-id>bdzpm07jy</task-id>
+<tool-use-id>toolu_01CMPaEdNAvyGoTa2JT6mSiE</tool-use-id>
+<output-file>C:\Users\IVANUZ~1\AppData\Local\Temp\claude\c--Users-Ivan-Uzunov-projects-ehl-day-by-day\63b2d78c-bd7f-45fe-af13-734f4d6272aa\tasks\bdzpm07jy.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll the test run until it reaches a final state" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+no, a colleague will take on from here. Now i want you to reasearch the net, maybe some best practices or architectures for such problems. What are the experts and the academia recommending and has shown empirically that it works. Are we following all recommendations? Also, what is specific to our case
+
+---
+
+no wait a second. A colleague tried to fix most of these points, so he is working on a separate branch. When he pushes I will let you know, you go and check his branch, compare with your recommendations and then first let me know what the differences are. go check the code on stream-j
+
+---
+
+first look at the last test run. We still failed at the same place.
+
+---
+
+wait, go check out the lastest push. THere might be a fix
+
+---
+
+no need, leave it
+
+---
+
+okay, but apparently, we get stuck at the same place almost always. I guess a fundamental change is needed, dont you think so?
+
+---
+
+there is no risk, because we will do it inside a new branch first. create a plan with your recommendations, and then review it for things that might fail. Please challenge every decision you make inside the plan

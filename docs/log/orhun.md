@@ -2,6 +2,24 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 01:43 · Test run run_f081cfe7e25825b6: quality 100; stream-o-board-openai goes to main by pull request
+
+- Test run `run_f081cfe7e25825b6` (`4cead00`): quality 100, eligible, 7:08, 176 model calls, $2.17.
+  - Every field of every position is right, and so are the net total and the dated metal-index check. The two
+    setup fees from the tender's Q&A were recorded as `setup_fees`; no position carried a free-text note any more.
+  - The bid was complete at second 164; the submission (Qwen) took the rest.
+  - One run only. The same evening other runs of the board concept ended without a bid when a website hung.
+  - After the bid was accepted the run closes; the Qwen call that was open then is refused and the program ends
+    with a traceback. It did not change the score. Not fixed yet.
+- Changed: merged `origin/main` (its notes file `docs/branch-stream-j-simple.md`). `AGENTS.md` and `CLAUDE.md` are
+  kept as they are on `main`, so this pull request changes no team rule; `docs/streams.md` is this branch's.
+- Checked: 237 unit tests pass (1 skipped) on the merged state.
+- For the others: J, I: after the merge `main` holds the board concept with your files as on this branch, including
+  the changes to `simple.py`, `facts.py` and `engine/` that the entries below describe. Please run
+  `git merge origin/main` on your branches.
+- Next: an experiment branch for cost and time (website agents start with Qwen and change to the OpenAI model when
+  they record prices; an agent that waits is woken only by new open items). No `atira submit` without Orhun's yes.
+
 ## 2026-10-11 01:24 · Test run run_114af65c08546a0a: quality 84.8; a setup fee that a Q&A answer sets for a position (touches facts.py, engine/)
 
 - Test run `run_114af65c08546a0a` (`1270c38`, with the grams fix): quality 84.8, eligible, 7:22, 175 model calls,

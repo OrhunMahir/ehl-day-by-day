@@ -131,7 +131,10 @@ class FakePage:
         self.opened = 0
         self.fails = False
 
-    async def new_context(self):
+    async def storage_state(self):
+        return {"cookies": [], "origins": []}
+
+    async def new_context(self, storage_state=None):
         if self.fails:
             raise RuntimeError("no further context")
         self.opened += 1

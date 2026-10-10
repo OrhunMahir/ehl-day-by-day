@@ -34,8 +34,8 @@ Approach:
    task: what to find, which exact reference, which details (dates, units, status, validity, senders), and to report
    verbatim. Their first pass should survey their site for everything the rules might need; information may sit on
    any site, so ask each assistant to report anything relevant it sees.
-3. Time allows two rounds of investigations. The first round is short (about {first_minutes} minutes per
-   investigation): give every assistant one narrow job, the one the other sites depend on. Typical first jobs: the
+3. Time allows two rounds of investigations. In the first round (about {first_minutes} minutes per
+   investigation, part of which goes into signing in) give every assistant one narrow job, the one the other sites depend on. Typical first jobs: the
    tender's positions with their requirement identifiers and all clarifications; the current specification
    revision with every requirement's attributes and catalogue group; the messages that name this exact tender
    reference; in the ERP only how materials are searched by catalogue group and which pages a material has.
@@ -80,7 +80,7 @@ COLLECT_SHARE = 0.45  # investigations end here
 SUBMIT_SHARE = 0.45  # from here on the lead has to price and submit
 # One investigation may take this long, so that a round of follow-ups fits before the investigations end.
 INVESTIGATION_SECONDS = 240
-FIRST_ROUND_SECONDS = 180  # the first round is cut shorter, so the follow-ups that depend on it get their time
+FIRST_ROUND_SECONDS = 240  # as long as later rounds: signing in and getting past a site's gates takes a while
 # How many investigations may work one website at the same time, each in a tab with a session of its own.
 TABS_PER_SITE = 4
 # How much each role's model thinks before it answers; None leaves the provider's default.
@@ -281,7 +281,8 @@ class Orchestrator:
             return self.free_tabs[site].pop()
         first = self.tabs[site]
         try:
-            context = await first.page.context.browser.new_context()
+            context = await first.page.context.browser.new_context(
+                storage_state=await first.page.context.storage_state())
             page = await context.new_page()
             await page.goto(self.urls[site], wait_until="domcontentloaded", timeout=30000)
             tab = Tab(site, page)
@@ -386,7 +387,11 @@ class Orchestrator:
         agent = SubmissionAgent(self.worker_model, sites, self.credentials, task, self.context(),
                                 deadline=self.deadline, log=self.log)
         self.submitted = answer
-        report = await agent.run()
+        try:
+            report = await agent.run()
+        except Exception as error:  # noqa: BLE001 - usually the run was closed under the agent: the bid is in
+            self.log(f"[submit] ended by {type(error).__name__}: {str(error)[:160]}")
+            report = "REPORT:\n(the submission agent was interrupted)"
         self.accepted = await self.run_is_over()
         if self.accepted:
             return report + "\n\nThe platform has closed the run: the bid was accepted."

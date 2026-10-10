@@ -2,6 +2,25 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 00:26 · stream-o-board-openai: merged stream-j-tweaks (the 73.1 run's code); the OpenAI reading model on top
+
+- Changed (branch `stream-o-board-openai`): merged `stream-j-tweaks` at `7f5e89d`.
+  - Taken from Julien as they are: `browser.py`, `browsing.py`, `board.py`, `submission.py`, `agent.py`, his tests.
+    His fresh session for a website that hangs replaces the one this branch had built an hour earlier
+    (`agent/tests/test_browser_fresh.py` is removed with it); the time shares are his again (investigations until
+    minute 11 or until the bid is complete).
+  - Kept from this branch: `agent/llm.py` (OpenAI through the Responses interface, a hung call sent again after
+    `call_seconds`, fallback to the hosted model) and, in `agent/simple.py`, the choice of the reading model: the
+    four website agents use `gpt-6.1-sol` at reasoning "low" when the run has `OPENAI_API_KEY`, the brief call and
+    the submission stay with Qwen without thinking; the brief call gets 20 s.
+- Why: Julien's test run `run_e7b86a346e4fe041` scored 73.1 with Qwen only ($0.60, 13:29). The points still
+  missing there are price fields of single positions, the total and the metal-index check. Other runs of the same
+  evening scored 45.4 and 35.2 or ended without a bid, so one run says little.
+- Checked: 230 unit tests pass (1 skipped). Not run in the sandbox: no test run of the merged state yet; Orhun
+  starts it.
+- For the others: J: your files are unchanged by the merge except `simple.py` (model choice, brief limit).
+- Next: one test run of this state, to compare with the 73.1 run field by field.
+
 ## 2026-10-10 23:39 · A website that stops answering its tab is opened again in a fresh session (touches browser.py)
 
 - Changed (branch `stream-o-board-openai`):

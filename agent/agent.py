@@ -82,10 +82,9 @@ PROVENANCE = ("For every value you report, say where it is from: the website, th
 SCORED_RUN_SECONDS = 20 * 60
 # How the working time is spent, as shares of it. Entering and signing the bid gets everything after SUBMIT_SHARE.
 # Entering and signing five priced positions took 487 s with the scouting logins (two re-logins and two stalled
-# model calls included) and about 165 s in a sandbox run that ended 8 minutes early, so investigations end at
-# minute 10 and the submission keeps 576 s.
-COLLECT_SHARE = 0.50  # investigations end here
-SUBMIT_SHARE = 0.52  # from here on the answer is priced and submitted
+# model calls included), so investigations end at minute 9 and the last reports get a minute to be recorded.
+COLLECT_SHARE = 0.45  # investigations end here
+SUBMIT_SHARE = 0.47  # from here on the answer is priced and submitted
 # One investigation may take this long. Investigations run in the background and start as soon as what they need
 # is known, so there are no rounds to fit: a narrow job finishes long before this.
 INVESTIGATION_SECONDS = 240

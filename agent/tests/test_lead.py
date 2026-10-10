@@ -74,7 +74,7 @@ class TheSchedule(unittest.TestCase):
         self.assertEqual(self.minutes({**TASK, "expires_at": (now + 300) * 1000}, now), self.plan(5))
 
     def test_the_submission_keeps_the_time_five_positions_took(self):
-        self.assertGreaterEqual(20 * 60 * (1 - agent.SUBMIT_SHARE), 487 + 80)  # the slowest measured, plus a margin
+        self.assertGreaterEqual(20 * 60 * (1 - agent.SUBMIT_SHARE), 487 + 120)  # measured, plus a margin
 
 
 class AddingFacts(unittest.TestCase):

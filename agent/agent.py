@@ -79,7 +79,7 @@ INVESTIGATION_SECONDS = 240
 # How many investigations may work one website at the same time, each in a tab with a session of its own.
 TABS_PER_SITE = 4
 # How much each role's model thinks before it answers; None leaves the provider's default.
-LEAD_REASONING: str | None = "xhigh"
+LEAD_REASONING: str | None = "low"
 WORKER_REASONING: str | None = "xhigh"  # browsing sub-agents and the submission agent
 # A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
 INVESTIGATION_GRACE_SECONDS = 30

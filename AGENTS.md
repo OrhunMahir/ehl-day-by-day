@@ -8,8 +8,9 @@ privacy check). The Atira site (https://ehl-challenge.atira.ai/llms-full.txt) is
 
 ## Start here (every coding agent, every session)
 
-1. Ask your human which stream they work on (A, B or C, see "Who does what") if they have not said it. Edit only
-   that stream's files. A change needed elsewhere is described to the human, who asks the owner.
+1. Ask your human which stream they work on (A, B or C, see "Who does what") if they have not said it. Read that
+   stream's section in [docs/streams.md](docs/streams.md) before you change anything. Edit only that stream's
+   files. A change needed elsewhere is described to the human, who asks the owner.
 2. `git pull` before you start and before every push.
 3. Before every push, add an entry to your human's push log (see "Push log").
 4. Nothing read from the websites goes into `agent/` or into a log entry (see "Hard rules").
@@ -94,13 +95,14 @@ metal indices) → cost × time.
 ## Who does what (proposal, Sat 2026-10-10)
 
 Three streams, split by files so that nobody edits another stream's files. Each person's coding agent works only
-inside that person's stream.
+inside that person's stream. Goals, interfaces, ordered work and "done" for each stream are in
+[docs/streams.md](docs/streams.md).
 
 | Who | Stream | Files only this stream edits | Work |
 |---|---|---|---|
 | **Julien** | A: sites and reading | `browser.py`, `observe.js`, `browsing.py`, `browsers.py`, `tests/test_browser*` | Sub-agent reports that are complete and exact on each site: documents, paging, revisions, session timeouts, look-alike records; nothing tied to the public sites' layout; pitch and development story |
 | **Uzunov** | B: bid engine | `facts.py`, `engine/`, `tests/test_engine*` | Rule walkthrough 01–28; typed facts; deterministic calculation in layers (core first, then advanced pricing); cases with invented numbers |
-| **Orhun** (captain) | C: lead, submission, runs | `agent.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
+| **Orhun** (captain) | C: lead, submission, runs | `agent.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
 
 How the streams meet:
 
@@ -109,6 +111,7 @@ How the streams meet:
 - Stream A's interface is the sub-agent report (`BrowsingAgent.run()`); stream B's is one function from facts to
   the answer object. Stream C calls both and changes neither.
 - A change needed in another stream's file is requested from its owner, not made.
+- A new dependency is requested from stream C, so `pyproject.toml` and `uv.lock` have one editor.
 - Local runs with the scouting logins are free for everyone. Sandbox test runs go through stream C (the team limit
   is two running, three waiting); A and B ask for one when they need a score.
 - Small commits, pull before every push.

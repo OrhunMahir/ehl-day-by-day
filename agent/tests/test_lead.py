@@ -307,5 +307,34 @@ class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("add_facts", model.lead_calls)
 
 
+class AWebsiteThatDoesNotAnswerAtTheStart(unittest.IsolatedAsyncioTestCase):
+    class Page:
+        def __init__(self, failures):
+            self.failures, self.attempts, self.url = failures, 0, "about:blank"
+            self.context = self
+
+        async def goto(self, url, **kwargs):
+            self.attempts += 1
+            if self.attempts <= self.failures:
+                raise TimeoutError("Page.goto: Timeout exceeded")
+            self.url = url
+
+        def on(self, *args):
+            pass
+
+    async def test_it_is_tried_again_and_the_run_goes_on(self):
+        page = self.Page(failures=1)
+        tab = await agent.open_site("mail", "https://mail.example.test/inbox", page)
+        self.assertEqual(page.attempts, 2)
+        self.assertEqual(tab.home, "https://mail.example.test")
+
+    async def test_a_site_that_never_opens_still_gets_its_tab(self):
+        page = self.Page(failures=99)
+        tab = await agent.open_site("mail", "https://mail.example.test/inbox", page)
+        self.assertEqual(page.attempts, agent.START_ATTEMPTS)
+        self.assertEqual(tab.home, "https://mail.example.test")
+        self.assertEqual(agent.Tab.homes["mail"], "https://mail.example.test")
+
+
 if __name__ == "__main__":
     unittest.main()

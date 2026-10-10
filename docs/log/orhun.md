@@ -2,6 +2,29 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 17:48 · A website that does not answer at the start no longer ends the run
+
+- Changed: `agent/agent.py`: at the start every website is opened with a 20-second limit and up to three
+  attempts; a site that still does not open keeps its tab, and the sub-agent that works it opens the address
+  again. Two tests in `agent/tests/test_lead.py`. Correction to earlier entries: the reasoning setting in
+  `agent.py` has been "xhigh" for the lead and the sub-agents since the commit of 16:43, not "not sent"; the change
+  came from another session working in the same checkout and went into that commit unnoticed.
+- Why: `run_1401025c68a7e5d7` ended after 44 seconds with exit code 1 and no model call: opening the mailbox at
+  the start timed out, and nothing caught it.
+- Checked: all unit tests pass. Not checked in the sandbox (no new runs for now, at Orhun's request).
+- Test runs of `main` as merged in PR #9: `run_78afea5264793796` and `run_db0e16aac11819a1` were both accepted,
+  quality 10 each (a bid with all positions left out), in 15 and 16 minutes. Read from the second run's log: the
+  recordings ran (twelve), further tabs were opened and nine investigations ran side by side in the second round,
+  the submission took 17 seconds. No position was priced because the second round only had 76 seconds: the first
+  reports were back at 280 s, the lead's next turn started at 320 s (it waited 40 s for a recording that stalled)
+  and ended at 465 s, and investigations end at 540 s. The specification's requirements were recorded without a
+  catalogue group, and no material reached the facts.
+- Learned: with the facts written by the recorder, the lead's turn between the rounds is now the longest wait
+  before the second round (145 s with "xhigh"; in the earlier run with the lead on "low" the same turn took 42 s).
+- For the others: J — in the 4-minute first round the specification report named the requirements but no
+  catalogue group, and the ERP report no material; the second round is where the ERP is searched by group.
+- Next: Orhun decides: a lower reasoning setting for the lead, and how the time between the rounds is split.
+
 ## 2026-10-10 17:08 · Reports recorded in the background, a form step with later fields in one call
 
 - Changed: `agent/agent.py`: when a report comes back, a separate model call records its facts into the

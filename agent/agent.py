@@ -17,7 +17,7 @@ import browsers
 import engine
 import facts
 import run as contract
-from browser import Tab
+from browser import Tab, origin
 from browsing import BrowsingAgent
 from calc import calculate
 from llm import Model
@@ -559,6 +559,26 @@ def validate(answer: dict, schema: dict) -> list[str]:
     return problems
 
 
+START_ATTEMPTS = 3
+START_TIMEOUT_MS = 20000
+
+
+async def open_site(site: str, url: str, page) -> Tab:
+    """The website's tab at the start of the run. A site that does not answer right now must not end the run:
+    its tab is kept, and the sub-agent that works it opens the address again."""
+    for attempt in range(1, START_ATTEMPTS + 1):
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=START_TIMEOUT_MS)
+            break
+        except Exception as error:  # noqa: BLE001
+            print(f"[start] {site} did not open (attempt {attempt}): {str(error).splitlines()[0][:120]}", flush=True)
+    tab = Tab(site, page)
+    if not tab.home:  # the page never loaded, so the tab does not know its own website yet
+        tab.home = origin(url)
+        Tab.homes[site] = tab.home
+    return tab
+
+
 async def main() -> int:
     started = time.time()
     task, token = contract.load_run()
@@ -575,8 +595,7 @@ async def main() -> int:
             browser, page = await browsers.connect(playwright, index if index < available else 0)
             if index >= available:  # fewer browsers than sites: a tab of its own in the first browser
                 page = await page.context.new_page()
-            await page.goto(access["url"], wait_until="domcontentloaded")
-            tabs[access["siteId"]] = Tab(access["siteId"], page)
+            tabs[access["siteId"]] = await open_site(access["siteId"], access["url"], page)
         lead = Orchestrator(task, token, tabs, model, started, worker_model)
         try:  # nothing may outlive the run's time, whatever is still waiting on a page or a model
             await asyncio.wait_for(lead.run(), timeout=lead.deadline - time.time() + 5)

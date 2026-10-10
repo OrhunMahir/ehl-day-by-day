@@ -60,6 +60,7 @@ agent/                  the submitted package; `atira test-run agent` / `atira s
   browsing.py           browsing sub-agent: a model works one site for a task, keeps notes, reports
   llm.py, models.py     model clients through the platform proxy
   calc.py               exact decimal calculator tool for the lead model
+  submission.py         submission agent: a model enters and signs the bid, filling a whole form step per call
   facts.py              (planned) typed facts with provenance; the contract between the lead and the bid engine
   engine/               (planned) deterministic bid calculation (rules 01–28), Decimal, half-up rounding
   tests/                unit tests with invented numbers only
@@ -103,7 +104,7 @@ another stream's files. Each person's coding agent works only inside that person
 |---|---|---|---|
 | **Julien** | J: sites and reading | `browser.py`, `observe.js`, `browsing.py`, `browsers.py`, `tests/test_browser*` | Sub-agent reports that are complete and exact on each site: documents, paging, revisions, session timeouts, look-alike records; nothing tied to the public sites' layout; pitch and development story |
 | **Ivan** | I: bid engine | `facts.py`, `engine/`, `tests/test_engine*` | Rule walkthrough 01–28; typed facts; deterministic calculation in layers (core first, then advanced pricing); cases with invented numbers |
-| **Orhun** (captain) | O: lead, submission, runs | `agent.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
+| **Orhun** (captain) | O: lead, submission, runs | `agent.py`, `submission.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
 
 How the streams meet:
 

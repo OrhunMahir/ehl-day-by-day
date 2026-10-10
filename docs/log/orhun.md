@@ -2,6 +2,29 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 15:20 · Submission agent that fills a form step per call
+
+- Changed: new `agent/submission.py`. A model still reads the page and chooses every field, value and button, but
+  one tool call now sets all fields of a form step in order and clicks the button that continues. It waits for
+  dropdowns whose options load after an earlier choice, finds a field again by id or name when the page rebuilt
+  it, and stops at the first field that fails, reporting each field. Near the end it is told to sign and confirm
+  with what is entered. `agent/agent.py` uses it for the submission, cuts off an investigation 30 seconds after
+  its time is up (keeping its notes), stops the lead when the time is over, and moves the shares to 40 % / 45 %.
+- Why: two 20-minute test runs ended without a bid. The submission form is a wizard of more than 75 actions, the
+  sub-agent asked the model after every action (9 to 12 seconds each), and it only got 4 to 6 minutes. One run
+  also lost about 10 minutes to an investigation step that never returned.
+- Checked: on an invented local page with dependent dropdowns and a form that rebuilds itself, a step of five
+  fields plus the button took 2 seconds; a wrong option stops the call, lists the options and does not click.
+  Not checked: the real website. Two sandbox test runs of this version are running (`run_9e05a8412d2dce61`,
+  `run_35d9d2027adbc60a`); results are not in.
+- Learned: the lead's decision to submit takes 2 to 3 minutes by itself. A sub-agent step can hang far beyond the
+  sub-agent's deadline, because the deadline is only checked between steps.
+- For the others: J — `submission.py` uses `Tab._locate`, `Tab.aid_frames`, `Tab._absolute`, `Tab.observe`,
+  `BrowsingAgent._login` and `BrowsingAgent._report`; please do not rename them without telling O. Two things in
+  your files would help every run: a time limit on a single step, and sub-agents that stop at the step limit
+  without a report ("stopped without finish" happened in most first rounds). I — nothing changes.
+- Next: read the two runs; if a bid was signed, open a pull request to `main`.
+
 ## 2026-10-10 14:48 · 20 minutes for every run, forced submission, resubmission until accepted
 
 - Changed: `agent/agent.py` gives every run 20 minutes again (the 10-minute time for test runs is gone).

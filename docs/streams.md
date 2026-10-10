@@ -19,12 +19,13 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
      a task in plain language. The sub-agent drives the browser through a text view of the page (`observe.js`,
      `Tab` in `browser.py`), takes notes, and returns one text report. Several sites run in parallel.
    - `calculate(expression)` does exact decimal arithmetic (`calc.py`).
-   - `submit_bid(answer, hints)` checks the answer against the schema, then sends a sub-agent to type the bid into
-     the tender website's form, fetch the signing code from the mailbox, sign and confirm.
+   - `submit_bid(answer, hints)` checks the answer against the schema, then sends the submission agent
+     (`submission.py`) to enter the bid in the tender website's form, fetch the signing code from the mailbox, sign
+     and confirm. It reads the page like a browsing sub-agent, but sets all fields of a form step in one call.
 3. The lead model decides what to ask next from the reports, works out the bid, and submits.
 
 The run's time is split in `agent.py`. Every run, scored or not, works with 20 minutes: investigations end at
-45 % (minute 9), from 50 % (minute 10) the lead is made to call `submit_bid`, and entering and signing the bid gets
+40 % (minute 8), from 45 % (minute 9) the lead is made to call `submit_bid`, and entering and signing the bid gets
 the rest. After each submission attempt the agent asks the platform whether the run is still open; the platform
 closes a run the moment it accepts a bid, so an open run means "not accepted yet" and the lead submits again.
 
@@ -49,6 +50,8 @@ agent has never seen.
 - `Tab(site_id, page)` and `BrowsingAgent(model, tabs, credentials, task, context, name=..., deadline=...,
   max_steps=..., log=...)`, as `agent.py` calls them today.
 - `await BrowsingAgent.run()` returns one string: the report, then the notes taken while browsing.
+- Stream O also uses these internals; rename or change them only together with O: `Tab._locate`,
+  `Tab.aid_frames`, `Tab._absolute`, `Tab.observe`, `BrowsingAgent._login`, `BrowsingAgent._report`.
 
 **Work, in this order.**
 1. Run one sub-agent per website on your machine with a survey task and compare its report with what you see in
@@ -122,7 +125,7 @@ test.
 **Goal.** The run as a whole: the lead model asks the right questions, the answers become facts, the engine prices
 them, and one signed bid is submitted before the clock ends, every time.
 
-**Files only this stream edits.** `agent/agent.py`, `agent/llm.py`, `agent/models.py`, `agent/run.py`,
+**Files only this stream edits.** `agent/agent.py`, `agent/submission.py`, `agent/llm.py`, `agent/models.py`, `agent/run.py`,
 `agent/calc.py`, `agent/agent.json`, `agent/pyproject.toml`, `agent/uv.lock`, `agent/tests/test_kit.py`,
 `README.md`, `AGENTS.md`, `CLAUDE.md`, `.gitignore`, `docs/` (except the other two push logs).
 
@@ -137,8 +140,8 @@ them, and one signed bid is submitted before the clock ends, every time.
    end, which fits an investigation but not a submission (stream J's file; the task text asks it not to stop).
 4. Reports to facts: have the lead model put what the sub-agents report into the records of `facts.py`, and call
    the engine instead of the calculator, as soon as stream I delivers the first version.
-5. Submission: the form, the signing code from the mailbox, signature, receipt check; validation against the
-   schema read at run time.
+5. Submission: `submission.py` fills a whole form step per model call. Open: it has not yet been seen to reach
+   the signature on the website; the signing code from the mailbox and the receipt check are untested.
 6. `llm.py`: when a provider's environment variable is missing it falls back to the provider's public address.
    Model calls must only go through the platform's proxy, so remove these fallbacks.
 7. Dependencies requested by the other streams (`pypdf` for stream J is in).

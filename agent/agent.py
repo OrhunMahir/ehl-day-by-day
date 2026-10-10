@@ -18,6 +18,7 @@ from browser import Tab
 from browsing import BrowsingAgent
 from calc import calculate
 from llm import Model
+from submission import SubmissionAgent
 
 ORCHESTRATOR = """You are the lead sales engineer preparing exactly one tender response. You cannot browse yourself:
 you direct browsing assistants, one per website, and they report back. You make the decisions.
@@ -40,8 +41,10 @@ and signing the bid takes the rest of the time."""
 
 SCORED_RUN_SECONDS = 20 * 60
 # How the working time is spent, as shares of it. Entering and signing the bid gets everything after SUBMIT_SHARE.
-COLLECT_SHARE = 0.45  # investigations end here
-SUBMIT_SHARE = 0.50  # from here on the lead has to submit
+COLLECT_SHARE = 0.40  # investigations end here
+SUBMIT_SHARE = 0.45  # from here on the lead has to submit
+# A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
+INVESTIGATION_GRACE_SECONDS = 30
 FORCE_SUBMIT = {"type": "function", "function": {"name": "submit_bid"}}
 
 
@@ -100,7 +103,12 @@ class Orchestrator:
                 return "No time left to investigate: call submit_bid now with what you have."
             agent = BrowsingAgent(self.model, {site: self.tabs[site]}, self.credentials, task, self.context(),
                                   name=site, deadline=self.collect_until, log=self.log)
-            return await agent.run()
+            try:
+                return await asyncio.wait_for(
+                    agent.run(), timeout=self.collect_until - time.time() + INVESTIGATION_GRACE_SECONDS)
+            except TimeoutError:
+                self.log(f"[{site}] cut off: a step did not return in time")
+                return agent._report("(cut off: out of time; only the notes below were saved)")
 
     async def submit(self, answer: dict, hints: str) -> str:
         problems = validate(answer, self.task["answer_schema"])
@@ -126,8 +134,8 @@ class Orchestrator:
                 "signed and confirmed counts for nothing: if you are told that time is almost up, do not stop; sign "
                 "and confirm what is entered, then report.\n\nANSWER:\n"
                 + json.dumps(answer, ensure_ascii=False, indent=1) + (f"\n\nHINTS:\n{hints}" if hints else ""))
-        agent = BrowsingAgent(self.model, sites, self.credentials, task, self.context(), name="submit",
-                              deadline=self.deadline, max_steps=90, log=self.log)
+        agent = SubmissionAgent(self.model, sites, self.credentials, task, self.context(),
+                                deadline=self.deadline, log=self.log)
         self.submitted = answer
         report = await agent.run()
         self.accepted = await self.run_is_over()
@@ -168,7 +176,12 @@ class Orchestrator:
             if must_submit and not self.submitted:
                 messages.append({"role": "user", "content": "Investigation time is over: call submit_bid now with "
                                  "your best answer. Leave out positions you could not complete."})
-            message = await self.ask(messages, tools, must_submit)
+            try:
+                message = await asyncio.wait_for(self.ask(messages, tools, must_submit),
+                                                 timeout=self.deadline - time.time())
+            except TimeoutError:
+                self.log("[lead] out of time")
+                return
             calls = message.tool_calls or []
             if message.content:
                 self.log(f"[lead] {message.content[:1500]}")

@@ -13,8 +13,9 @@ from browsing import BrowsingAgent
 
 SIGN_NOW_SECONDS = 150  # this long before the end the agent is told to stop filling and get the bid signed
 STOP_SECONDS = 10
-MODEL_CALL_SECONDS = 150
+MODEL_CALL_SECONDS = 45  # a step normally takes under 10 s; a call that stalls is dropped and asked again
 TOOL_SECONDS = 90
+FIRST_VIEW_SECONDS = 30
 OPTION_WAIT_SECONDS = 6  # dependent dropdowns load their options after the one before them was chosen
 
 SYSTEM = """You enter one finished bid into a website's submission form and get it signed and confirmed.
@@ -113,11 +114,14 @@ class SubmissionAgent:
         self._browsing = BrowsingAgent(model, tabs, credentials, "", "", name="submit", deadline=deadline, log=log)
 
     async def run(self) -> str:
-        views = [f"# Current page of {site}\n{await tab.observe()}" for site, tab in self.tabs.items()]
+        # Only the submission website is read up front; the others are opened when the model asks for them.
+        first = next(iter(self.tabs))
+        others = [site for site in self.tabs if site != first]
         messages = [
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": f"{self.context}\n\n# Your websites\n" + "\n".join(f"- {s}" for s in self.tabs)
-             + f"\n\n# Your task\n{self.task}\n\n" + "\n\n".join(views)},
+            {"role": "user", "content": f"{self.context}\n\n# Your websites\n- {first}: the bid is entered here\n"
+             + "".join(f"- {site}: not opened yet; use look when you need it\n" for site in others)
+             + f"\n# Your task\n{self.task}\n\n# Current page of {first}\n{await self._first_view(first)}"},
         ]
         tools = tool_schemas(list(self.tabs))
         told_to_sign = False
@@ -162,6 +166,17 @@ class SubmissionAgent:
             _forget_old_views(messages)
         self.log("[submit] stopped without finish")
         return "REPORT:\n(stopped before the bid was confirmed: out of steps or time)"
+
+    async def _first_view(self, site: str) -> str:
+        self.log(f"[submit] reading {site}")
+        started = time.time()
+        try:
+            view = await asyncio.wait_for(self.tabs[site].observe(), timeout=FIRST_VIEW_SECONDS)
+        except TimeoutError:
+            self.log(f"[submit] {site} was not read within {FIRST_VIEW_SECONDS} s")
+            return "(the page could not be read in time; use look or goto)"
+        self.log(f"[submit] read {site} in {time.time() - started:.1f} s")
+        return view
 
     async def _run_tool(self, name: str, args: dict) -> str:
         site = args.get("site")

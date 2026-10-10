@@ -2,7 +2,24 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
-## 2026-10-10 16:25 · First signed bid with a position (18.3), hard stop, reasoning setting, proxy-only model client
+## 2026-10-10 16:27 · Submission start hardened: one site read up front, stalled calls dropped sooner
+
+- Changed: `agent/submission.py`: at its start the submission agent reads only the submission website, with a
+  30-second limit and two log lines (reading, read in n s); the other websites are listed as not opened and read
+  when the model asks. A model call that has not answered after 45 seconds (was 150) is dropped and asked again.
+- Why: `run_de6c7f380e198960` priced two positions but did not reach the signature: the lead took 4.3 minutes to
+  write the facts, and one stalled model call used 151 of the 367 seconds the submission had. An earlier run hung
+  at the very start of the submission, where all four websites were read without a limit.
+- Checked: with stand-ins, three situations: a normal start reads one site and offers the others; a submission
+  site that hangs while being read is given up after the limit and the run goes on; a first model call that
+  stalls is replaced by a second one. Sandbox run `run_0ffb32eef33e6619` of this state is running; result not in.
+- Learned: of three comparable runs so far one signed a bid, one hung and one ran out of time, so a single test
+  run says little; a version counts as working when two runs in a row sign.
+- For the others: nothing changes in the interfaces.
+- Next: results of the default, "lead low" and "all low" runs; then two runs of the chosen setting before any
+  scored submission.
+
+## 2026-10-10 16:20 · First signed bid with a position (18.3), hard stop, reasoning setting, proxy-only model client
 
 - Changed: merged `main` again (stream J: paged lists, four-part reports, structured sources). `agent/agent.py`:
   everything is stopped 5 seconds after the run's time is over, whatever is still waiting; the lead and the

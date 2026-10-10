@@ -2,6 +2,34 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 19:10 · Test run run_969ce72f14a980ac; the ERP search is asked for as soon as the groups are known
+
+- Test run `run_969ce72f14a980ac`, package `stream-j` at `2a030cd`: `main` + `stream-o` up to `3a0362e` +
+  `exp-speed` + the entry below. Quality 10 (decision 5, tender reference 5, every position 0), eligible, 11:48,
+  $0.17.
+  - The lead's turns took 20 s and about 30 s. The second round started at 231 s instead of after investigations
+    had ended, and got about 195 s on the sites.
+  - All 9 reports were recorded (the largest in 158 s, after one call over 75 s).
+  - At the end the facts held the positions, Q&A changes, withdrawals, 38 keys per position, the rule mails and
+    the discount approvals.
+  - No ERP search by catalogue group was ever sent. When the lead planned the second round (231 s), the
+    specification's groups were recorded, but the positions were not yet (343 s). The checklist asks for a group
+    search only per recorded position whose requirement is complete, which for usable travel also takes the
+    end-reserve mail, so `needed` had no ERP entry. The lead without thinking follows `needed`. At 613 s the
+    checklist named all four groups, after investigations had ended at 540 s.
+- Changed: `engine/needs.py` (stream I's file, for Ivan to confirm): as soon as the current specification revision
+  is recorded, every catalogue group of its requirements that has not been searched is a "find" entry for the ERP.
+  It does not wait for the positions or for every attribute of the requirement. Positions recorded later add
+  themselves to the same entry; with positions known, only the requirements they use count. Two tests in
+  `tests/test_engine_needs.py`; the first fails on the previous code.
+- Checked: 194 unit tests pass (1 skipped).
+- Learned: with the run's 20 minutes, the run ended after under 12 minutes. Signing a bid without positions took
+  97 s, so time is left over once positions are priced.
+- For the others: I: please look at the `needs.py` change. O: the second round now depends on `needed` naming the
+  ERP searches early; the prompt's "one ERP investigation per catalogue group" alone did not make the lead send
+  them.
+- Next: test run of this commit; the points per field and when the ERP investigations start.
+
 ## 2026-10-10 18:45 · Test-run state: stream-o and exp-speed merged; reports keep what was read last
 
 - Changed:

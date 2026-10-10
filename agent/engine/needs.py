@@ -83,6 +83,15 @@ def needs(facts: Facts, result) -> list[Need]:
         c.add("find", SPEC, "the specification revisions and which one is marked current", 2)
     elif sum(1 for r in facts.revisions if r.current) != 1:
         c.add("find", SPEC, "which specification revision the site marks as current/valid", 2)
+    if revision is not None:
+        # The ERP search by catalogue group needs nothing but the group: ask for it as soon as the specification is
+        # read, not only once the positions and every attribute of the requirement are recorded, so that it can run
+        # in the same round as the rest. Positions recorded later add themselves to the same entry.
+        wanted = {norm_key(pos.requirement) for pos in facts.positions}
+        relevant = [r for r in revision.requirements if norm_key(r.requirement) in wanted] or revision.requirements
+        for base in relevant:
+            if norm_key(base.catalogue_group) and not resolve.searched(facts, base):
+                c.add("find", ERP, _search(base.catalogue_group), 10)
 
     lines = {norm_key(ln.position): ln for ln in result.lines}
     for p in result.omitted:
@@ -148,11 +157,14 @@ def _position(facts: Facts, revision, pos, ln, c: _Collector):
         c.add("find", SPEC, f"the Kataloggruppe of requirement {req.requirement} (the ERP search key)", 10, p)
     if ln.material is None:
         if not resolve.searched(facts, req):
-            c.add("find", ERP, f"search Kataloggruppe {req.catalogue_group or '(none stated)'}: record every result with "
-                               "the attributes the list shows; open the details (status, stock, conditions, scales) "
-                               "only of results that match the requirement", 10, p)
+            c.add("find", ERP, _search(req.catalogue_group or "(none stated)"), 10, p)
         return
     _material(facts, ln, c)
+
+
+def _search(group: str) -> str:
+    return (f"search Kataloggruppe {group}: record every result with the attributes the list shows; open the details "
+            "(status, stock, conditions, scales) only of results that match the requirement")
 
 
 def _material(facts: Facts, ln, c: _Collector):

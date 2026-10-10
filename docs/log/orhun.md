@@ -1,6 +1,20 @@
-# Push log · Orhun · stream O: lead, submission, runs
+# Push log · Orhun · stream O: lead, submission
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
+
+## 2026-10-10 18:26 · Julien starts all sandbox test runs; hand-over note
+
+- Changed: `AGENTS.md`, `CLAUDE.md` and `docs/streams.md`: sandbox test runs are started by Julien only, for all
+  three streams; a coding agent starts one only when its human is Julien and asks. Stream O is now "lead,
+  submission". New `docs/handover-stream-o.md`: what stream O changed, the settings, what the runs have shown
+  (points only), what to look at in the next run, what is not proven. Nothing under `agent/` changed.
+- Why: Orhun's decision: one person starts runs, so that no state is run twice and results stay comparable.
+- Checked: read the three documents again for other places that say who starts runs; none left. No run started.
+- Learned: nothing new about the sites.
+- For the others: J — you start the runs. The three commits `b54879f`, `d9c00ce`, `b98ce09` are on `stream-o`
+  only and not on `main`; merge `origin/stream-o` into your branch to have them in a run. Please note run ids
+  and points per field in your log. I — ask Julien for a run when you need a score.
+- Next: wait for the run's result and read its log.
 
 ## 2026-10-10 18:12 · Short narrow first round, exact identifiers in the recording, recorder with its own model
 

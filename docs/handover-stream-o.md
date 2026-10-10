@@ -1,7 +1,7 @@
 # Stream O — changes to test together with yours
 
-Written Sat 2026-10-10 18:20 for the teammate who starts the next sandbox test run. One person starts runs from now
-on, so this file says what stream O changed, where it is, what to look at in the run, and what is not proven yet.
+Written Sat 2026-10-10 18:20 for Julien, who starts every sandbox test run from now on. One person starts runs, so
+that no state is run twice; this file says what stream O changed, where it is, what to look at in the run, and what is not proven yet.
 
 ## Where the changes are
 

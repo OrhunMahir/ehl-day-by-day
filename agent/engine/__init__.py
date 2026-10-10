@@ -18,6 +18,8 @@ plain JSON back, e.g. for the run log. Then:
     result.incomplete   # positions whose unit price lacks a component (still listed, priced without it)
     result.omitted      # positions left out of the answer; mark them "Position auslassen" in the form (rule 9)
     result.explain()    # plain text for the run log: what each value came from, which records counted
+    result.needed()     # what to find or verify next, by site role and rule; give it to the lead after each price_bid
+    result.complete     # True when nothing is left to find: submit
 
 Positions whose material or quantity is unknown are left out of `answer`; the decision is `no_bid` only when a
 searched requirement has no matching active material (rule 3).

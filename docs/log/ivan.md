@@ -2,6 +2,31 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 16:19 · Checklist of what is still missing: result.needed() and result.complete
+
+- Changed: new `agent/engine/needs.py`. `result.needed()` lists what the lead still has to find or verify, each
+  entry with `kind` ("find": a fact is missing; "verify": a value is assumed or decides a lot), `site` by role
+  (brief, tender portal, specification, ERP, mailbox; not by name, since the final run's sites have other names),
+  `what`, `rule` and `positions`. Ordered by kind and site, an outstanding ERP search first. `result.complete` is
+  true when nothing is left to find and no position is left out or incompletely priced. The text helpers
+  `clean`, `norm_key` and `norm_text` in `facts.py` are now cached: on a 100-position tender the engine takes
+  0.4 s instead of 1.5 s, the checklist 0.8 s, the explanation 0.2 s. New `agent/tests/test_engine_needs.py`.
+- Why: the two finished test runs (from before the engine was merged) scored 18.3 and 5; the material was wrong
+  in every position of both, and five of eight runs ended without an answer. The lead needs to know what exactly
+  is still missing, and when it can stop investigating and submit.
+- Checked: 112 engine tests pass on Python 3.12 and 3.14, ruff clean. Every gap is named: for each of 17 kinds of
+  removed facts (FX rate, metal index, tariff, pool, bonus, Konditionsregeln, commitment, end reserve, conditions,
+  stock, carton size, masses, materials, pieces per set, current mark, revisions) and for damaged tenders, each
+  position the engine leaves out or prices incompletely is named by a "find" entry; a one-off run over 3000 doubly
+  damaged tenders found no unnamed gap. All 300 clean random tenders are `complete`.
+- Learned: test-run scores are readable by every team member with `GET /v1/runs/{run_id}` (field `score.breakdown`,
+  points per field). Only print points: the session logs are public, and `got` and `answer` hold our values.
+- For the others: O — return `result.needed()` with every `price_bid` result and tell the lead to work through the
+  "find" entries in order; when `result.complete` is true (or the time is up), submit. J — the entries name the
+  site by role and say exactly what to read, which can go straight into a sub-agent's task.
+- Next: read the next test run with the engine; then a check of the brief's rule text against the rules the
+  engine implements.
+
 ## 2026-10-10 15:50 · Thorough check: Python 3.12, damaged facts, speed, fair play
 
 - Changed: the engine now keeps the answer valid whatever the facts look like. A position listed twice counts once

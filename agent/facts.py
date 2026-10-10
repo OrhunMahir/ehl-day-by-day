@@ -13,6 +13,7 @@ Conventions:
 from __future__ import annotations
 
 import copy
+import functools
 import re
 import types
 import typing
@@ -42,16 +43,23 @@ class Source:
 _INVISIBLE = re.compile("[​-‏⁠﻿­]")
 
 
+@functools.lru_cache(maxsize=65536)
+def _clean(text: str) -> str:
+    return re.sub(r"\s+", " ", _INVISIBLE.sub("", text)).strip()
+
+
 def clean(text: str) -> str:
     """Remove zero-width characters and collapse whitespace."""
-    return re.sub(r"\s+", " ", _INVISIBLE.sub("", str(text))).strip()
+    return _clean(str(text))
 
 
+@functools.lru_cache(maxsize=65536)
 def norm_key(text: str | None) -> str:
     """Canonical form of a code or key: no invisible characters or spaces, upper case."""
     return re.sub(r"\s+", "", clean(text or "")).upper()
 
 
+@functools.lru_cache(maxsize=65536)
 def norm_text(text: str | None) -> str:
     """Canonical form of a free-text attribute such as a mounting type: case-folded, single spaces."""
     return clean(text or "").casefold()

@@ -29,6 +29,7 @@ class Line:
     scope: DiscountScope = DiscountScope.BASE
     lead_weeks: int | None = None
     unit_price: Decimal | None = None
+    negative_price: bool = False            # the computed unit price was negative: an input is implausible
 
 
 @dataclass
@@ -40,6 +41,17 @@ class BidResult:
     omitted: list[str] = field(default_factory=list)      # tender positions not in the answer; mark them in the
                                                           # form as "Position auslassen" (rule 9)
     facts: Facts | None = None
+
+    def needed(self) -> list[dict]:
+        """What the lead still has to find ("find") or check ("verify"), in the order to look for it; empty "find"
+        entries mean the facts are complete."""
+        from .needs import needs
+        return [n.as_dict() for n in needs(self.facts, self)]
+
+    @property
+    def complete(self) -> bool:
+        """No fact is missing: nothing to find, no position omitted or incompletely priced."""
+        return not self.omitted and not self.incomplete and not any(n["kind"] == "find" for n in self.needed())
 
     def explain(self) -> str:
         """Plain text for the run log: what each value was computed from and which records counted."""
@@ -113,6 +125,7 @@ def evaluate(facts: Facts) -> BidResult:
         if ln.unit_price is not None and ln.unit_price < 0:
             issues.append(f"position {ln.position}: unit price {ln.unit_price} is negative; a component is wrong")
             ln.unit_price = None
+            ln.negative_price = True
         if ln.unit_price is None:
             incomplete.append(ln.position)
         unit_price = ln.unit_price if ln.unit_price is not None else ZERO

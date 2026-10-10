@@ -2,7 +2,7 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
-## 2026-10-10 14:55 · 20 minutes for every run, forced submission, resubmission until accepted
+## 2026-10-10 14:48 · 20 minutes for every run, forced submission, resubmission until accepted
 
 - Changed: `agent/agent.py` gives every run 20 minutes again (the 10-minute time for test runs is gone).
   Investigations end at 45 % of the time, and from 50 % the model call is forced to `submit_bid`; if the model

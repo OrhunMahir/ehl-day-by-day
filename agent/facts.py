@@ -745,7 +745,7 @@ def _merge_fields(old: dict, new: dict, prefer_existing: bool = False) -> dict:
     `prefer_existing`, `new` only fills fields that `old` does not know yet."""
     merged = dict(old)
     for name, value in new.items():
-        if value is None or (value == [] and _known(old.get(name))):  # an empty list is "not read", not "none"
+        if value is None or (value in ([], "") and _known(old.get(name))):  # empty is "not read", not "none"
             continue
         if name == "requirements" and isinstance(value, list) and isinstance(old.get(name), list):
             merged[name] = _merge_list(old[name], value, ("requirement",), True, prefer_existing)[0]
@@ -843,7 +843,7 @@ class FactsBuilder:
                         groups.append(clean(str(g)))
                 merged[name] = groups
             elif value is not None:
-                if prefer_existing and _known(merged.get(name)):
+                if (prefer_existing or value == "") and _known(merged.get(name)):  # "" is "not read": keep the known
                     continue
                 new = {**merged.get(name, {}), **value} if name == "authority" and isinstance(value, dict) else value
                 try:

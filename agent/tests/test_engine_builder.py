@@ -134,6 +134,14 @@ class Builder(unittest.TestCase):
         self.assertEqual(b.data["packaging_tariffs"][0]["eur_per_carton"], 5)          # a known record is kept
         self.assertEqual((b.data["tender_reference"], b.data["scenario_date"]), ("T-1", "2030-03-15"))
 
+    def test_empty_text_never_erases_a_known_value(self):
+        # a recorder that fills every field of the schema sends "" for what its report did not contain
+        b = FactsBuilder()
+        b.add({"bidder_domain": "bidder.test", "materials": [{"material_number": "M-1", "mounting": "flange"}]})
+        b.add({"bidder_domain": "", "materials": [{"material_number": "M-1", "mounting": "", "stock": 3}]})
+        self.assertEqual(b.data["bidder_domain"], "bidder.test")
+        self.assertEqual((b.data["materials"][0]["mounting"], b.data["materials"][0]["stock"]), ("flange", 3))
+
     def test_field_reference_is_short_and_names_every_list(self):
         from facts import Facts, field_reference
         text = field_reference()

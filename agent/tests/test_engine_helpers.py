@@ -107,8 +107,9 @@ class Json(unittest.TestCase):
         "revisions": [{"revision": "R-2", "current": True, "date": "2030-01-20", "requirements": [
             {"requirement": "A", "bore_mm": "50", "stroke_mm": "300", "pressure_bar": "160", "mounting": "Flansch",
              "certification": "keine gefordert", "catalogue_group": "G-A"}]}],
-        "materials": [{"material_number": "M-A1", "active": "aktiv", "catalogue_group": "G-A", "bore_mm": 50, "stroke_mm": "300,0",
-                       "pressure_bar": "160", "mounting": "Flansch", "stock": "1250", "pieces_per_carton": "2,5", "stock_lead_weeks": "1",
+        "materials": [{"material_number": "M-A1", "active": "aktiv", "catalogue_group": "G-A", "bore_mm": 50,
+                       "stroke_mm": "300,0", "pressure_bar": "160", "mounting": "Flansch", "stock": "1250",
+                       "pieces_per_carton": "2,5", "stock_lead_weeks": "1",
                        "conditions": [{"valid_from": "01.01.2030, 00:00:00 UTC", "valid_to": "31.12.2030",
                                        "price_unit": "1", "scales": [{"min_quantity": "1", "price": "1.234,50"}]}]}],
         "discount_approvals": [{"reference": "T-TEST-1", "percent": "4", "min_order_value": "3.000,00",

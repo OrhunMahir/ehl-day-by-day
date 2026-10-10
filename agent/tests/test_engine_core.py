@@ -80,8 +80,10 @@ class RevisionAndMaterial(unittest.TestCase):
     def test_no_material_means_no_bid(self):                           # rules 3, 8
         f = core_facts()
         f.revisions[1].requirements[1] = replace(f.revisions[1].requirements[1], pressure_bar=D(999))
-        answer = build_bid(f)
+        result = evaluate(f)
+        answer = result.answer
         self.assertEqual((answer["decision"], answer["positions"], answer["total_net"]), ("no_bid", [], 0))
+        self.assertTrue(any("closest: M-B1: pressure 200 (required 999)" in i for i in result.issues), result.issues)
 
     def test_no_bid_with_conditional_approval_has_zero_discount(self):  # rule 16
         f = core_facts()

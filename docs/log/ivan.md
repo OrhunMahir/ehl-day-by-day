@@ -2,6 +2,28 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 15:50 · Thorough check: Python 3.12, damaged facts, speed, fair play
+
+- Changed: the engine now keeps the answer valid whatever the facts look like. A position listed twice counts once
+  (last entry), an empty or over-long position number or material number leaves the position out (in `omitted`),
+  a negative quantity is unknown, a discount outside 0–100 % counts as 0, a negative price component makes the
+  unit price unknown and its breakdown field blank, an unreadable amendment value is ignored, a bonus or pool
+  without usable weights is unknown; each case is named in `issues`. A no_bid now names the closest candidates
+  and what differs ("closest: M: pressure 170 (required 160)"), so the lead can re-check those values before
+  submitting a no_bid. `FactsBuilder` checks only what an update changes: 282 updates of a 100-position tender
+  took 235 s before and 2.8 s now. New `agent/tests/test_engine_robust.py`.
+- Why: a model fills the facts; a crash or an answer the configurator rejects costs the run. One misread attribute
+  turns a bid into a no_bid, which loses almost all points, so a no_bid must be easy to double-check.
+- Checked: 107 engine tests pass on Python 3.12 (the sandbox's version) and 3.14; ruff (errors, bugbear) clean.
+  400 damaged tenders in the tests and 3000 more with twice the damage in a one-off run: no crash, every answer
+  passes the answer schema with a total equal to the sum of its positions. A 100-position tender with 412 materials
+  and 3872 mail records: evaluate 1.5 s, explain 0.9 s. `atira test-run agent --dry-run` packs `facts.py` and
+  `engine/`. No value from the scouting notes in any package file (115 values checked). Full suite with
+  `PYTHONUTF8=1`: only the three known `test_kit` failures.
+- For the others: O — when `price_bid` returns a no_bid, have the lead re-check the values named after "closest:"
+  once before submitting. J — nothing.
+- Next: read O's first test run with the engine.
+
 ## 2026-10-10 15:32 · Explanation of the bid for the run log, guide for filling the facts
 
 - Changed: `result.explain()` (new `agent/engine/explain.py`) returns plain text for the run log: per position

@@ -137,12 +137,14 @@ def withdrawn_numbers(facts: Facts) -> set[str]:
 def _live(entries, facts: Facts):
     gone = withdrawn_numbers(facts)
     return [e for e in entries
-            if not (norm_key(e.qa_number) and norm_key(e.qa_number) in gone) and not_after(_date(e), facts.scenario_date)]
+            if not (norm_key(e.qa_number) and norm_key(e.qa_number) in gone)
+            and not_after(_date(e), facts.scenario_date)]
 
 
 def assignment(facts: Facts, position: str, kind: AssignmentKind) -> Assignment | None:
     """The latest remaining Q&A assignment of this kind to the position."""
-    found = [a for a in _live(facts.assignments, facts) if a.kind == kind and norm_key(a.position) == norm_key(position)]
+    found = [a for a in _live(facts.assignments, facts)
+             if a.kind == kind and norm_key(a.position) == norm_key(position)]
     return max(found, key=_qa_rank) if found else None
 
 
@@ -165,6 +167,24 @@ def quantity_story(facts: Facts, pos: TenderPosition) -> str:
                  else " (after the scenario date)" if not not_after(_date(c), facts.scenario_date) else "")
         parts.append(f"{label} {day}: {c.quantity}{state}")
     return "; ".join(parts) + f" -> {stated_quantity(facts, pos)} {unit}"
+
+
+def closest(facts: Facts, req: Requirement, limit: int = 3) -> str:
+    """The candidates of the requirement's group nearest to a match, with what differs, for the lead to re-check."""
+    group = norm_key(req.catalogue_group)
+    pool = [m for m in facts.materials if not group or norm_key(m.catalogue_group) == group]
+    wanted = {"bore": req.bore_mm, "stroke": req.stroke_mm, "pressure": req.pressure_bar, "mounting": req.mounting,
+              "certification": req.certification or "none"}
+    got = {"bore": "bore_mm", "stroke": "stroke_mm", "pressure": "pressure_bar", "mounting": "mounting",
+           "certification": "certification"}
+    ranked = sorted(pool, key=lambda m: (len(mismatches(m, req)) + (m.active is False), m.material_number))
+    parts = []
+    for m in ranked[:limit]:
+        diff = [f"{name} {getattr(m, got[name]) or 'none'} (required {wanted[name]})" for name in mismatches(m, req)]
+        if m.active is False:
+            diff.append("inactive")
+        parts.append(f"{m.material_number}: " + ", ".join(diff))
+    return "; ".join(parts) if parts else "no candidates recorded"
 
 
 def mismatches(m: Material, req: Requirement) -> list[str]:
@@ -232,7 +252,13 @@ def requirement(facts: Facts, revision: SpecRevision | None, ref: str, issues: l
             latest[a.attribute] = a.value
     changes = {}
     for attr, value in latest.items():
-        changes[attr.value] = value if attr in (Attr.MOUNTING, Attr.CERTIFICATION) else dec(value)
+        if attr in (Attr.MOUNTING, Attr.CERTIFICATION):
+            changes[attr.value] = value
+            continue
+        try:
+            changes[attr.value] = dec(value)
+        except (ValueError, TypeError):
+            issues.append(f"requirement {ref}: amendment of {attr.value} has no number ({value!r}), ignored")
     req = replace(base, **changes)
     if req.usable_travel:
         reserves = latest_by_key(facts.end_reserves, facts, issues,

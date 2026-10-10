@@ -29,7 +29,8 @@ def pieces(data: dict, rng: random.Random) -> list[dict]:
             elif name == "revisions" and isinstance(item, dict) and item.get("requirements"):
                 reqs = list(item["requirements"])
                 cut = rng.randint(0, len(reqs))
-                parts = [{**item, "requirements": reqs[:cut]}, {"revision": item["revision"], "requirements": reqs[cut:]}]
+                parts = [{**item, "requirements": reqs[:cut]},
+                         {"revision": item["revision"], "requirements": reqs[cut:]}]
             for part in parts:
                 rng.choice(updates).setdefault(name, []).append(part)
     rng.shuffle(updates)

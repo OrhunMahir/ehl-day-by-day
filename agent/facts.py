@@ -731,38 +731,52 @@ def _merge_fields(old: dict, new: dict) -> dict:
         if value is None:
             continue
         if name == "requirements" and isinstance(value, list) and isinstance(old.get(name), list):
-            merged[name] = _merge_list(old[name], value, ("requirement",), field_merge=True)
+            merged[name] = _merge_list(old[name], value, ("requirement",), field_merge=True)[0]
         else:
             merged[name] = value
     return merged
 
 
-def _merge_list(old: list, new: list, paths: tuple[str, ...], field_merge: bool) -> list:
+def _merge_list(old: list, new: list, paths: tuple[str, ...], field_merge: bool) -> tuple[list, list[int]]:
+    """The merged list (items are never changed in place) and the indexes of the items that are new or changed."""
     items = list(old)
+    index = {}
+    for i, existing in enumerate(items):
+        index.setdefault(_ident(existing, paths), i)
+    changed = []
     for item in new:
         if not isinstance(item, dict):
             raise ValueError(f"expected objects in the list, got {item!r}")
         key = _ident(item, paths)
-        at = next((i for i, existing in enumerate(items) if _ident(existing, paths) == key), None)
+        at = index.get(key)
         if at is None:
-            items.append(item)
+            index[key] = len(items)
+            changed.append(len(items))
+            items.append(copy.deepcopy(item))
         else:
-            items[at] = _merge_fields(items[at], item) if field_merge else item
-    return items
+            items[at] = _merge_fields(items[at], copy.deepcopy(item)) if field_merge else copy.deepcopy(item)
+            changed.append(at)
+    return items, changed
+
+
+def _item_class(name: str):
+    return typing.get_args(typing.get_type_hints(Facts)[name])[0]
 
 
 class FactsBuilder:
     """Collects the facts as plain JSON over several tool calls.
 
-    `add(update)` merges one update and checks the result at once: an update with a bad field is rejected whole
-    (ValueError naming the field) and the facts collected so far stay as they were. Lists grow; an item with the
-    same identity as an earlier one replaces it (positions, revisions and materials are merged field by field, so a
-    material's stock and conditions can arrive after its attributes). `replace_lists` in an update replaces whole
-    lists, to take back records added by mistake. `facts()` returns the typed `Facts` for the engine.
+    `add(update)` merges one update and checks what it changes at once: an update with a bad field is rejected
+    whole (ValueError naming the field) and the facts collected so far stay as they were. Lists grow; an item with
+    the same identity as an earlier one replaces it (positions, revisions and materials are merged field by field,
+    so a material's stock and conditions can arrive after its attributes). `replace_lists` in an update replaces
+    whole lists, to take back records added by mistake. `facts()` returns the typed `Facts` for the engine.
     """
 
     def __init__(self, data: dict | None = None):
-        self.data: dict = copy.deepcopy(data) if data else {}
+        self.data: dict = {}
+        if data:
+            self.add(data)
 
     def add(self, update: dict) -> str:
         if not isinstance(update, dict):
@@ -772,26 +786,45 @@ class FactsBuilder:
         unknown = replace - set(_IDENTITY) - {"searched_groups"}
         if unknown:
             raise ValueError(f"replace_lists: unknown list(s) {', '.join(sorted(unknown))}")
-        merged = copy.deepcopy(self.data)
+        hints = typing.get_type_hints(Facts)
+        names = {f.name for f in fields(Facts)}
+        bad = set(update) - names
+        if bad:
+            raise ValueError(f"Facts: unknown field(s) {', '.join(sorted(bad))}")
+        merged = dict(self.data)            # shallow: changed lists are new list objects, items are never mutated
         for name, value in update.items():
-            if name in replace or name not in _IDENTITY and name != "searched_groups":
-                if name == "authority" and isinstance(value, dict) and name not in replace:
-                    merged[name] = {**merged.get(name, {}), **value}
-                elif value is not None:
-                    merged[name] = value
-            elif name == "searched_groups":
-                groups = list(merged.get(name, []))
-                for g in value or []:
-                    if norm_key(g) not in {norm_key(x) for x in groups}:
-                        groups.append(g)
-                merged[name] = groups
-            else:
+            if name in _IDENTITY:
+                if value is None:
+                    continue
                 if not isinstance(value, list):
-                    raise ValueError(f"{name}: expected a list")
-                merged[name] = _merge_list(merged.get(name, []), value, _IDENTITY[name], name in _FIELD_MERGE)
+                    raise ValueError(f"Facts.{name}: expected a list")
+                base = [] if name in replace else merged.get(name, [])
+                items, changed = _merge_list(base, value, _IDENTITY[name], name in _FIELD_MERGE)
+                cls = _item_class(name)
+                for i in changed:
+                    try:
+                        from_dict(cls, items[i])
+                    except ValueError as exc:
+                        raise ValueError(f"Facts.{name}: {exc}") from exc
+                merged[name] = items
+            elif name == "searched_groups":
+                groups = [] if name in replace else list(merged.get(name, []))
+                seen = {norm_key(x) for x in groups}
+                for g in value or []:
+                    if norm_key(g) not in seen:
+                        seen.add(norm_key(g))
+                        groups.append(clean(str(g)))
+                merged[name] = groups
+            elif value is not None:
+                if name == "authority" and isinstance(value, dict):
+                    value = {**merged.get(name, {}), **value}
+                try:
+                    _convert(hints[name], value)
+                except (ValueError, TypeError) as exc:
+                    raise ValueError(f"Facts.{name}: {exc}") from exc
+                merged[name] = copy.deepcopy(value)
         for name in replace - set(update):
             merged[name] = []
-        from_dict(Facts, {"tender_reference": "", "scenario_date": "2000-01-01", **merged})   # check only
         self.data = merged
         return self.summary()
 

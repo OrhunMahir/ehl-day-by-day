@@ -130,18 +130,26 @@ def _why_not(m, req) -> str:
     return "inactive" if m.active is False else "status unknown"
 
 
+def _record_key(name: str):
+    def approval(_record):
+        return "approval"
+
+    def with_revision(record):
+        return f"{norm_key(record.key)} / {norm_key(record.revision)}"
+
+    def plain(record):
+        return norm_key(record.key)
+
+    return {"discount_approvals": approval, "end_reserves": with_revision}.get(name, plain)
+
+
 def _records(facts: Facts) -> list[str]:
     out = ["Mail records:"]
     for name in RECORD_LISTS:
         records = getattr(facts, name)
         if not records:
             continue
-        if name == "discount_approvals":
-            keyfn = (lambda r: "approval")
-        elif name == "end_reserves":
-            keyfn = (lambda r: f"{norm_key(r.key)} / {norm_key(r.revision)}")
-        else:
-            keyfn = (lambda r: norm_key(r.key))
+        keyfn = _record_key(name)
         used = ({"approval": resolve.discount_approval(facts, [])} if name == "discount_approvals"
                 else resolve.latest_by_key(records, facts, [], key=keyfn))
         groups = defaultdict(list)

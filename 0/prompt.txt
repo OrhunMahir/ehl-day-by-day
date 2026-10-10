@@ -1,0 +1,15 @@
+<bash-input>git push -u origin main</bash-input><bash-stdout>[entire] Pushing 2 checkpoint ref(s) to origin..... done
+Enumerating objects: 42, done.
+Counting objects: 100% (42/42), done.
+Delta compression using up to 12 threads
+Compressing objects: 100% (25/25), done.
+Writing objects: 100% (40/40), 34.12 KiB | 34.12 MiB/s, done.
+Total 40 (delta 4), reused 29 (delta 3), pack-reused 0 (from 0)
+remote: Resolving deltas: 100% (4/4), done.
+To https://github.com/OrhunMahir/ehl-day-by-day.git
+ ! [remote rejected] main -&gt; main (missing necessary objects)
+error: failed to push some refs to 'https://github.com/OrhunMahir/ehl-day-by-day.git'</bash-stdout><bash-stderr></bash-stderr>
+
+---
+
+birde görev dağılımını da pushla ve detaylıca açıkla başka ai'lar da anlayabilsin

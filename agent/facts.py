@@ -176,6 +176,7 @@ class TenderPosition:
     unit: Unit = Unit.PIECE
     requirement: str = ""               # the specification requirement it refers to
     source: Source | None = None
+    setup_fee_eur: Decimal | None = None  # a one-time setup fee for this position (e.g. from a Q&A answer), net EUR
 
 
 @dataclass
@@ -580,6 +581,8 @@ FIELD_DOCS = {
     "Facts.director_address": "the sales director's mail address as the brief names it",
     "Facts.searched_groups": "every Kataloggruppe searched in the ERP, also searches that found nothing",
     "TenderPosition.quantity": "the tender's quantity in the position's own unit (before any clarification)",
+    "TenderPosition.setup_fee_eur": "a one-time setup fee (Rüstkosten) a Q&A answer or the tender sets for this "
+                                    "position, net EUR for the whole position; never part of its quantity",
     "TechnicalAmendment.value": "the new value as stated; for a usable-travel requirement the usable travel",
     "Requirement.stroke_mm": "as stated; for a usable-travel requirement the usable travel (reserves are added later)",
     "Requirement.certification": "as stated; null or empty when no certification is required",

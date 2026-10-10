@@ -7,12 +7,17 @@ on what its own website can answer. There is no lead and no report to pass on: t
 """
 import asyncio
 import json
+import re
 
 import engine
 import facts
 
 NEWS_RECORDS = 12  # most recent records of other agents shown in one update
 RECORD_CHARS = 700  # of each of them
+# Money fields: a value given as a JSON number with exactly three decimals, or as text like "64.853", is how a German
+# "64.853,00" (sixty-four thousand) gets misread as sixty-four; such a value is refused and asked for as written.
+MONEY = {"price", "setup_fee_eur", "fee_eur", "eur_per_carton", "min_order_value", "lower", "upper"}
+AMBIGUOUS = re.compile(r"^\s*-?\d{1,3}\.\d{3}\s*(EUR|USD|€|\$)?\s*$", re.IGNORECASE)
 NEEDS_SHOWN = 30  # enough that the items for prices and rule mails are not cut off behind the others
 
 
@@ -30,6 +35,7 @@ class Board:
         if not isinstance(update, dict):
             raise ValueError("the facts must be an object")
         update = {key: value for key, value in update.items() if key != "authority"}  # the engine's default
+        update = _checked(update)
         refused = ""
         if update.get("searched_groups") and not (update.get("materials") or who in self.searchers):
             # A group counts as searched only from the agent that searched it and recorded what it found; a group
@@ -97,6 +103,36 @@ class Board:
         else:
             text += "Nothing is listed as still needed right now."
         return text
+
+
+def _checked(update: dict) -> dict:
+    """Masses with a unit become kilograms; money values that may be misread thousands are refused with the reason,
+    so the agent records them again as the page writes them."""
+    doubtful: list[str] = []
+
+    def walk(value, key=""):
+        if isinstance(value, dict):
+            return {k: walk(v, k) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v, key) for v in value]
+        if key.endswith("_kg") and isinstance(value, str) and re.search(r"[a-zA-Z]", value):
+            try:
+                return float(facts.mass_kg(value))  # a plain number: "1.875" as text would be ambiguous
+            except ValueError:
+                return value
+        if key in MONEY:
+            if isinstance(value, float) and len(repr(value).split(".")[-1]) == 3 and "e" not in repr(value):
+                doubtful.append(repr(value))
+            elif isinstance(value, str) and AMBIGUOUS.match(value):
+                doubtful.append(repr(value))
+        return value
+    checked = walk(update)
+    if doubtful:
+        raise ValueError(
+            f"the amount(s) {', '.join(doubtful[:5])} may be misread: a German page writes sixty-four thousand as "
+            "64.853,00. Record each amount as text exactly as the page writes it, with its decimal part (e.g. "
+            "\"64.853,00\" or \"64,85\"); nothing of this update was saved")
+    return checked
 
 
 def _need(need: dict) -> str:

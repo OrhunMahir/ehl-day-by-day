@@ -48,6 +48,10 @@ own thousands and decimal marks (e.g. "186.615,00" or "1.250,00 EUR"); never tur
 never convert, divide or round it. The engine reads the format. A German "186.615,00" is one hundred and eighty-six
 thousand, not one hundred and eighty-six.
 
+Q&A answers can also set a one-time setup fee (Rüstkosten) for a position: record it as that position's
+setup_fee_eur, never as a quantity. Stock: record the stock that is free to use (unrestricted); stock in quality
+inspection, blocked or reserved does not count, so a physical total that includes it is not the stock.
+
 Then keep going with what the board says is still needed and your website can answer, e.g. a search by a key that
 another website gave (search a catalogue group with at most 20 results, record every result, open the details of
 the ones whose attributes match). When nothing on your website is left for now, call wait."""

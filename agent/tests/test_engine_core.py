@@ -255,6 +255,21 @@ class Robustness(unittest.TestCase):
         self.assertEqual([p["position"] for p in build_bid(f)["positions"]], ["9", "10"])
 
 
+class SetupFeeOfAPosition(unittest.TestCase):
+    def test_a_one_time_setup_fee_of_a_position_is_spread_over_its_pieces_and_never_discounted(self):  # 25, 27
+        plain = evaluate(core_facts()).answer
+        f = core_facts()
+        f.positions[0] = replace(f.positions[0], setup_fee_eur=D("85.00"))
+        answer = evaluate(f).answer
+        before, after = pos(plain, "1"), pos(answer, "1")
+        pieces = after["quantity"]
+        share = D("85.00") / pieces
+        self.assertEqual(D(str(after.get("surcharge_per_unit", 0))) - D(str(before.get("surcharge_per_unit", 0))),
+                         share.quantize(D("0.01")))
+        self.assertEqual(D(str(after["unit_price"])) - D(str(before["unit_price"])), share.quantize(D("0.01")))
+        self.assertEqual(pos(answer, "2"), pos(plain, "2"))  # only its own position
+
+
 class AlwaysACompleteAnswer(unittest.TestCase):
     """Every answer field scores on its own, so every position is bid with what is known at any moment; a gap
     costs only its own fields, never the position or the bid."""

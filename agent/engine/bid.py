@@ -188,7 +188,9 @@ def _surcharges(facts: Facts, lines: list[Line], issues: list[str]):
     """Rule 28: mass surcharge per piece = surcharge mass x index rate on the scenario date. Setup fee as read."""
     for ln in lines:
         m = ln.material
-        ln.setup = m.setup_fee_eur if m.setup_fee_eur is not None else ZERO
+        # the ordinary setup fee: the material's own plus a one-time fee set for the position (rules 25 and 27)
+        own = ln.tender.setup_fee_eur if ln.tender is not None and ln.tender.setup_fee_eur is not None else ZERO
+        ln.setup = (m.setup_fee_eur if m.setup_fee_eur is not None else ZERO) + own
         if not norm_key(m.metal_index):
             ln.mass_surcharge = ZERO
             continue

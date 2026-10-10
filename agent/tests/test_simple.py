@@ -102,6 +102,34 @@ class TheBoard(unittest.IsolatedAsyncioTestCase):
         position = next(p for p in evaluate(board.builder.facts()).answer["positions"] if p["position"] == "1")
         self.assertEqual(position["base_unit_price"], 1866.15)
 
+    async def test_an_amount_that_may_be_a_misread_thousand_is_refused_with_the_reason(self):
+        # run_e7b86a346e4fe041: "64.853,00" per 100 pieces was recorded as 64.853, a base price of 0.71 instead of 705
+        board = Board(log=lambda *a: None)
+        board.record("site-a", {**START, **POSITIONS})
+        board.record("site-b", SPEC)
+        condition = ERP["materials"][0]["conditions"][0]
+        for doubtful in (64.853, "64.853", "64.853 EUR"):
+            material = {**ERP["materials"][0], "conditions": [{**condition, "price_unit": 100,
+                                                              "scales": [{"min_quantity": 1, "price": doubtful}]}]}
+            with self.assertRaises(ValueError) as refused:
+                board.record("site-c", {"materials": [material], "searched_groups": ["G1"]})
+            self.assertIn("as the page writes it", str(refused.exception))
+        self.assertNotIn("materials", board.builder.data)  # nothing of a refused update is saved
+        material = {**ERP["materials"][0], "conditions": [{**condition, "price_unit": 100,
+                                                          "scales": [{"min_quantity": 1, "price": "64.853,00"}]}]}
+        board.record("site-c", {"materials": [material], "searched_groups": ["G1"]})
+        from engine import evaluate
+        position = next(p for p in evaluate(board.builder.facts()).answer["positions"] if p["position"] == "1")
+        self.assertEqual(position["base_unit_price"], 648.53)
+
+    async def test_a_mass_with_its_unit_is_kept_in_kilograms(self):
+        board = Board(log=lambda *a: None)
+        board.record("brief", START)
+        board.record("site-c", {"materials": [{"material_number": "M7", "surcharge_mass_kg": "1875 g/Stück",
+                                               "allocation_mass_kg": "0,875 kg"}]})
+        material = board.builder.facts().materials[0]
+        self.assertEqual((str(material.surcharge_mass_kg), str(material.allocation_mass_kg)), ("1.875", "0.875"))
+
     async def test_a_bad_record_is_refused_and_changes_nothing(self):
         board = Board(log=lambda *a: None)
         with self.assertRaises(ValueError):

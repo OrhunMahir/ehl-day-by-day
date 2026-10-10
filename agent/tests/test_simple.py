@@ -108,6 +108,21 @@ class TheBoard(unittest.IsolatedAsyncioTestCase):
             board.record("site-c", {"materials": [{"material_number": "M1", "stock": "a lot"}]})
         self.assertEqual(board.version, 0)
 
+    async def test_a_waiting_agent_is_woken_by_a_new_open_item_and_not_by_every_record(self):
+        board = Board(log=lambda *a: None)
+        board.record("site-a", {**START, **POSITIONS})
+        seen = board.version
+        waiting = asyncio.ensure_future(board.wait_for_work(seen, 2))
+        await asyncio.sleep(0.05)
+        board.record("site-d", {"bidder_domain": "example.test"})  # nothing new is asked for by this
+        await asyncio.sleep(0.2)
+        self.assertFalse(waiting.done())
+        self.assertEqual(board.work_version, seen)
+        board.record("site-b", SPEC)  # the specification's groups: the ERP search is asked for now
+        self.assertTrue(await asyncio.wait_for(waiting, 1))
+        self.assertEqual(board.work_version, board.version)
+        self.assertFalse(await board.wait_for_work(board.version, 0.1))  # and nothing since
+
     async def test_wait_returns_as_soon_as_another_agent_records(self):
         board = Board(log=lambda *a: None)
 
@@ -196,6 +211,65 @@ class OnlyAsLongAsItHelps(unittest.TestCase):
         self.assertFalse(board.complete())
         board.record("x", {**START, **POSITIONS})
         self.assertFalse(board.complete())
+
+
+class TheModelOfAnAgent(unittest.IsolatedAsyncioTestCase):
+    """An agent starts with the hosted model and changes to the reading model when it comes to careful facts."""
+
+    class Answers:
+        def __init__(self, name, *messages):
+            self.provider, self.model, self.thinking, self.reasoning_effort = name, name, None, None
+            self.messages, self.asked = list(messages), 0
+
+        async def chat(self, messages, tools=None, **kwargs):
+            self.asked += 1
+            return self.messages.pop(0)
+
+        def usage(self):
+            return f"{self.asked} calls"
+
+    def test_only_records_of_careful_facts_call_for_the_reading_model(self):
+        answer = lambda *calls: NS(content="", tool_calls=list(calls))  # noqa: E731
+        self.assertIsNone(simple.careful_record(answer(call(1, "click", {"element": "3"}))))
+        self.assertIsNone(simple.careful_record(answer(call(1, "record", {"facts": POSITIONS}))))
+        self.assertIsNone(simple.careful_record(answer(call(1, "record", {"facts": SPEC}))))
+        self.assertIsNone(simple.careful_record(NS(content="thinking aloud", tool_calls=None)))
+        self.assertIn("materials", simple.careful_record(answer(call(1, "record", {"facts": ERP}))))
+        self.assertIn("setup_fees", simple.careful_record(answer(call(1, "record", {"facts": {
+            **POSITIONS, "setup_fees": [{"position": "1", "fee_eur": "50,00"}]}}))))
+        self.assertIn("materials", simple.careful_record(answer(call(1, "record", ERP))))  # facts sent bare
+        broken = NS(content="", tool_calls=[NS(id="c1", type="function", function=NS(name="record", arguments="{"))])
+        self.assertIn("cannot be read", simple.careful_record(broken))
+        from dataclasses import fields
+        import facts
+        self.assertLessEqual(simple.CAREFUL_FACTS, {f.name for f in fields(facts.Facts)})
+
+    async def test_the_record_of_careful_facts_is_asked_again_from_the_reading_model_which_stays(self):
+        from llm import Stepped
+        step = NS(content="", tool_calls=[call(1, "click", {"element": "3"})])
+        hasty = NS(content="", tool_calls=[call(2, "record", {"facts": ERP})])
+        careful = NS(content="", tool_calls=[call(3, "record", {"facts": ERP})])
+        later = NS(content="", tool_calls=[call(4, "wait", {})])
+        hosted, reader, said = self.Answers("hosted", step, hasty), self.Answers("reader", careful, later), []
+        model = Stepped(hosted, reader, simple.careful_record, name="site-c", log=said.append)
+        self.assertEqual((model.provider, model.changed), ("hosted", False))
+        self.assertIs(await model.chat([{"role": "user", "content": "go"}], []), step)
+        self.assertIs(await model.chat([{"role": "user", "content": "go"}], []), careful)  # not the hasty one
+        self.assertIs(await model.chat([{"role": "user", "content": "go"}], []), later)
+        self.assertEqual((hosted.asked, reader.asked, model.provider, model.changed), (2, 2, "reader", True))
+        self.assertEqual(len(said), 1)
+        self.assertIn("about to record materials", said[0])
+
+    def test_every_agent_changes_on_its_own(self):
+        lead = NS(task=TASK, tabs={site: NS(page=NS(context=NS(browser=None))) for site in SITES}, credentials={},
+                  context=lambda: "context", collect_until=time.time() + 60, log=lambda *a: None)
+        hosted, reader = self.Answers("hosted"), self.Answers("reader")
+        agents = simple.site_agents(lead, Board(log=lambda *a: None), reader, "T-1", hosted)
+        self.assertEqual([type(a.model).__name__ for a in agents], ["Stepped"] * 4)
+        agents[2].model.changed = True
+        self.assertEqual([a.model.provider for a in agents], ["hosted", "hosted", "reader", "hosted"])
+        same = simple.site_agents(lead, Board(log=lambda *a: None), reader, "T-1")
+        self.assertTrue(all(a.model is reader for a in same))
 
 
 class OneAgentPerWebsite(unittest.TestCase):

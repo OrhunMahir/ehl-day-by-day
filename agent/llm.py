@@ -51,6 +51,39 @@ def _client_config(provider: str) -> tuple[str, str]:
     raise SystemExit(f"Unknown AGENT_PROVIDER {provider!r}; use one of {', '.join(DEFAULT_MODELS)}")
 
 
+class Stepped:
+    """The model of one agent that starts with one model and changes to another for good: at the first answer of
+    which `change_for` says why the other one should give it. That answer is thrown away and asked again from the
+    other model, so nothing of it is acted on. Callers use it like a `Model`."""
+
+    def __init__(self, first: "Model", then: "Model", change_for, name: str = "", log=print):
+        self.first, self.then, self.change_for, self.name, self.log = first, then, change_for, name, log
+        self.changed = first is then
+
+    @property
+    def active(self) -> "Model":
+        return self.then if self.changed else self.first
+
+    provider = property(lambda self: self.active.provider)
+    model = property(lambda self: self.active.model)
+    thinking = property(lambda self: self.active.thinking)
+    reasoning_effort = property(lambda self: self.active.reasoning_effort)
+
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None, **kwargs):
+        if self.changed:
+            return await self.then.chat(messages, tools, **kwargs)
+        message = await self.first.chat(messages, tools, **kwargs)
+        reason = self.change_for(message)
+        if not reason:
+            return message
+        self.changed = True
+        self.log(f"[{self.name}] {reason}: {self.then.provider}/{self.then.model} from here on")
+        return await self.then.chat(messages, tools, **kwargs)
+
+    def usage(self) -> str:
+        return self.active.usage()
+
+
 def _key_refused(status, error) -> bool:
     """The provider does not take this key (any more): unknown, not allowed, or out of credit. Waiting does not help."""
     return status in (401, 403) or (status == 429 and "insufficient_quota" in str(error))

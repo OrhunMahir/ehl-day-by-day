@@ -2,6 +2,34 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 01:48 · Branch stream-o-cheaper: agents start with Qwen and change to the OpenAI model for prices; a waiting agent is woken only by a new open item
+
+- `main` holds the state of the 100 run since pull request #11 (`108e9f3`). This branch starts from it and is an
+  experiment for cost and time; it is not for `main` before a test run has shown that the quality holds.
+- Changed (branch `stream-o-cheaper`):
+  - `agent/llm.py`: new `Stepped`, the model of one agent: it answers with a first model until `change_for` gives
+    a reason for one of its answers; that answer is thrown away and asked again from the second model, which then
+    stays.
+  - `agent/simple.py` (Julien's file): every website agent gets a `Stepped` of its own, Qwen without thinking
+    first, then `gpt-6.1-sol`. The reason to change is a `record` of one of `CAREFUL_FACTS`: materials, setup
+    fees, discount approvals and the rule records of the mails. Positions, quantity changes, withdrawals,
+    amendments, assignments and specification revisions stay with Qwen. No website is named: an agent whose website
+    holds none of the careful facts never changes.
+  - `agent/board.py`, `agent/browsing.py` (Julien's files): `Board.wait_for_work` and `work_version`. The `wait`
+    tool returns when the list of what is still needed has gained an item, not at every record of another agent;
+    it still returns after 45 s at the latest.
+  - `agent/tests/test_simple.py`: tests for both.
+- Why: in the 100 run all of the OpenAI cost falls into the first three minutes, about 130 calls of the four
+  agents with roughly 5,000 input tokens each. Each agent called `wait` three to nine times and was woken by every
+  record of the others, each waking a full call. In Julien's 73.1 run with Qwen only, the fields that came from the
+  tender portal and the specification were right.
+- Checked: 241 unit tests pass (1 skipped). Not run in the sandbox.
+- Risks, not measured: Qwen has to notice a setup fee in a Q&A answer by itself before the reading model is asked;
+  the assignments of keys to positions are recorded by Qwen; with Qwen on two websites the facts the ERP search
+  waits for may arrive later, so the run may take longer than the 100 run's 7:08.
+- For the others: J: `simple.py`, `board.py` and `browsing.py` changed as listed, on this branch only.
+- Next: one test run of this branch, started by Orhun; compare quality, cost and time with `run_f081cfe7e25825b6`.
+
 ## 2026-10-11 01:43 · Test run run_f081cfe7e25825b6: quality 100; stream-o-board-openai goes to main by pull request
 
 - Test run `run_f081cfe7e25825b6` (`4cead00`): quality 100, eligible, 7:08, 176 model calls, $2.17.

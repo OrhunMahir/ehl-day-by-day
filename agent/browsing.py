@@ -234,9 +234,10 @@ class BrowsingAgent:
             if self.board is None:
                 raise ValueError("Unknown tool wait")
             before = self.seen
-            changed = await self.board.wait(before, min(WAIT_SECONDS, max(1.0, self.deadline - time.time() - 10)))
+            # woken by a new open item, not by every record of the others: each waking is a model call
+            changed = await self.board.wait_for_work(before, min(WAIT_SECONDS, max(1.0, self.deadline - time.time() - 10)))
             if not changed:
-                return "No change on the board yet. Explore your website for what the open items will need, or wait again."
+                return "Nothing new is needed yet. Explore your website for what the open items will need, or wait again."
             self.seen = self.board.version
             return "The board changed:\n" + self.board.news(self.name, before)
         if name == "record":

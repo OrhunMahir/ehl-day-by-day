@@ -30,6 +30,7 @@ class Need:
     what: str
     rule: int | None = None
     positions: list[str] = field(default_factory=list)
+    catalogue_group: str | None = None  # a runtime ERP search key, separate from the task's wording
 
     def as_dict(self) -> dict:
         out = {"kind": self.kind, "site": self.site, "what": self.what}
@@ -37,6 +38,8 @@ class Need:
             out["rule"] = self.rule
         if self.positions:
             out["positions"] = self.positions
+        if self.catalogue_group:
+            out["catalogue_group"] = self.catalogue_group
         return out
 
 
@@ -44,8 +47,9 @@ class _Collector:
     def __init__(self):
         self.items: dict[tuple, Need] = {}
 
-    def add(self, kind, site, what, rule=None, position=None):
-        need = self.items.setdefault((kind, site, what), Need(kind, site, what, rule))
+    def add(self, kind, site, what, rule=None, position=None, catalogue_group=None):
+        need = self.items.setdefault((kind, site, what),
+                                    Need(kind, site, what, rule, catalogue_group=catalogue_group))
         if position is not None and position not in need.positions:
             need.positions.append(position)
 
@@ -83,6 +87,18 @@ def needs(facts: Facts, result) -> list[Need]:
         c.add("find", SPEC, "the specification revisions and which one is marked current", 2)
     elif sum(1 for r in facts.revisions if r.current) != 1:
         c.add("find", SPEC, "which specification revision the site marks as current/valid", 2)
+    if revision is not None:
+        # A known search key can be used while positions and technical attributes are still being recorded.
+        # Once positions are known, unrelated requirements no longer create ERP work.
+        wanted: dict[str, list[str]] = {}
+        for pos in facts.positions:
+            wanted.setdefault(norm_key(pos.requirement), []).append(pos.position)
+        relevant = ([r for r in revision.requirements if norm_key(r.requirement) in wanted]
+                    if facts.positions else revision.requirements)
+        for requirement in relevant:
+            if norm_key(requirement.catalogue_group) and not resolve.searched(facts, requirement):
+                for position in wanted.get(norm_key(requirement.requirement), [None]):
+                    _search_need(c, requirement.catalogue_group, position)
 
     lines = {norm_key(ln.position): ln for ln in result.lines}
     for p in result.omitted:
@@ -147,11 +163,21 @@ def _position(facts: Facts, revision, pos, ln, c: _Collector):
     if not norm_key(req.catalogue_group):
         c.add("find", SPEC, f"the Kataloggruppe of requirement {req.requirement} (the ERP search key)", 10, p)
     if ln.material is None:
+        for candidate in resolve.unknown_matching_materials(facts, req):
+            c.add("find", ERP, f"status (active/released?) of matching material {candidate.material_number}", 3, p,
+                  catalogue_group=req.catalogue_group or None)
         if not resolve.searched(facts, req):
-            c.add("find", ERP, f"search Kataloggruppe {req.catalogue_group or '(none stated)'} and record every "
-                               "candidate (also inactive ones and near misses)", 10, p)
+            if norm_key(req.catalogue_group):
+                _search_need(c, req.catalogue_group, p)
         return
     _material(facts, ln, c)
+
+
+def _search_need(c: _Collector, group: str, position: str | None = None):
+    c.add("find", ERP,
+          f"search Kataloggruppe {group}: record every result with the attributes the list shows; open the details "
+          "(status, stock, conditions, scales) of matching candidates and candidates not yet ruled out",
+          10, position, catalogue_group=group)
 
 
 def _material(facts: Facts, ln, c: _Collector):

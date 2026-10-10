@@ -5,6 +5,7 @@ elements, driven by element numbers. Nothing here knows any particular website; 
 import asyncio
 import io
 import re
+import time
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
@@ -23,6 +24,27 @@ READ_PAGES_MAX = 6  # pages per read_pages call
 READ_PAGES_EACH = 8000  # characters kept per page in read_pages
 FRAME_READ_SECONDS = 10  # reading one frame may take at most this long
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
+LOAD_SECONDS = 15
+STUCK_SECONDS = 8
+TARGET_SECONDS = 2
+ACTION_MILLISECONDS = 6000
+
+TARGET_STATE_JS = """el => {
+  if (!el.isConnected) return "stale element: it was removed; use look and choose again";
+  if (el.matches(":disabled") || el.closest('[aria-disabled="true"], [inert]')) return "element is disabled";
+  if (!(el.checkVisibility ? el.checkVisibility() : el.getClientRects().length)) return "element is not visible";
+  const dialogs = [...el.ownerDocument.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]')]
+    .filter(d => d.checkVisibility ? d.checkVisibility() : d.getClientRects().length);
+  const contains = (ancestor, child) => {
+    while (child) {
+      if (child === ancestor) return true;
+      child = child.parentNode || (child.getRootNode && child.getRootNode().host);
+    }
+    return false;
+  };
+  if (dialogs.some(d => !contains(d, el))) return "element is behind an open dialog; deal with the dialog first";
+  return "";
+}"""
 
 
 class _HtmlText(HTMLParser):
@@ -104,13 +126,22 @@ class Tab:
         self.files: dict[str, str] = {}  # downloaded file name -> text
         self.events: list[str] = []  # dialogs, downloads, new tabs since the last observation
         self.aid_frames: dict[str, object] = {}
+        self.next_aid = 0
+        self.frame_prefixes: dict[object, str] = {}
+        self.next_frame = 1
         self.last_text = ""
         self.last_status = 0  # HTTP status of the last page load in the main frame
+        self.last_method = "GET"
         self.scratch_pages: set = set()
         self.previous: list = []  # pages below the active popup, newest last
+        self.allow_recovery = True  # submission disables automatic reloads to preserve a partly completed form
+        self.loading: tuple[str, str, float] | None = None
+        self.loading_request = None
         self._attach(page)
 
     def _attach(self, page):
+        page.on("request", self._on_request)
+        page.on("requestfailed", self._on_request_failed)
         page.on("response", self._on_response)
         page.on("dialog", lambda dialog: asyncio.ensure_future(self._on_dialog(dialog)))
         page.on("download", lambda download: asyncio.ensure_future(self._on_download(download)))
@@ -182,13 +213,15 @@ class Tab:
         self.events.append("The active page had closed; opened the website again")
 
     def _attach_page_only(self, page):
+        page.on("request", self._on_request)
+        page.on("requestfailed", self._on_request_failed)
         page.on("response", self._on_response)
         page.on("dialog", lambda dialog: asyncio.ensure_future(self._on_dialog(dialog)))
         page.on("download", lambda download: asyncio.ensure_future(self._on_download(download)))
 
     async def settle(self):
         try:
-            await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+            await self.page.wait_for_load_state("domcontentloaded", timeout=LOAD_SECONDS * 1000)
         except Exception:  # noqa: BLE001
             pass
         await asyncio.sleep(0.4)
@@ -201,22 +234,59 @@ class Tab:
             except asyncio.TimeoutError:
                 pass
 
-    def _on_response(self, response):
+    def _main_document(self, request):
         try:
-            if response.request.resource_type == "document" and response.frame == self.page.main_frame:
-                self.last_status = response.status
+            return request.resource_type == "document" and request.frame == self.page.main_frame
         except Exception:  # noqa: BLE001
-            pass
+            return False
+
+    def _on_request(self, request):
+        if self._main_document(request):
+            self.loading = (request.url, request.method, time.monotonic())
+            self.loading_request = request
+
+    def _on_request_failed(self, request):
+        if request is self.loading_request:
+            self.loading = self.loading_request = None
+
+    def _on_response(self, response):
+        if self._main_document(response.request):
+            self.last_status = response.status
+            self.last_method = response.request.method
+            if response.request is self.loading_request:
+                self.loading = self.loading_request = None
+
+    async def _unstick(self, force=False):
+        """Retry an unanswered GET, never replay a form submission or reload while submission owns the tab."""
+        if not self.allow_recovery:
+            return False
+        pending = self.loading
+        if pending and (pending[1] != "GET" or (not force and time.monotonic() - pending[2] < STUCK_SECONDS)):
+            return False
+        if not pending and (not force or self.last_method != "GET"):
+            return False
+        target = pending[0] if pending else self.page.url
+        if not origin(target):
+            return False
+        self.loading = self.loading_request = None
+        try:
+            await self.page.goto(target, wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
+            self.events.append("An unanswered page load was requested again")
+        except Exception as error:  # noqa: BLE001
+            self.events.append(f"Navigation retry failed: {str(error).splitlines()[0]}")
+        return True
 
     async def _retry_server_error(self, attempts: int = 2):
         """Flaky server error pages usually work on a retry: reload, at most `attempts` times."""
+        if not self.allow_recovery or self.last_method != "GET":
+            return
         for attempt in range(attempts):
             if self.last_status < 500:
                 return
             status = self.last_status
             await asyncio.sleep(1.5 * (attempt + 1))
             try:
-                await self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                await self.page.reload(wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
                 self.events.append(f"The page answered HTTP {status}; reloaded it")
             except Exception as error:  # noqa: BLE001
                 self.events.append(f"The page answered HTTP {status}; reload failed: {str(error).splitlines()[0]}")
@@ -227,26 +297,13 @@ class Tab:
     async def observe(self, offset: int = 0) -> str:
         """The page as text: URL, title, each frame's content with numbered elements, and recent events."""
         await self._ensure_open()
+        await self._unstick()
         await self.settle()
         await self._retry_server_error()
-        parts, start = [], 0
-        self.aid_frames = {}
-        for index, frame in enumerate(self.page.frames):
-            prefix = "" if index == 0 else f"f{index}."
-            try:
-                result = await asyncio.wait_for(  # a frame stuck mid-navigation must not block the whole view
-                    frame.evaluate(OBSERVE_JS, {"prefix": prefix, "start": start if index == 0 else 0, "full": True}),
-                    timeout=FRAME_READ_SECONDS)
-            except Exception as error:  # noqa: BLE001
-                reason = "it did not respond in time" if isinstance(error, asyncio.TimeoutError) else error
-                parts.append(f"--- frame {index} ({frame.url}) could not be read: {reason}")
-                continue
-            if index == 0:
-                start = result["next"]
-                parts.append(result["text"])
-            elif result["text"].strip():
-                parts.append(f"\n--- frame f{index} (url {frame.url}) ---\n{result['text']}")
-            self.aid_frames[prefix] = frame
+        parts, main_read = await self._read_frames()
+        if not main_read and await self._unstick(force=True):
+            await self.settle()
+            parts, main_read = await self._read_frames()
         text = "\n".join(parts)
         self.last_text = text
         header = f"[{self.site_id}] URL: {self.page.url}\nTitle: {await self._title()}\n"
@@ -260,50 +317,144 @@ class Tab:
             body += f"\n... (page continues: {len(text) - offset - MAX_OBSERVATION} more characters; call read_more with offset={offset + MAX_OBSERVATION})"
         return header + body
 
+    async def _read_frames(self):
+        parts, main_read = [], False
+        self.aid_frames = {}
+        for index, frame in enumerate(self.page.frames):
+            if index == 0:
+                prefix = ""
+            else:
+                if frame not in self.frame_prefixes:
+                    self.frame_prefixes[frame] = f"f{self.next_frame}."
+                    self.next_frame += 1
+                prefix = self.frame_prefixes[frame]
+            try:
+                result = await asyncio.wait_for(  # a frame stuck mid-navigation must not block the whole view
+                    frame.evaluate(OBSERVE_JS, {"prefix": prefix, "start": self.next_aid, "full": True}),
+                    timeout=FRAME_READ_SECONDS)
+            except Exception as error:  # noqa: BLE001
+                reason = "it did not respond in time" if isinstance(error, asyncio.TimeoutError) else error
+                parts.append(f"--- frame {index} ({frame.url}) could not be read: {reason}")
+                continue
+            if index == 0:
+                main_read = True
+                parts.append(result["text"])
+            elif result["text"].strip():
+                parts.append(f"\n--- frame {prefix[:-1]} (url {frame.url}) ---\n{result['text']}")
+            self.next_aid = max(self.next_aid, result["next"])
+            self.aid_frames[prefix] = frame
+        return parts, main_read
+
     async def _title(self):
         try:
-            return await self.page.title()
+            return await asyncio.wait_for(self.page.title(), timeout=TARGET_SECONDS)
         except Exception:  # noqa: BLE001
             return ""
 
     def _locate(self, aid: str):
+        """Compatibility locator; public actions use find() to reject missing or ambiguous targets."""
         aid = aid.strip().strip("[]")
         if not re.fullmatch(r"(f\d+\.)?\d+", aid):  # the model named the element by its text instead of its number
             return self.page.get_by_text(aid.strip('"'), exact=False).first
         prefix = aid[: aid.index(".") + 1] if "." in aid else ""
-        frame = self.aid_frames.get(prefix, self.page.main_frame)
-        return frame.locator(f'[data-aid="{aid}"]').first
+        frame = self.aid_frames.get(prefix)
+        if frame is None:
+            raise ValueError(f"Stale element {aid}: its frame is no longer in the current view; use look")
+        return frame.locator(f'[data-aid="{aid}"]')
 
-    async def click(self, aid: str) -> str:
+    async def find(self, aid: str):
+        """Resolve a number or an unambiguous label; never choose the first of several matching controls."""
         await self._ensure_open()
-        locator = self._locate(aid)
+        aid = str(aid).strip().strip("[]")
+        if re.fullmatch(r"(f\d+\.)?\d+", aid):
+            locator = self._locate(aid)
+            count = await locator.count()
+            if not count:
+                raise ValueError(f"Stale element {aid}: it is no longer present; use look and choose again")
+            if count != 1:
+                raise ValueError(f"Ambiguous element {aid}: its marker was duplicated; use look and choose again")
+            return locator
+        text = aid.strip('"')
+        tiers = (
+            (self.page.get_by_role("button", name=text, exact=True), self.page.get_by_role("link", name=text, exact=True)),
+            (self.page.get_by_label(text, exact=True),),
+            (self.page.get_by_text(text, exact=True),),
+            (self.page.get_by_role("button", name=text), self.page.get_by_role("link", name=text)),
+        )
+        for tier in tiers:
+            matches = []
+            for locator in tier:
+                visible = locator.filter(visible=True)
+                count = await visible.count()
+                if count:
+                    matches.append((visible, count))
+            count = sum(n for _, n in matches)
+            if count > 1:
+                raise ValueError(f"Ambiguous element {text!r}: {count} controls match; use the number from look")
+            if count == 1:
+                return matches[0][0]
+        raise ValueError(f"No visible element named {text!r}; use look and choose its number")
+
+    async def resolve_target(self, aid: str):
+        """Capture this DOM node before a multi-field operation changes the page. Replacement is a stale target."""
+        locator = await asyncio.wait_for(self.find(aid), timeout=TARGET_SECONDS)
+        handle = await locator.element_handle(timeout=TARGET_SECONDS * 1000)
+        if handle is None:
+            raise ValueError(f"Stale element {aid}; use look and choose again")
+        number = str(aid).strip().strip("[]")
+        if re.fullmatch(r"(f\d+\.)?\d+", number):
+            assigned = await asyncio.wait_for(handle.evaluate("el => globalThis[Symbol.for('agent-observation-ids')]?.ids.get(el)"),
+                                              timeout=TARGET_SECONDS)
+            if assigned != number:
+                raise ValueError(f"Stale element {aid}: the DOM marker was copied to a different node; use look")
+        return handle
+
+    async def check_target(self, handle):
         try:
-            await locator.scroll_into_view_if_needed(timeout=3000)
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            await locator.click(timeout=6000)
-        except Exception:  # noqa: BLE001
-            await locator.evaluate("el => el.click()")  # covered or off-screen: a DOM click still works
+            frame = await asyncio.wait_for(handle.owner_frame(), timeout=TARGET_SECONDS)
+            if frame is None or frame.page is not self.page:
+                raise ValueError("Stale element: its page is no longer active; use look")
+            reason = await asyncio.wait_for(handle.evaluate(TARGET_STATE_JS), timeout=TARGET_SECONDS)
+        except ValueError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            raise ValueError("Stale element: it could not be checked; use look and choose again") from error
+        if reason:
+            raise ValueError(reason)
+
+    async def click_target(self, handle) -> str:
+        """Only a physical, actionable click succeeds. Disabled, stale or covered controls raise an error."""
+        await self.check_target(handle)
+        await handle.click(timeout=ACTION_MILLISECONDS)
         await asyncio.sleep(0.6)
         return await self.observe()
 
+    async def click(self, aid: str) -> str:
+        return await self.click_target(await self.resolve_target(aid))
+
     async def fill(self, aid: str, text: str, submit: bool = False) -> str:
-        await self._ensure_open()
-        locator = self._locate(aid)
-        await locator.fill(text, timeout=6000)
+        handle = await self.resolve_target(aid)
+        await self.check_target(handle)
+        kind = await asyncio.wait_for(handle.evaluate("el => el.tagName === 'INPUT' ? el.type : ''"), timeout=TARGET_SECONDS)
+        if kind in ("checkbox", "radio"):
+            value = str(text).strip().lower()
+            if value not in ("true", "false", "checked", "unchecked", "1", "0"):
+                raise ValueError("For checkbox/radio, type true or false to set its checked state")
+            await handle.set_checked(value in ("true", "checked", "1"), timeout=ACTION_MILLISECONDS)
+        else:
+            await handle.fill(text, timeout=ACTION_MILLISECONDS)
         if submit:
-            await locator.press("Enter")
+            await handle.press("Enter", timeout=ACTION_MILLISECONDS)
             await asyncio.sleep(0.6)
         return await self.observe()
 
     async def select(self, aid: str, option: str) -> str:
-        await self._ensure_open()
-        locator = self._locate(aid)
+        handle = await self.resolve_target(aid)
+        await self.check_target(handle)
         try:
-            await locator.select_option(label=option, timeout=4000)
+            await handle.select_option(label=option, timeout=4000)
         except Exception:  # noqa: BLE001
-            await locator.select_option(value=option, timeout=4000)
+            await handle.select_option(value=option, timeout=4000)
         await asyncio.sleep(0.3)
         return await self.observe()
 
@@ -317,7 +468,7 @@ class Tab:
         await self._ensure_open()
         for attempt in range(3):
             try:
-                response = await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                response = await self.page.goto(url, wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
                 if response is None or response.status < 500:
                     break
             except Exception as error:  # noqa: BLE001
@@ -330,7 +481,7 @@ class Tab:
 
     async def back(self) -> str:
         await self._ensure_open()
-        await self.page.go_back()
+        await self.page.go_back(wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
         return await self.observe()
 
     async def _fetch_bytes(self, url: str) -> tuple[int, dict, bytes]:
@@ -345,16 +496,17 @@ class Tab:
             return response.status, response.headers, await response.body()
 
     async def _render_readonly(self, url: str, html: bytes | None = None) -> str:
-        """A page rendered in a background tab with this tab's session, as text: hidden decoys are filtered like in
-        any page view. Element numbers are left out (the tab closes); links keep their target."""
+        """Read a selected page with shared cookies and same-origin session storage. Gates remain explicit;
+        a background read cannot accept a dialog or prove that it reached the requested document."""
         scratch = await self.page.context.new_page()
         self.scratch_pages.add(scratch)
         try:
+            await self.copy_session_to(scratch, url)
             if html is not None:  # already fetched: serve it from memory, so the address is not requested twice
                 async def serve(route):
                     await route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
                 await scratch.route(lambda address: address == url, serve, times=1)
-            await scratch.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await scratch.goto(url, wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
             await asyncio.sleep(0.5)
             parts = []
             for index, frame in enumerate(scratch.frames):
@@ -363,11 +515,39 @@ class Tab:
                         frame.evaluate(OBSERVE_JS, {"prefix": f"x{index}.", "start": 0, "full": True}),
                         timeout=FRAME_READ_SECONDS)
                     parts.append(result["text"])
+                    gate = await asyncio.wait_for(frame.evaluate("""() => {
+                      const visible = el => el.checkVisibility ? el.checkVisibility() : el.getClientRects().length > 0;
+                      const modal = [...document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]')].some(visible);
+                      const password = [...document.querySelectorAll('input[type="password"]')].filter(visible);
+                      const login = password.some(el => el.form && [...el.form.querySelectorAll('input')].some(
+                        input => visible(input) && !['password','hidden','checkbox','radio','submit','button'].includes(input.type)));
+                      return modal ? 'open dialog' : login ? 'sign-in form' : '';
+                    }"""), timeout=TARGET_SECONDS)
+                    if gate:
+                        parts.insert(0, f"ACCESS GATE ({gate}): this background read is incomplete. Use goto on this URL "
+                                        "and handle the gate in the active tab; do not treat its document as absent.")
                 except Exception as error:  # noqa: BLE001
                     parts.append(f"(a frame could not be read: {type(error).__name__})")
             return re.sub(r"\[x\d+\.\d+\] ", "", "\n".join(parts))
         finally:
             await scratch.close()
+            self.scratch_pages.discard(scratch)
+
+    async def copy_session_to(self, page, target_url: str) -> bool:
+        """Seed a new page's sessionStorage for this origin only, before navigation; no values are returned/logged.
+        Cookies/localStorage are the context owner's responsibility. Gates must still be checked after loading."""
+        if not origin(target_url) or origin(target_url) != origin(self.page.url):
+            return False
+        try:
+            storage = await asyncio.wait_for(self.page.evaluate("() => Object.fromEntries(Object.entries(sessionStorage))"),
+                                             timeout=TARGET_SECONDS)
+            import json
+            seed = json.dumps({"origin": origin(target_url), "values": storage}, ensure_ascii=True)
+            await page.add_init_script("(() => { const seed = " + seed + "; if (location.origin === seed.origin) "
+                                       "for (const [k,v] of Object.entries(seed.values)) sessionStorage.setItem(k,v); })()")
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     async def read_pages(self, urls: list[str]) -> str:
         """Several pages the model chose, read in parallel in background tabs and returned together."""
@@ -419,27 +599,34 @@ class Tab:
     async def collect_pages(self, aid: str, max_pages: int = 10) -> str:
         """Follows a paging control the model chose ("next page", "load more") until it disappears or `max_pages`
         views are collected, and joins them. The control is found again on each new view by its visible text."""
-        first = await self.observe()
-        match = re.search(r"^\[" + re.escape(aid.strip().strip("[]")) + r"\] (link|button|clickable) \"([^\"]*)\"", self.last_text, re.M)
-        if not match or not match.group(2).strip():
-            return f"Element {aid} is not a link or button with text on this page.\n" + first
-        kind, label = match.group(1), match.group(2)
+        # Capture the model's selected node before observing; a new snapshot must not reinterpret its number.
+        target = await self.resolve_target(aid)
+        selected = await asyncio.wait_for(target.evaluate("""el => ({
+          kind: el.tagName === 'A' ? 'link' : el.tagName === 'BUTTON' || ['submit','button'].includes(el.type) ? 'button' : el.getAttribute('role') || 'clickable',
+          label: (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\\s+/g,' ').trim()
+        })"""), timeout=TARGET_SECONDS)
+        kind, label = selected["kind"], selected["label"]
+        if kind not in ("link", "button", "clickable") or not label:
+            raise ValueError(f"Element {aid} is not a paging link or button with a label")
+        await self.observe()
         views, seen = [self.last_text], set(self.last_text.splitlines())
         urls = [self.page.url]
-        current = aid
         for _ in range(max(1, min(int(max_pages), 30)) - 1):
             before = self.last_text
-            await self.click(current)
+            await self.click_target(target)
             if self.last_text == before:
                 break
             fresh = [line for line in self.last_text.splitlines() if line not in seen]
             seen.update(fresh)
             views.append("\n".join(fresh))
             urls.append(self.page.url)
-            again = re.search(r"^\[([\w.]+)\] " + kind + r" \"" + re.escape(label) + r"\"", self.last_text, re.M)
+            again = re.findall(r"^\[([\w.]+)\] " + kind + r" \"" + re.escape(label) + r"\"", self.last_text, re.M)
             if not again:
                 break
-            current = again.group(1)
+            if len(again) != 1:
+                self.events.append("Paging stopped: several controls have the selected label; choose one with look")
+                break
+            target = await self.resolve_target(again[0])
         joined = "\n".join(f"--- view {i + 1} ({u}) ---\n{v}" for i, (u, v) in enumerate(zip(urls, views)))
         self.last_text = joined
         note = (f"Collected {len(views)} views by following {kind} \"{label}\". Later views show only lines that are "

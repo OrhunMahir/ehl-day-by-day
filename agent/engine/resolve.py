@@ -296,14 +296,16 @@ def requirement_complete(req: Requirement) -> bool:
 
 
 def searched(facts: Facts, req: Requirement) -> bool:
-    """The ERP was searched for this requirement: its Kataloggruppe is recorded as searched or a candidate of that
-    group is known. A requirement without a Kataloggruppe was not read completely (rule 10 names one for each), so
-    no search of it counts as conclusive."""
+    """Only an explicitly completed catalogue-group search is conclusive; a known candidate is not coverage."""
     group = norm_key(req.catalogue_group)
     if not group:
         return False
-    return (group in {norm_key(g) for g in facts.searched_groups}
-            or any(norm_key(m.catalogue_group) == group for m in facts.materials))
+    return group in {norm_key(g) for g in facts.searched_groups}
+
+
+def unknown_matching_materials(facts: Facts, req: Requirement) -> list[Material]:
+    """Matching attributes with an unread status cannot prove either an eligible material or its absence."""
+    return [m for m in facts.materials if m.active is None and matches(m, req)]
 
 
 def select_material(facts: Facts, req: Requirement, position: str, issues: list[str]) -> Material | None:
@@ -311,10 +313,9 @@ def select_material(facts: Facts, req: Requirement, position: str, issues: list[
     hits = sorted((m for m in facts.materials if matches(m, req)), key=lambda m: norm_key(m.material_number))
     active = [m for m in hits if m.active is True]
     if not active:
-        unknown = [m for m in hits if m.active is None]
+        unknown = unknown_matching_materials(facts, req)
         if unknown:
             issues.append(f"position {position}: matching material {unknown[0].material_number} has unknown status")
-            active = unknown
     if len(active) > 1:
         numbers = ", ".join(m.material_number for m in active)
         issues.append(f"position {position}: several active materials match ({numbers}); taking the first")

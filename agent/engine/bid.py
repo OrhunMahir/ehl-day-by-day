@@ -81,11 +81,12 @@ def evaluate(facts: Facts) -> BidResult:
             line.pieces = None
         if req is not None and resolve.requirement_complete(req):
             line.material = resolve.select_material(facts, req, pos.position, issues)
-            if line.material is None and resolve.searched(facts, req):
+            if (line.material is None and resolve.searched(facts, req)
+                    and not resolve.unknown_matching_materials(facts, req)):
                 no_match.append(pos.position)
                 issues.append(f"position {pos.position}: no active material matches requirement {req.requirement}; "
                               f"closest: {resolve.closest(facts, req)}. Re-check these values before a no_bid.")
-            elif line.material is None:
+            elif line.material is None and not resolve.searched(facts, req):
                 issues.append(f"position {pos.position}: Kataloggruppe {req.catalogue_group or '(none)'} not "
                               "searched in the ERP yet, material unknown")
         elif req is not None:

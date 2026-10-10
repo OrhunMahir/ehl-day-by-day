@@ -66,6 +66,7 @@ class Needs(unittest.TestCase):
     def test_examples(self):
         f = core_facts()
         f.director_address = ""
+        f.searched_groups = ["G-A"]
         f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
         f.materials[0] = replace(f.materials[0], conditions=[])
         needs = {n["what"]: n for n in evaluate(f).needed()}

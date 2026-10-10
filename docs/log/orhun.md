@@ -2,6 +2,23 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 21:09 · Integrated research, pricing and submission fixes on steam-oc
+
+- Changed: lead scheduling, browser actions and observations, partial fact merging, material eligibility,
+  partial-bid recovery, form submission and receipt evidence. Reports have individual recovery identifiers;
+  research and recording finish before the answer is frozen for signing. Added offline regressions and
+  `docs/steam-oc-readiness.md`. Agent: codex, working across all streams with Orhun's authorization.
+- Why: earlier signed answers omitted unresolved positions; incomplete catalogue coverage could cause a premature
+  no-bid. Stale controls, queued model calls and late records also threatened timely form completion.
+- Checked: the complete offline suite ran 260 tests: 259 passed, one live-site survey skipped. Two invented
+  positions were calculated, entered and signed in a local Chromium integration test. `git diff --check` passed.
+- Learned: ready facts do not prove that pending research is finished. A final recording barrier and a frozen
+  answer are needed before submission; position changes on the same URL must count as form progress.
+- For the others: all changes are on `steam-oc`, including J/I/O files as authorized by the captain. The
+  `add_facts` tool acknowledges recovered reports individually with `recorded_reports`. Keep one run operator.
+- Next: commit and push this candidate, then wait. Orhun explicitly postponed the Atira test run; no live run,
+  scored submission or cancellation has been started for this candidate.
+
 ## 2026-10-10 17:08 · Reports recorded in the background, a form step with later fields in one call
 
 - Changed: `agent/agent.py`: when a report comes back, a separate model call records its facts into the

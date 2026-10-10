@@ -30,6 +30,7 @@ def material(number, group, bore, stroke, price):
 def facts_with(searched, materials):
     return {
         "tender_reference": "T-1", "scenario_date": "2030-01-01",
+        "director_address": "director@invented.invalid", "bidder_domain": "invented.invalid",
         "positions": [{"position": "1", "quantity": 4, "requirement": "R1"},
                       {"position": "2", "quantity": 2, "requirement": "R2"}],
         "revisions": [{"revision": "A", "current": True, "requirements": [
@@ -59,16 +60,23 @@ class TheSchedule(unittest.TestCase):
 
     def test_a_scored_run_works_with_the_time_the_platform_gives(self):
         now = time.time()
-        self.assertEqual(self.minutes({**TASK, "expires_at": (now + 1200) * 1000}, now), [9.0, 9.0, 20.0])
+        self.assertEqual(self.minutes({**TASK, "expires_at": (now + 1200) * 1000}, now), [10.0, 13.0, 20.0])
 
     def test_a_run_that_expires_later_still_plans_with_twenty_minutes(self):
         now = time.time()
-        self.assertEqual(self.minutes({**TASK, "expires_at": (now + 7200) * 1000}, now), [9.0, 9.0, 20.0])
-        self.assertEqual(self.minutes(TASK, now), [9.0, 9.0, 20.0])
+        self.assertEqual(self.minutes({**TASK, "expires_at": (now + 7200) * 1000}, now), [10.0, 13.0, 20.0])
+        self.assertEqual(self.minutes(TASK, now), [10.0, 13.0, 20.0])
+
+    def test_a_longer_run_can_be_asked_for_but_never_beyond_the_platforms_time(self):
+        now = time.time()
+        with patch.dict("os.environ", {"AGENT_RUN_SECONDS": "3600"}):
+            self.assertEqual(self.minutes(TASK, now), [36.0, 39.0, 60.0])  # local run
+            self.assertEqual(self.minutes({**TASK, "expires_at": (now + 7200) * 1000}, now), [36.0, 39.0, 60.0])
+            self.assertEqual(self.minutes({**TASK, "expires_at": (now + 1200) * 1000}, now), [10.0, 13.0, 20.0])  # scored
 
     def test_a_run_close_to_its_end_plans_with_what_is_left(self):
         now = time.time()
-        self.assertEqual(self.minutes({**TASK, "expires_at": (now + 300) * 1000}, now), [2.2, 2.2, 5.0])
+        self.assertEqual(self.minutes({**TASK, "expires_at": (now + 300) * 1000}, now), [1.7, 2.2, 5.0])
 
 
 class AddingFacts(unittest.TestCase):
@@ -124,7 +132,10 @@ class FakePage:
         self.opened = 0
         self.fails = False
 
-    async def new_context(self):
+    async def storage_state(self):
+        return {"cookies": [], "origins": []}
+
+    async def new_context(self, storage_state=None):
         if self.fails:
             raise RuntimeError("no further context")
         self.opened += 1
@@ -172,16 +183,16 @@ class SeveralInvestigationsOfOneWebsite(unittest.IsolatedAsyncioTestCase):
             return time.time() - started
 
     async def test_they_run_side_by_side_each_in_a_tab_of_its_own(self):
-        took = await self.ask(3)
+        took = await self.ask(agent.TABS_PER_SITE)
         self.assertLess(took, 0.45)
-        self.assertEqual(len({id(tab) for tab, _, _ in SlowSubAgent.spans}), 3)
-        self.assertEqual(self.page.opened, 2)
+        self.assertEqual(len({id(tab) for tab, _, _ in SlowSubAgent.spans}), agent.TABS_PER_SITE)
+        self.assertEqual(self.page.opened, agent.TABS_PER_SITE - 1)
 
     async def test_free_tabs_are_used_again_before_new_ones_are_opened(self):
-        await self.ask(3)
-        await self.ask(3)
-        self.assertEqual(self.page.opened, 2)
-        self.assertEqual(len(self.lead.free_tabs["erp"]), 3)
+        await self.ask(agent.TABS_PER_SITE)
+        await self.ask(agent.TABS_PER_SITE)
+        self.assertEqual(self.page.opened, agent.TABS_PER_SITE - 1)
+        self.assertEqual(len(self.lead.free_tabs["erp"]), agent.TABS_PER_SITE)
 
     async def test_no_more_than_the_limit_work_one_website_at_once(self):
         await self.ask(agent.TABS_PER_SITE + 2)
@@ -242,6 +253,9 @@ class QuickSubAgent:
 
 
 class Signs:
+    accepted = True
+    receipt = "Invented signed receipt"
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -259,7 +273,7 @@ class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
         orchestrator.collect_until = orchestrator.submit_from = time.time() + investigate_for
         orchestrator.deadline = time.time() + 600
         with patch.object(agent, "BrowsingAgent", QuickSubAgent), patch.object(agent, "SubmissionAgent", Signs), \
-                patch.object(agent, "Tab", FakeTab):
+                patch.object(agent, "Tab", FakeTab), patch.object(agent, "MIN_INVESTIGATION_SECONDS", 0):
             await asyncio.wait_for(orchestrator.run(), timeout=20)
         return orchestrator
 
@@ -305,6 +319,104 @@ class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
         orchestrator = await self.run_with(model, investigate_for=0.2)
         self.assertEqual([p["position"] for p in orchestrator.submitted["positions"]], ["1", "2"])
         self.assertNotIn("add_facts", model.lead_calls)
+
+
+class ASecondSubmissionAttempt(unittest.IsolatedAsyncioTestCase):
+    async def test_it_is_told_to_continue_where_the_form_is(self):
+        tasks = []
+        entered_at_start = []
+
+        class Remembers:
+            def __init__(self, model, sites, credentials, task, context, deadline, log):
+                tasks.append(task)
+                self.entered_sites = set()
+
+            async def run(self):
+                entered_at_start.append(set(self.entered_sites))
+                self.entered_sites.add("portal")
+                return "report"
+
+        task = {**TASK, "access": [{"siteId": "portal", "url": "https://portal.example.test"}],
+                "submission": {"kind": "site", "siteId": "portal"}}
+        orchestrator = agent.Orchestrator(task, None, {"portal": FakeTab("portal", FakePage())}, None, time.time())
+        orchestrator.log = lambda text: None
+        with patch.object(agent, "SubmissionAgent", Remembers):
+            await orchestrator.submit({"decision": "bid"}, "")
+            await orchestrator.submit({"decision": "bid"}, "")
+        self.assertNotIn("EARLIER ATTEMPT", tasks[0])
+        self.assertIn("EARLIER ATTEMPT", tasks[1])
+        self.assertIn("do not go back", tasks[1])
+        self.assertEqual(entered_at_start, [set(), {"portal"}])
+
+
+class TheFirstRoundIsShorter(unittest.IsolatedAsyncioTestCase):
+    async def test_first_investigations_get_less_time_than_follow_ups(self):
+        deadlines = []
+
+        class Notes:
+            def __init__(self, model, tabs, credentials, task, context, name, deadline, log):
+                deadlines.append(deadline - time.time())
+
+            async def run(self):
+                return "report"
+
+        task = {**TASK, "access": [{"siteId": "erp", "url": "https://erp.example.test"}]}
+        orchestrator = agent.Orchestrator(task, None, {"erp": FakeTab("erp", FakePage())}, None, time.time())
+        orchestrator.log = lambda text: None
+        with patch.object(agent, "BrowsingAgent", Notes), patch.object(agent, "Tab", FakeTab):
+            orchestrator.rounds = 1
+            await orchestrator.investigate("erp", "first job")
+            orchestrator.rounds = 2
+            await orchestrator.investigate("erp", "follow-up")
+        self.assertAlmostEqual(deadlines[0], agent.FIRST_ROUND_SECONDS, delta=2)
+        self.assertAlmostEqual(deadlines[1], agent.INVESTIGATION_SECONDS, delta=2)
+
+    async def test_the_recorder_asks_its_own_model(self):
+        asked = []
+
+        class Named:
+            def __init__(self, name):
+                self.name = name
+
+            async def chat(self, messages, tools, **kwargs):
+                asked.append(self.name)
+                return tool_call("add_facts", {"facts": facts_with(["G1"], [MATCH_1])})
+
+        orchestrator = agent.Orchestrator(TASK, None, {"erp": None}, Named("lead"), time.time(),
+                                          worker_model=Named("worker"), recorder_model=Named("recorder"))
+        orchestrator.log = lambda text: None
+        await orchestrator.record("erp", "report")
+        self.assertEqual(asked, ["recorder"])
+        self.assertEqual(len(orchestrator.builder.data["materials"]), 1)
+
+
+class AWebsiteThatDoesNotAnswerAtTheStart(unittest.IsolatedAsyncioTestCase):
+    class Page:
+        def __init__(self, failures):
+            self.failures, self.attempts, self.url = failures, 0, "about:blank"
+            self.context = self
+
+        async def goto(self, url, **kwargs):
+            self.attempts += 1
+            if self.attempts <= self.failures:
+                raise TimeoutError("Page.goto: Timeout exceeded")
+            self.url = url
+
+        def on(self, *args):
+            pass
+
+    async def test_it_is_tried_again_and_the_run_goes_on(self):
+        page = self.Page(failures=1)
+        tab = await agent.open_site("mail", "https://mail.example.test/inbox", page)
+        self.assertEqual(page.attempts, 2)
+        self.assertEqual(tab.home, "https://mail.example.test")
+
+    async def test_a_site_that_never_opens_still_gets_its_tab(self):
+        page = self.Page(failures=99)
+        tab = await agent.open_site("mail", "https://mail.example.test/inbox", page)
+        self.assertEqual(page.attempts, agent.START_ATTEMPTS)
+        self.assertEqual(tab.home, "https://mail.example.test")
+        self.assertEqual(agent.Tab.homes["mail"], "https://mail.example.test")
 
 
 if __name__ == "__main__":

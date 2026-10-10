@@ -102,6 +102,7 @@ class RevisionAndMaterial(unittest.TestCase):
 
     def test_unsearched_group_is_not_a_no_bid(self):
         f = core_facts()
+        f.searched_groups = ["G-A"]
         f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
         result = evaluate(f)
         self.assertEqual(result.answer["decision"], "bid")
@@ -197,6 +198,7 @@ class Discount(unittest.TestCase):
 
     def test_threshold_with_a_position_not_priced_yet_is_flagged(self):   # rule 16
         f = core_facts()
+        f.searched_groups = ["G-A"]
         f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]   # position 2 not searched yet
         result = evaluate(f)
         self.assertEqual(result.answer["discount_percent"], 0)                # 12 x 90 = 1080 < 3000, for now

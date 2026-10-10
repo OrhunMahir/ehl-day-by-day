@@ -677,7 +677,8 @@ FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you 
 - Materials: every candidate from the ERP search, also inactive ones and near misses, with status, attributes,
   stock, lead times, carton size, masses in kg (625 g = 0.625), metal index code, setup fee and every price
   condition with its validity, currency, FX key, price unit and all quantity scales. List every Kataloggruppe you
-  searched in searched_groups, also when the search found nothing.
+  searched completely in searched_groups, also when the search found nothing. A known candidate or a partly read
+  result list is not a completed search. Leave active out until the ERP explicitly states the material's status.
 - Keys that tie a position to a rule record (Konditionsgruppe, packaging tariff, delivery commitment, setup pool,
   project bonus) go into assignments, wherever you read them.
 - Mail rule records: one record per key per mail. Konditionsgruppe wording -> scope base / base_and_surcharge /
@@ -724,24 +725,28 @@ def _ident(item: dict, paths: tuple[str, ...]) -> tuple:
             value = value.get(part) if isinstance(value, dict) else None
         if value is None or value == "":
             out.append(None)
-        elif path.endswith("date"):
+        elif path.endswith("date") or path in ("valid_from", "valid_to"):
             try:
                 out.append(when(value).isoformat())
             except ValueError:
                 out.append(norm_key(str(value)))
+        elif path in ("min_quantity", "price_unit"):
+            out.append(dec(value))
         else:
             out.append(norm_key(str(value)))
     return tuple(out)
 
 
 def _merge_fields(old: dict, new: dict) -> dict:
-    """Fields of `new` override `old`; a null never erases a known value; requirements merge by their id."""
+    """Fields of `new` override `old`; nested requirements, condition windows and scales grow by identity."""
     merged = dict(old)
+    nested = {"requirements": ("requirement",), "conditions": ("valid_from", "valid_to"),
+              "scales": ("min_quantity",)}
     for name, value in new.items():
         if value is None:
             continue
-        if name == "requirements" and isinstance(value, list) and isinstance(old.get(name), list):
-            merged[name] = _merge_list(old[name], value, ("requirement",), field_merge=True)[0]
+        if name in nested and isinstance(value, list) and isinstance(old.get(name), list):
+            merged[name] = _merge_list(old[name], value, nested[name], field_merge=True)[0]
         else:
             merged[name] = value
     return merged
@@ -779,8 +784,10 @@ class FactsBuilder:
     `add(update)` merges one update and checks what it changes at once: an update with a bad field is rejected
     whole (ValueError naming the field) and the facts collected so far stay as they were. Lists grow; an item with
     the same identity as an earlier one replaces it (positions, revisions and materials are merged field by field,
-    so a material's stock and conditions can arrive after its attributes). `replace_lists` in an update replaces
-    whole lists, to take back records added by mistake. `facts()` returns the typed `Facts` for the engine.
+    so a material's stock and conditions can arrive after its attributes). Condition windows merge by validity
+    bounds and their scales by quantity threshold. Empty partial lists keep earlier pages; `replace_lists` can
+    replace the materials list with a corrected complete snapshot to remove nested records added by mistake.
+    `facts()` returns the typed `Facts` for the engine.
     """
 
     def __init__(self, data: dict | None = None):

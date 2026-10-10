@@ -2,7 +2,11 @@
 // stamped on the element as data-aid so an action can find it again. Tables become " | " rows.
 // Called with {prefix, start, full}; returns {text, next}.
 ({prefix, start, full}) => {
-  let n = start;
+  // IDs belong to DOM nodes, not to their position in the next snapshot. The caller also keeps the counter
+  // across documents, so a stale number can never silently become a different element after navigation.
+  const key = Symbol.for("agent-observation-ids");
+  const state = globalThis[key] || (globalThis[key] = {ids: new WeakMap(), next: 0});
+  let n = Math.max(start, state.next);
   const lines = [];
   const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG", "HEAD", "META", "LINK"]);
   const BLOCK = new Set(["DIV", "P", "SECTION", "ARTICLE", "MAIN", "HEADER", "FOOTER", "NAV", "ASIDE", "UL", "OL",
@@ -57,7 +61,11 @@
     return false;
   };
   const tag = (el) => {
-    const id = `${prefix}${n++}`;
+    let id = state.ids.get(el);
+    if (!id || !id.startsWith(prefix) || (prefix === "" && id.includes("."))) {
+      id = `${prefix}${n++}`;
+      state.ids.set(el, id);
+    }
     el.setAttribute("data-aid", id);
     return id;
   };
@@ -68,7 +76,9 @@
     const title = el.getAttribute("title"), aria = el.getAttribute("aria-label");
     if (aria) extra.push(`aria="${clean(aria)}"`);
     if (title && title !== aria) extra.push(`title="${clean(title)}"`);
-    if (el.disabled) extra.push("disabled");
+    if (el.disabled || el.getAttribute("aria-disabled") === "true") extra.push("disabled");
+    if (el.hasAttribute("aria-checked")) extra.push(`checked=${el.getAttribute("aria-checked")}`);
+    if (el.hasAttribute("aria-valuenow")) extra.push(`value=${el.getAttribute("aria-valuenow")}`);
     const ref = referenced(el);
     if (ref) extra.push(`(${ref})`);
     if (t === "A") {
@@ -175,7 +185,6 @@
     for (const c of kids(el)) walk(c, depth + 1);
   };
 
-  document.querySelectorAll("[data-aid]").forEach((e) => e.removeAttribute("data-aid"));
   // open dialogs and modals sit in front of the page: show them first, so the model deals with them first
   const DIALOG = 'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
   const shownFirst = new Set();
@@ -191,5 +200,6 @@
   // collapse duplicate consecutive lines
   const out = [];
   for (const l of lines) if (out[out.length - 1] !== l) out.push(l);
+  state.next = n;
   return {text: out.join("\n"), next: n, title: document.title};
 }

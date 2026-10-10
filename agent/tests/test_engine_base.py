@@ -82,6 +82,7 @@ def core_facts() -> Facts:
                      stock_lead_weeks=2,
                      production_lead_weeks=8, conditions=[condition((1, "25000"), (10, "24050"), unit=100)]),
         ],
+        searched_groups=["G-A", "G-B"],  # this complete invented catalogue has been read in full
         discount_approvals=[
             DiscountApproval(REF, D(5), source=at("2030-02-01", DIRECTOR)),
             DiscountApproval(REF, D(4), D("3000.00"), at("2030-03-01", DIRECTOR)),

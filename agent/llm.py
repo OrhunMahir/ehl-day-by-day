@@ -11,6 +11,7 @@ In a run every base URL already points at the platform's metering proxy; your ow
 import asyncio
 import os
 import time
+import weakref
 
 from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 
@@ -23,6 +24,16 @@ DEFAULT_MODELS = {
 
 # Longest lead call seen in a run was about 90 s; a call that hangs must not eat the run.
 CALL_TIMEOUT_SECONDS = 240
+CALL_CONCURRENCY = 4
+_call_slots = weakref.WeakKeyDictionary()
+
+
+def call_slots() -> asyncio.Semaphore:
+    """Share a bounded queue across lead, recorder and browsers in this event loop."""
+    loop = asyncio.get_running_loop()
+    if loop not in _call_slots:
+        _call_slots[loop] = asyncio.Semaphore(CALL_CONCURRENCY)
+    return _call_slots[loop]
 
 
 def _client_config(provider: str) -> tuple[str, str]:
@@ -41,9 +52,12 @@ def _client_config(provider: str) -> tuple[str, str]:
 
 
 class Model:
-    def __init__(self, provider: str | None = None, model: str | None = None, reasoning_effort: str | None = None):
+    def __init__(self, provider: str | None = None, model: str | None = None, reasoning_effort: str | None = None,
+                 thinking: bool | None = None, max_tokens: int | None = None):
         # how much the model thinks before it answers; None leaves the provider's default
         self.reasoning_effort = reasoning_effort
+        self.thinking = thinking
+        self.max_tokens = max_tokens
         self.provider = provider or os.environ.get("AGENT_PROVIDER", "qwen")
         self.model = model or os.environ.get("AGENT_MODEL") or DEFAULT_MODELS[self.provider]
         base_url, api_key = _client_config(self.provider)
@@ -59,11 +73,18 @@ class Model:
             try:
                 started = time.time()
                 args = dict(model=self.model, messages=messages, **kwargs)
-                if self.reasoning_effort:
+                if self.max_tokens is not None:
+                    args.setdefault("max_tokens", self.max_tokens)
+                if self.thinking is False and self.provider == "qwen":
+                    extra = dict(args.get("extra_body") or {})
+                    extra["chat_template_kwargs"] = {**(extra.get("chat_template_kwargs") or {}), "enable_thinking": False}
+                    args["extra_body"] = extra
+                elif self.reasoning_effort:
                     args.setdefault("reasoning_effort", self.reasoning_effort)
                 if tools:
                     args["tools"] = tools
-                reply = await self.client.chat.completions.create(**args)
+                async with call_slots():
+                    reply = await self.client.chat.completions.create(**args)
                 self.calls += 1
                 if reply.usage:
                     self.prompt_tokens += reply.usage.prompt_tokens or 0
@@ -74,7 +95,7 @@ class Model:
                 return reply.choices[0].message
             except (APIError, APITimeoutError, RateLimitError) as error:
                 status = getattr(error, "status_code", None)
-                if status in (400, 401, 403, 404) and attempt > 0:
+                if status in (400, 401, 403, 404):
                     raise
                 print(f"[llm] {self.provider} call failed ({status or type(error).__name__}: {str(error)[:200]}); retrying", flush=True)
                 await asyncio.sleep(delay)

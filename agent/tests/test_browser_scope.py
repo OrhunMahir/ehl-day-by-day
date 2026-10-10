@@ -292,5 +292,77 @@ class FinishLastTest(unittest.TestCase):
         self.assertIn("document: Spec C", report)
 
 
+class CutoffEvidenceTest(unittest.TestCase):
+    def test_initial_view_survives_failed_first_model_call_and_wrap_up(self):
+        import time
+        tab = Tab("portal", FakePage("https://portal.example.test/doc/8"))
+
+        async def observe(offset=0):
+            return "Document revision D; requirement: 27 mm"
+        tab.observe = observe
+
+        class Fails:
+            async def chat(self, messages, tools=None, **kwargs):
+                raise RuntimeError("unavailable")
+
+        agent = BrowsingAgent(Fails(), {"portal": tab}, {}, "Read requirement", "", "test",
+                              time.time() + 120, max_steps=0, log=lambda *_: None)
+        report = asyncio.run(agent.run())
+        self.assertIn("LAST PAGES READ, NOT NOTED YET", report)
+        self.assertIn("requirement: 27 mm", report)
+        self.assertIn("unfinished searches remain unknown", agent.report_so_far())
+
+    def test_latest_unnoted_read_is_in_cutoff_report_and_summary_prompt(self):
+        import time
+        tab = Tab("portal", FakePage("https://portal.example.test/doc/8"))
+        tab.last_text = "Revision D, requirement: 27 mm"
+
+        async def observe(offset=0):
+            return "Initial menu"
+        tab.observe = observe
+
+        class ReadThenSummarize:
+            prompt = ""
+            limit = None
+
+            async def chat(self, messages, tools=None, **kwargs):
+                if tools is not None:
+                    return type("M", (), {"content": "", "tool_calls": [FakeCall(1, "read_more", '{"offset":0}')]})()
+                self.prompt, self.limit = messages[0]["content"], kwargs.get("max_tokens")
+                return type("M", (), {"content": "NOT CHECKED: other documents", "tool_calls": None})()
+
+        model = ReadThenSummarize()
+        agent = BrowsingAgent(model, {"portal": tab}, {}, "Read requirement", "", "test",
+                              time.time() + 120, max_steps=1, log=lambda *_: None)
+        report = asyncio.run(agent.run())
+        self.assertIn("requirement: 27 mm", report)
+        self.assertIn("requirement: 27 mm", model.prompt)
+        self.assertEqual(model.limit, 1000)
+        self.assertFalse(agent.finished)
+
+    def test_thinking_false_uses_shorter_retry_cap_without_changing_model_configuration(self):
+        import time
+        from unittest.mock import patch
+
+        class StallsOnce:
+            thinking = False
+            calls = 0
+
+            async def chat(self, messages, tools=None, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    await asyncio.sleep(3600)
+                return "answered"
+
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+        model = StallsOnce()
+        agent = BrowsingAgent(model, {"portal": tab}, {}, "task", "", "test", time.time() + 120,
+                              log=lambda *_: None)
+        with patch("browsing.QUICK_CALL_SECONDS", 0.05):
+            self.assertEqual(asyncio.run(agent._ask([], [])), "answered")
+        self.assertEqual(agent.stalls, 1)
+        self.assertFalse(model.thinking)
+
+
 if __name__ == "__main__":
     unittest.main()

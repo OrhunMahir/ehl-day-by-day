@@ -10,6 +10,7 @@ report and no hand-off: the board is the only connection, and it is immediate.
 """
 import asyncio
 import json
+import os
 import sys
 import time
 
@@ -37,6 +38,12 @@ Then keep going with what the board says is still needed and your website can an
 another website gave (search a catalogue group with at most 20 results, record every result, open the details of
 the ones whose attributes match). When nothing on your website is left for now, call wait."""
 JOB_STEPS = 400  # the clock ends a job long before this
+# The agents that read the websites and record the facts use a larger model with a little thinking: prices, price
+# units and validity periods were what the hosted model without thinking read wrongly or not at all. The brief call
+# and the submission stay with the hosted model without thinking, which entered and signed five positions fastest.
+READER_PROVIDER = "openai"
+READER_MODEL = "gpt-6.1-sol"
+READER_REASONING = "low"
 BRIEF_SECONDS = 60
 SUBMIT_ATTEMPTS = 2
 
@@ -104,12 +111,25 @@ async def submit(lead: lead_module.Orchestrator) -> None:
         hints = "An earlier attempt did not end with an accepted bid. Its report:\n" + report[-2000:]
 
 
-async def _run(lead: lead_module.Orchestrator, model: Model) -> None:
+def reading_model(hosted: Model) -> Model:
+    """The model of the agents that read the websites. Without a key for its provider it is the hosted model; with a
+    key the provider turns down during the run, the hosted model takes over from that call on."""
+    if not os.environ.get(f"{READER_PROVIDER.upper()}_API_KEY") or not os.environ.get(f"{READER_PROVIDER.upper()}_BASE_URL"):
+        return hosted
+    return Model(provider=READER_PROVIDER, model=READER_MODEL, reasoning_effort=READER_REASONING, fallback=hosted)
+
+
+def described(model: Model) -> str:
+    effort = "without thinking" if model.thinking is False else f"reasoning {model.reasoning_effort or 'default'}"
+    return f"{model.provider}/{model.model} {effort}"
+
+
+async def _run(lead: lead_module.Orchestrator, model: Model, reader: Model) -> None:
     board = Board(lead.builder, log=lead.log)
     reference = await brief_facts(lead, board, model)
     lead.log(f"[run] tender {reference}; one agent per website ({', '.join(lead.tabs)}) until "
              f"{lead.collect_until - lead.started:.0f} s")
-    await run_agents(lead, site_agents(lead, board, model, reference))
+    await run_agents(lead, site_agents(lead, board, reader, reference))
     await submit(lead)
 
 
@@ -117,8 +137,10 @@ async def main() -> int:
     started = time.time()
     task, token = contract.load_run()
     model = Model(thinking=False)
-    print(f"Run {task.get('run_id') or '(local scouting run)'}; model {model.provider}/{model.model} without thinking; "
-          f"one agent per website: {', '.join(a['siteId'] for a in task['access'])}", flush=True)
+    reader = reading_model(model)
+    print(f"Run {task.get('run_id') or '(local scouting run)'}; websites read by {described(reader)}; brief and "
+          f"submission by {described(model)}; one agent per website: "
+          f"{', '.join(a['siteId'] for a in task['access'])}", flush=True)
     async with async_playwright() as playwright:
         async def open_one(index: int, access: dict):
             available = max(len(browsers.cdp_urls()), 1)
@@ -130,10 +152,11 @@ async def main() -> int:
         tabs = dict(await asyncio.gather(*(open_one(i, a) for i, a in enumerate(task["access"][:4]))))
         lead = lead_module.Orchestrator(task, token, tabs, model, started, model)
         try:
-            await asyncio.wait_for(_run(lead, model), timeout=lead.deadline - time.time() + 5)
+            await asyncio.wait_for(_run(lead, model, reader), timeout=lead.deadline - time.time() + 5)
         except TimeoutError:
             lead.log("[run] stopped at the end of the run's time")
-    print(f"Done in {time.time() - started:.0f}s; {model.usage()}; submitted: "
+    readers = "" if reader is model else f"readers {reader.usage()}; hosted model "
+    print(f"Done in {time.time() - started:.0f}s; {readers}{model.usage()}; submitted: "
           f"{json.dumps(lead.submitted, ensure_ascii=False) if lead.submitted else 'nothing'}", flush=True)
     return 0
 

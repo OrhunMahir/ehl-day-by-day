@@ -2,6 +2,43 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 23:10 · Branch stream-o-board-openai: the board concept with an OpenAI model reading the websites
+
+- Changed (branch `stream-o-board-openai`, from `stream-j-simple` at `0ae9257`):
+  - `agent/llm.py`: OpenAI's reasoning models are called through the Responses interface (request and reply are
+    translated inside `Model.chat`, the callers still speak chat completions); no `temperature` for them; a limited
+    answer gets room for the model's thinking; an effort the model refuses is lowered. A Responses request that is
+    refused is asked through chat completions without thinking. New `fallback`: when the provider turns the key
+    down or the credit is used up, the hosted model answers from that call on. `thinking=False` and `max_tokens`
+    from `stream-j-simple` are kept for Qwen.
+  - `agent/simple.py` (Julien's file, touched with Orhun's go-ahead): the four website agents use
+    `gpt-6.1-sol` at reasoning "low" when the run has `OPENAI_API_KEY`; the brief call and the submission stay with
+    Qwen without thinking. Without the key every role is Qwen, as before.
+  - `agent/agent.py`: investigations end at 50 % of the run instead of 45 %; the submission keeps 576 s.
+  - `agent/tests/test_kit.py`, `agent/tests/test_lead.py`: tests for the above; the submission-time test's margin
+    is 80 s instead of 120 s.
+- Why: the 51.2 run (`run_9b8aee1022f379bc`, Qwen without thinking) had every material, quantity and lead time but
+  almost no price field, and ended 8 minutes early. In stream O's test run with `gpt-6.1-sol` on the old lead
+  architecture (`run_c059f6e6457b8063`, quality 41, $1.51) the two positions that were priced had every price field
+  right. This branch puts that model where the prices are read.
+- Checked: 224 unit tests pass (1 skipped). Test runs of the OpenAI model layer on the old architecture,
+  all started from the `openai` branch's working copy, package not committed:
+  `run_9482f4f55a082374` failed at the first call (the model refuses tools together with thinking in chat
+  completions; this is what the Responses path fixes); `run_c059f6e6457b8063` `gpt-6.1-sol` low: quality 41, 19 min,
+  $1.51; `run_d1148747f595fab6` `gpt-6-astra` high: quality 10, a bid without positions (the lead's first call ran
+  into the 240 s limit, the first investigations started at 258 s); `run_9590c9e78615fde1` `gpt-6-luna` low:
+  quality 5 (wrong decision), $0.05; `run_c01ae3aec7290f62` `gpt-6-astra` low: cancelled at minute 7, $7.13 by then.
+  Not checked: this branch in the sandbox (a test run follows this push), and the fallback against the real provider.
+- Learned: the platform's proxy accepts the OpenAI model names `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-luna` and
+  refuses unknown ones before forwarding. A team secret cannot hold a provider or model name (too short), so the
+  entry point names them. Cost follows the number of calls, not the effort: `gpt-6-astra` cost about five times
+  `gpt-6.1-sol` per call. More thinking made every run worse, because the time went into the calls.
+- For the others: J: `simple.py` and `agent.py` changed as listed; `browsing.py`, `board.py` and the engine are
+  untouched. The stall limit of a browsing step is 75 s for the OpenAI model (its `thinking` is not `False`).
+  I: nothing. The scored final run would bill the team's OpenAI key; if the credit is gone the fallback keeps
+  the run on Qwen.
+- Next: one test run of this branch; compare its price fields with the 51.2 run.
+
 ## 2026-10-10 18:26 · Julien starts all sandbox test runs; hand-over note
 
 - Changed: `AGENTS.md`, `CLAUDE.md` and `docs/streams.md`: sandbox test runs are started by Julien only, for all

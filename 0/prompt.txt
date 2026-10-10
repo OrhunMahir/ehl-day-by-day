@@ -1,0 +1,159 @@
+https://github.com/OrhunMahir/ehl-day-by-day/tree/stream-j-simple buraya pushladı galiba kodu
+
+---
+
+<task-notification>
+<task-id>bfysgxb7y</task-id>
+<tool-use-id>toolu_011AQaTHZcQevUNZbUPK9iZz</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bfysgxb7y.output</output-file>
+<status>completed</status>
+<summary>Background command "Add a test for the choice of the reading model and run the whole test suite of the new branch" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bjbc5s9ag</task-id>
+<tool-use-id>toolu_01RzkNrLXhcv1qpkp9YtzRDN</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bjbc5s9ag.output</output-file>
+<status>completed</status>
+<summary>Background command "Start one sandbox test run of the new branch, retrying if the platform times out and never starting a second run" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bcxburgjr</task-id>
+<tool-use-id>toolu_01NnaxhZkMQxFeuyeSV8VvCH</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bcxburgjr.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait until the new run is running, then show its start-up line, any model errors, and counts of board records and stalled model calls (structure only)" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+4 ajan kullanmak yerine 1 ajan kullandığımız yere 1den fazla ajan koysak daha hızlı ve iyi çalışmaz mı bu mümkün mü yani totalde 4ten fazla ajan kullanmak mantıklı mı
+
+---
+
+<task-notification>
+<task-id>b6r4wngnb</task-id>
+<tool-use-id>toolu_01AJc5jbsPbNJ43revpxPtcF</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/b6r4wngnb.output</output-file>
+<status>completed</status>
+<summary>Background command "Follow the run's log into a scratch file until it ends, then show status, model errors, stalled-call counts and the score as points per field next to the 51-point run" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+tamam bizim runladığımız koşu failladı neden onu incele sonrasında da erpye birden fazla ajan atama işini yapalım
+
+---
+
+dur koşuyu hiçbir değişiklik yapmadan tekrar başlatmanın ne mantığı var bu na bir çözüm bulamaz mıyız ?Bir sitenin takılmasına karşı ise bir şey yapmadım; teklifin girildiği site cevap vermiyorsa ajanın yapabileceği pek bir şey yok. Bu, Julien’in notunda da “açık sorun” olarak duruyor ve koşudan koşuya şansa bağlı
+
+---
+
+tamam pushla ama koşuyu başlatmak için benim onayımı bekle
+
+---
+
+<task-notification>
+<task-id>bqlrcvh8r</task-id>
+<tool-use-id>toolu_01Uy3iSHo622aresDJm7dsCf</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bqlrcvh8r.output</output-file>
+<status>completed</status>
+<summary>Background command "Start one sandbox test run of the combination branch with the three fixes, retrying if the platform times out and never starting a second run" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+dur şu an bu runlamaya çalıştığımız modelin özellikleri ne kısaca
+
+---
+
+tamam koşuyu başlat
+
+---
+
+bekle yeni bi koşu 73 rating aldı şimdi arkadaşım onu pushladı https://github.com/OrhunMahir/ehl-day-by-day/tree/stream-j-tweaks bununla birleştir gpt 6.1 sol planını
+
+---
+
+başlat
+
+---
+
+<task-notification>
+<task-id>bqx2bpowh</task-id>
+<tool-use-id>toolu_013FSZzBVhj2Q2YsAPLRee6G</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bqx2bpowh.output</output-file>
+<status>completed</status>
+<summary>Background command "Follow the new run's log into a scratch file until the run ends, then show status, start-up line, model errors and counts of stalls and hang handling (structure only)" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+tamam 77 aldık sonuçları karşılaştır ve önerilerini sun nasıl geliştirebileceğimiz hakkında
+
+---
+
+erpdeki ajan sayısını arttırmak mantıklı olur mu?
+
+---
+
+1. Gram düzeltmesi. Dosya Ivan’ın (`facts.py`); “yap” dersen ben yaparım, testini ekler, push ederim. bunu yap sadece pushla
+
+---
+
+aynı anda 2 test çalıştırmak sıkıntı çıakrdıpı için c388b41a ile başlayan test bitene kadar çalıştırm bu test bittikten somra teste at ve çalıştır
+
+---
+
+<task-notification>
+<task-id>bal59nh6r</task-id>
+<tool-use-id>toolu_01BbQv9D9YsK4AbFxhipGFKp</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bal59nh6r.output</output-file>
+<status>completed</status>
+<summary>Background command "Confirm with invented numbers that a board record in grams now builds as kilograms, and run the whole test suite" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b2cu90k16</task-id>
+<tool-use-id>toolu_01VAHTHvycT1LYbRo7pneP4m</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/b2cu90k16.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait until the team's running test run has ended; then, only if no other team run is active, start one test run of the combination branch (never more than one)" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+tamma şimdi runlayabilirsin testte
+
+---
+
+daha kolay tasklerde agent olarak qwen kullan ve komplike olanlarda sol 6.1 u kullan böylece paradan tasarruf edebilelim bu run bitsin sonrasında bakalım bunun sonucuna göre
+
+---
+
+<task-notification>
+<task-id>bsp8aj3x5</task-id>
+<tool-use-id>toolu_01LJzhqJffEPaAD9Pxetd6Dx</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bsp8aj3x5.output</output-file>
+<status>completed</status>
+<summary>Background command "Follow the test run's log into a scratch file until the run ends, then show status, model errors, hang-handling counts and the score as points per field" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+is it possible to use like free models like deepseekv4 to make it cheaper and faster bunu aklında tut daha sonra ekleyebilriiz
+
+---
+
+şimdi yeni yaptığımız model +23 verebilir demiştin fakat bize +12 kazandırdı bunun sebebini araştır çözüm yolu var mı sonrasında testi başlatmadan önce bana söyle ben onay verinc başlatıcaz
+
+---
+
+could this bring us up to 100?

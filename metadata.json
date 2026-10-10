@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4M244M5W3AHMNYRV4V27ABE",
+  "strategy": "manual-commit",
+  "branch": "stream-o-board-openai",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "agent/engine/bid.py",
+    "agent/engine/needs.py",
+    "agent/engine/resolve.py",
+    "agent/facts.py",
+    "agent/simple.py",
+    "agent/tests/test_engine_advanced.py",
+    "agent/tests/test_engine_robust.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 78,
+    "cache_creation_tokens": 58066,
+    "cache_read_tokens": 12729102,
+    "output_tokens": 37873,
+    "api_call_count": 32
+  }
+}

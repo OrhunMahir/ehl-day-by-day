@@ -1,6 +1,64 @@
-# Push log · Orhun · stream O: lead, submission, runs
+# Push log · Orhun · stream O: lead, submission
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
+
+## 2026-10-10 18:26 · Julien starts all sandbox test runs; hand-over note
+
+- Changed: `AGENTS.md`, `CLAUDE.md` and `docs/streams.md`: sandbox test runs are started by Julien only, for all
+  three streams; a coding agent starts one only when its human is Julien and asks. Stream O is now "lead,
+  submission". New `docs/handover-stream-o.md`: what stream O changed, the settings, what the runs have shown
+  (points only), what to look at in the next run, what is not proven. Nothing under `agent/` changed.
+- Why: Orhun's decision: one person starts runs, so that no state is run twice and results stay comparable.
+- Checked: read the three documents again for other places that say who starts runs; none left. No run started.
+- Learned: nothing new about the sites.
+- For the others: J — you start the runs. The three commits `b54879f`, `d9c00ce`, `b98ce09` are on `stream-o`
+  only and not on `main`; merge `origin/stream-o` into your branch to have them in a run. Please note run ids
+  and points per field in your log. I — ask Julien for a run when you need a score.
+- Next: wait for the run's result and read its log.
+
+## 2026-10-10 18:12 · Short narrow first round, exact identifiers in the recording, recorder with its own model
+
+- Changed: `agent/agent.py`: an investigation of the first round is ended after 3 minutes (later ones after 4),
+  and the lead is told to give every site one narrow first job and to keep the ERP searches by catalogue group
+  for the second round. The lead's next turn waits 20 seconds for pending recordings (was 40). The recorder is
+  told to write identifiers character for character and to record every requirement's catalogue group, and it
+  has a model object of its own with reasoning effort "medium". Before this, in a commit of its own: the lead's
+  reasoning effort is "low". Two tests added.
+- Why: in `run_db0e16aac11819a1` the second round had 76 seconds; the specification's requirements were recorded
+  without catalogue groups and the positions' requirement identifiers did not match them (also named in a review
+  by another session).
+- Checked: all unit tests pass. Two recordings with the hosted model on invented tender and specification
+  reports took 19 seconds side by side: positions and requirements carry the same identifiers, every requirement
+  has its catalogue group, and the engine then asks for exactly the two ERP group searches. Not checked: no
+  sandbox run; one run of the "lead low" state alone was queued and cancelled at Orhun's request before it started.
+- Learned: the sub-agent stops browsing 45 seconds before its deadline to write its report, so a 3-minute
+  investigation has about 2 minutes and 15 seconds on the site.
+- For the others: J — first-round jobs are now narrow and 3 minutes long; a report that states each requirement's
+  catalogue group and the tender's requirement identifiers exactly is what unlocks the second round. I — nothing.
+- Next: one sandbox run of this state when Orhun says so.
+
+## 2026-10-10 17:48 · A website that does not answer at the start no longer ends the run
+
+- Changed: `agent/agent.py`: at the start every website is opened with a 20-second limit and up to three
+  attempts; a site that still does not open keeps its tab, and the sub-agent that works it opens the address
+  again. Two tests in `agent/tests/test_lead.py`. Correction to earlier entries: the reasoning setting in
+  `agent.py` has been "xhigh" for the lead and the sub-agents since the commit of 16:43, not "not sent"; the change
+  came from another session working in the same checkout and went into that commit unnoticed.
+- Why: `run_1401025c68a7e5d7` ended after 44 seconds with exit code 1 and no model call: opening the mailbox at
+  the start timed out, and nothing caught it.
+- Checked: all unit tests pass. Not checked in the sandbox (no new runs for now, at Orhun's request).
+- Test runs of `main` as merged in PR #9: `run_78afea5264793796` and `run_db0e16aac11819a1` were both accepted,
+  quality 10 each (a bid with all positions left out), in 15 and 16 minutes. Read from the second run's log: the
+  recordings ran (twelve), further tabs were opened and nine investigations ran side by side in the second round,
+  the submission took 17 seconds. No position was priced because the second round only had 76 seconds: the first
+  reports were back at 280 s, the lead's next turn started at 320 s (it waited 40 s for a recording that stalled)
+  and ended at 465 s, and investigations end at 540 s. The specification's requirements were recorded without a
+  catalogue group, and no material reached the facts.
+- Learned: with the facts written by the recorder, the lead's turn between the rounds is now the longest wait
+  before the second round (145 s with "xhigh"; in the earlier run with the lead on "low" the same turn took 42 s).
+- For the others: J — in the 4-minute first round the specification report named the requirements but no
+  catalogue group, and the ERP report no material; the second round is where the ERP is searched by group.
+- Next: Orhun decides: a lower reasoning setting for the lead, and how the time between the rounds is split.
 
 ## 2026-10-10 17:08 · Reports recorded in the background, a form step with later fields in one call
 

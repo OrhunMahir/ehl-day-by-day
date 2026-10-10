@@ -307,5 +307,75 @@ class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("add_facts", model.lead_calls)
 
 
+class TheFirstRoundIsShorter(unittest.IsolatedAsyncioTestCase):
+    async def test_first_investigations_get_less_time_than_follow_ups(self):
+        deadlines = []
+
+        class Notes:
+            def __init__(self, model, tabs, credentials, task, context, name, deadline, log):
+                deadlines.append(deadline - time.time())
+
+            async def run(self):
+                return "report"
+
+        task = {**TASK, "access": [{"siteId": "erp", "url": "https://erp.example.test"}]}
+        orchestrator = agent.Orchestrator(task, None, {"erp": FakeTab("erp", FakePage())}, None, time.time())
+        orchestrator.log = lambda text: None
+        with patch.object(agent, "BrowsingAgent", Notes), patch.object(agent, "Tab", FakeTab):
+            orchestrator.rounds = 1
+            await orchestrator.investigate("erp", "first job")
+            orchestrator.rounds = 2
+            await orchestrator.investigate("erp", "follow-up")
+        self.assertAlmostEqual(deadlines[0], agent.FIRST_ROUND_SECONDS, delta=2)
+        self.assertAlmostEqual(deadlines[1], agent.INVESTIGATION_SECONDS, delta=2)
+
+    async def test_the_recorder_asks_its_own_model(self):
+        asked = []
+
+        class Named:
+            def __init__(self, name):
+                self.name = name
+
+            async def chat(self, messages, tools, **kwargs):
+                asked.append(self.name)
+                return tool_call("add_facts", {"facts": facts_with(["G1"], [MATCH_1])})
+
+        orchestrator = agent.Orchestrator(TASK, None, {"erp": None}, Named("lead"), time.time(),
+                                          worker_model=Named("worker"), recorder_model=Named("recorder"))
+        orchestrator.log = lambda text: None
+        await orchestrator.record("erp", "report")
+        self.assertEqual(asked, ["recorder"])
+        self.assertEqual(len(orchestrator.builder.data["materials"]), 1)
+
+
+class AWebsiteThatDoesNotAnswerAtTheStart(unittest.IsolatedAsyncioTestCase):
+    class Page:
+        def __init__(self, failures):
+            self.failures, self.attempts, self.url = failures, 0, "about:blank"
+            self.context = self
+
+        async def goto(self, url, **kwargs):
+            self.attempts += 1
+            if self.attempts <= self.failures:
+                raise TimeoutError("Page.goto: Timeout exceeded")
+            self.url = url
+
+        def on(self, *args):
+            pass
+
+    async def test_it_is_tried_again_and_the_run_goes_on(self):
+        page = self.Page(failures=1)
+        tab = await agent.open_site("mail", "https://mail.example.test/inbox", page)
+        self.assertEqual(page.attempts, 2)
+        self.assertEqual(tab.home, "https://mail.example.test")
+
+    async def test_a_site_that_never_opens_still_gets_its_tab(self):
+        page = self.Page(failures=99)
+        tab = await agent.open_site("mail", "https://mail.example.test/inbox", page)
+        self.assertEqual(page.attempts, agent.START_ATTEMPTS)
+        self.assertEqual(tab.home, "https://mail.example.test")
+        self.assertEqual(agent.Tab.homes["mail"], "https://mail.example.test")
+
+
 if __name__ == "__main__":
     unittest.main()

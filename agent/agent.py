@@ -17,7 +17,7 @@ import browsers
 import engine
 import facts
 import run as contract
-from browser import Tab
+from browser import Tab, origin
 from browsing import BrowsingAgent
 from calc import calculate
 from llm import Model
@@ -34,10 +34,14 @@ Approach:
    task: what to find, which exact reference, which details (dates, units, status, validity, senders), and to report
    verbatim. Their first pass should survey their site for everything the rules might need; information may sit on
    any site, so ask each assistant to report anything relevant it sees.
-3. Time allows two rounds of investigations: the first survey and one round of follow-ups. Every investigation
-   is ended after about {round_minutes} minutes, so give each assistant one clear job. Use the follow-up round for
-   what depends on another site's answer (e.g. a catalogue group found in the specification must then be searched
-   in the ERP by that group, reading every result; amendments must be applied to the right revision).
+3. Time allows two rounds of investigations. The first round is short (about {first_minutes} minutes per
+   investigation): give every assistant one narrow job, the one the other sites depend on. Typical first jobs: the
+   tender's positions with their requirement identifiers and all clarifications; the current specification
+   revision with every requirement's attributes and catalogue group; the messages that name this exact tender
+   reference; in the ERP only how materials are searched by catalogue group and which pages a material has.
+   The second round (about {round_minutes} minutes per investigation) is for what depends on another site's
+   answer: one ERP investigation per catalogue group, reading every result of the search and each candidate's
+   attributes, status, stock, lead times and price conditions; amendments applied to the right revision.
 4. The facts of every report are recorded for you and the bid is priced from them in code. After a round you get
    the state of the bid: the priced answer, `issues` (what is missing or ambiguous), `needed` (what to find or
    verify next, and on which site), `incomplete` and `omitted` positions. Do not price anything yourself. Use
@@ -76,6 +80,7 @@ COLLECT_SHARE = 0.45  # investigations end here
 SUBMIT_SHARE = 0.45  # from here on the lead has to price and submit
 # One investigation may take this long, so that a round of follow-ups fits before the investigations end.
 INVESTIGATION_SECONDS = 240
+FIRST_ROUND_SECONDS = 180  # the first round is cut shorter, so the follow-ups that depend on it get their time
 # How many investigations may work one website at the same time, each in a tab with a session of its own.
 TABS_PER_SITE = 4
 # How much each role's model thinks before it answers; None leaves the provider's default. Qwen writes about 40
@@ -85,9 +90,11 @@ TABS_PER_SITE = 4
 LEAD_REASONING: str | None = "low"
 LEAD_MAX_TOKENS = 4000
 LEAD_CALL_SECONDS = 120  # a lead call that has not answered by then is dropped and asked again
-WORKER_REASONING: str | None = None
-WORKER_THINKING = False
+RECORDER_REASONING: str | None = None  # the calls that turn a report into facts
+RECORDER_THINKING = False
 RECORD_MAX_TOKENS = 8000  # the facts of one report as JSON
+WORKER_REASONING: str | None = None  # browsing sub-agents and the submission agent
+WORKER_THINKING = False
 # A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
 INVESTIGATION_GRACE_SECONDS = 30
 RECORD = """You record facts for a bid engine. Below are the brief of a tender and one report of an assistant who
@@ -95,6 +102,10 @@ read a website. Put what the report states into the facts and call `add_facts` o
 the scenario date, the sales director's address and our own mailbox domain from the brief.
 
 - Record every record the report states that the facts have a place for, exactly as stated, each with its source.
+- Write identifiers character for character as the websites show them: position numbers, requirement identifiers,
+  revision names, material numbers, catalogue groups, keys. A tender position's `requirement` and the
+  specification requirement it points to must carry the same identifier.
+- For every specification requirement record its catalogue group when the report states one.
 - Also record what the report lists as superseded, withdrawn, a look-alike or dated later, with its own source:
   the engine picks the record that counts.
 - A catalogue group belongs in `searched_groups` only when the report says the ERP was searched by that group and
@@ -105,7 +116,7 @@ the scenario date, the sales director's address and our own mailbox domain from 
 """
 RECORD_SECONDS = 150  # one report's facts must be recorded within this
 RECORD_CALL_SECONDS = 75  # a recording call that has not answered by then is dropped and asked again
-RECORD_WAIT_SECONDS = 40  # how long the lead's next turn waits for reports that are still being recorded
+RECORD_WAIT_SECONDS = 20  # how long the lead's next turn waits for reports that are still being recorded
 SUBMISSION_RESERVE_SECONDS = 420  # recording never eats into this much time for entering and signing the bid
 
 FORCE_SUBMIT = {"type": "function", "function": {"name": "submit_bid"}}
@@ -116,10 +127,10 @@ RUN_CLOSED_CHECKS = 3  # the platform closes a run a moment after it accepts the
 
 class Orchestrator:
     def __init__(self, task: dict, token: str | None, tabs: dict[str, Tab], model: Model, started: float,
-                 worker_model: Model | None = None, record_model: Model | None = None):
+                 worker_model: Model | None = None, recorder_model: Model | None = None):
         self.task, self.token, self.tabs, self.model = task, token, tabs, model
         self.worker_model = worker_model or model  # the model of the sub-agents that work the websites
-        self.record_model = record_model or model  # the model that copies a report's facts into the facts
+        self.recorder_model = recorder_model or model  # the model that turns reports into facts
         self.credentials = {a["siteId"]: a.get("credentials", {}) for a in task["access"]}
         self.started = started
         now = time.time()
@@ -133,6 +144,7 @@ class Orchestrator:
         self.tab_count = {site: 1 for site in tabs}
         self.tab_slots = {site: asyncio.Semaphore(TABS_PER_SITE) for site in tabs}
         self.builder = facts.FactsBuilder()  # the facts recorded so far
+        self.rounds = 0  # turns of the lead that sent out investigations
         self.records: set[asyncio.Task] = set()  # reports whose facts are being recorded right now
         self.unrecorded: list[str] = []  # reports whose facts could not be recorded
         self.priced: engine.BidResult | None = None  # what the bid engine made of the latest facts
@@ -192,7 +204,8 @@ class Orchestrator:
         async with self.tab_slots[site]:
             if time.time() >= self.collect_until:
                 return "No time left to investigate: call submit_bid now with what you have."
-            until = min(self.collect_until, time.time() + INVESTIGATION_SECONDS)
+            longest = FIRST_ROUND_SECONDS if self.rounds <= 1 else INVESTIGATION_SECONDS
+            until = min(self.collect_until, time.time() + longest)
             tab = await self.take_tab(site)
             agent = BrowsingAgent(self.worker_model, {site: tab}, self.credentials, f"{task}\n\n{PROVENANCE}",
                                   self.context(), name=site, deadline=until, log=self.log)
@@ -224,7 +237,7 @@ class Orchestrator:
             if left < 5:
                 break
             try:
-                message = await asyncio.wait_for(self.ask(messages, [tool], FORCE_ADD, self.record_model),
+                message = await asyncio.wait_for(self.ask(messages, [tool], FORCE_ADD, self.recorder_model),
                                                  timeout=min(RECORD_CALL_SECONDS, left))
             except TimeoutError:
                 self.log(f"[{source}] a recording call took too long; asking again")
@@ -452,7 +465,8 @@ class Orchestrator:
         minutes = round((self.submit_from - time.time()) / 60)
         messages = [
             {"role": "system", "content": ORCHESTRATOR.format(
-                minutes=minutes, round_minutes=round(INVESTIGATION_SECONDS / 60), tabs=TABS_PER_SITE) + "\n\n" + facts.FILLING_GUIDE},
+                minutes=minutes, first_minutes=round(FIRST_ROUND_SECONDS / 60),
+                round_minutes=round(INVESTIGATION_SECONDS / 60), tabs=TABS_PER_SITE) + "\n\n" + facts.FILLING_GUIDE},
             {"role": "user", "content": self.context() + "\n\n# Websites\n" + "\n".join(
                 f"- {a['siteId']}: {a['url']}" for a in self.task["access"]) + "\n\nBegin."},
         ]
@@ -520,6 +534,7 @@ class Orchestrator:
                 except Exception as error:  # noqa: BLE001
                     return f"Error: {error}"
 
+            self.rounds += any(c.function.name == "investigate" for c in calls)
             results = await asyncio.gather(*(execute(c) for c in calls))
             for call, result in zip(calls, results):
                 self.log(f"[lead] <- {call.function.name}: {result[:3000]}")
@@ -571,15 +586,38 @@ def validate(answer: dict, schema: dict) -> list[str]:
     return problems
 
 
+START_ATTEMPTS = 3
+START_TIMEOUT_MS = 20000
+
+
+async def open_site(site: str, url: str, page) -> Tab:
+    """The website's tab at the start of the run. A site that does not answer right now must not end the run:
+    its tab is kept, and the sub-agent that works it opens the address again."""
+    for attempt in range(1, START_ATTEMPTS + 1):
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=START_TIMEOUT_MS)
+            break
+        except Exception as error:  # noqa: BLE001
+            print(f"[start] {site} did not open (attempt {attempt}): {str(error).splitlines()[0][:120]}", flush=True)
+    tab = Tab(site, page)
+    if not tab.home:  # the page never loaded, so the tab does not know its own website yet
+        tab.home = origin(url)
+        Tab.homes[site] = tab.home
+    return tab
+
+
 async def main() -> int:
     started = time.time()
     task, token = contract.load_run()
     model = Model(reasoning_effort=LEAD_REASONING, max_tokens=LEAD_MAX_TOKENS)
     worker_model = Model(reasoning_effort=WORKER_REASONING, thinking=WORKER_THINKING)
-    record_model = Model(thinking=False, max_tokens=RECORD_MAX_TOKENS)
+    recorder_model = Model(reasoning_effort=RECORDER_REASONING, thinking=RECORDER_THINKING, max_tokens=RECORD_MAX_TOKENS)
+
+    def effort(m: Model) -> str:
+        return "no thinking" if m.thinking is False else m.reasoning_effort or "provider default"
+
     print(f"Run {task.get('run_id') or '(local scouting run)'}; model {model.provider}/{model.model}; "
-          f"reasoning lead={model.reasoning_effort or 'provider default'}, "
-          f"workers={'no thinking' if worker_model.thinking is False else worker_model.reasoning_effort or 'default'}; "
+          f"reasoning lead={effort(model)}, workers={effort(worker_model)}, recorder={effort(recorder_model)}; "
           f"sites: {', '.join(a['siteId'] for a in task['access'])}", flush=True)
     async with async_playwright() as playwright:
         tabs = {}
@@ -588,14 +626,13 @@ async def main() -> int:
             browser, page = await browsers.connect(playwright, index if index < available else 0)
             if index >= available:  # fewer browsers than sites: a tab of its own in the first browser
                 page = await page.context.new_page()
-            await page.goto(access["url"], wait_until="domcontentloaded")
-            tabs[access["siteId"]] = Tab(access["siteId"], page)
-        lead = Orchestrator(task, token, tabs, model, started, worker_model, record_model)
+            tabs[access["siteId"]] = await open_site(access["siteId"], access["url"], page)
+        lead = Orchestrator(task, token, tabs, model, started, worker_model, recorder_model)
         try:  # nothing may outlive the run's time, whatever is still waiting on a page or a model
             await asyncio.wait_for(lead.run(), timeout=lead.deadline - time.time() + 5)
         except TimeoutError:
             lead.log("[lead] stopped at the end of the run's time")
-    print(f"Done in {time.time() - started:.0f}s; lead {model.usage()}; workers {worker_model.usage()}; submitted: "
+    print(f"Done in {time.time() - started:.0f}s; lead {model.usage()}; workers {worker_model.usage()}; recorder {recorder_model.usage()}; submitted: "
           f"{json.dumps(lead.submitted, ensure_ascii=False) if lead.submitted else 'nothing'}", flush=True)
     return 0
 

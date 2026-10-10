@@ -45,6 +45,9 @@ How to work:
   the button texts before you act again.
 - A fill_form result says for every field what was set or why it failed, then shows the page as it is now. Read
   it before you go on. After a failure, continue from that field with the numbers of the new page view.
+- The answer is final. Do not look up, check or verify any of its values on any website, and do not open messages
+  about discounts, prices or materials: open another website only for what the form needs and the answer cannot
+  give, such as the signing code when the form asks for it.
 - Enter the values of the answer exactly. Write numbers the way the form expects them (look at its examples,
   placeholders and error messages). Leave a field empty when the answer has no value for it.
 - If the form has its own option to leave a position out and you were told to leave one out, use that option.

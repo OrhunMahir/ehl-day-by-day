@@ -180,53 +180,72 @@ class BrowserPagesTest(unittest.TestCase):
         view = self.run_async(check)
         self.assertIn("All good", view)
 
-    def test_a_page_the_server_leaves_unanswered_is_requested_again(self):
+    def test_a_hung_load_never_holds_a_page_view_and_goto_asks_again(self):
         import browser
 
         async def check(tab, site, context):
             await self.agent(tab)._run_tool("login", {})
             site.hang_next = 1
             started = time.time()
-            by_goto = await tab.goto(f"{SITE}/slow")
+            by_goto = await tab.goto(f"{SITE}/slow")  # the first attempt hangs, the second is answered
             took = time.time() - started
             site.hang_next = 1
             await tab.goto(f"{SITE}/to-slow")
             await tab.page.click("text=Inbox", no_wait_after=True)  # the click starts a load that never answers
             await asyncio.sleep(1.5)
-            by_click = await tab.observe()
-            return by_goto, took, by_click
-        old = browser.LOAD_SECONDS, browser.STUCK_SECONDS
-        browser.LOAD_SECONDS, browser.STUCK_SECONDS = 3, 1
+            started = time.time()
+            view = await tab.observe()
+            look_took = time.time() - started
+            again = await tab.goto(f"{SITE}/slow")
+            return by_goto, took, view, look_took, again
+        old = browser.LOAD_SECONDS
+        browser.LOAD_SECONDS = 3
         try:
-            by_goto, took, by_click = self.run_async(check)
+            by_goto, took, view, look_took, again = self.run_async(check)
         finally:
-            browser.LOAD_SECONDS, browser.STUCK_SECONDS = old
+            browser.LOAD_SECONDS = old
         self.assertIn("3 messages", by_goto)
         self.assertLess(took, 12)
-        self.assertIn("3 messages", by_click)
-        self.assertIn("requested again", by_click)
+        self.assertIn("(still loading", view)  # said, not waited for
+        self.assertLess(look_took, 5)
+        self.assertIn("3 messages", again)
 
     def test_a_slow_sign_in_is_never_cut_short(self):
         # the page is read while a form submission still waits for its answer: it must not be thrown away
-        import browser
-
         async def check(tab, site, context):
             site.slow_sign_in = 3
             await tab.page.fill("input[name=u]", "me")
             await tab.page.fill("input[name=p]", "secret")
             await tab.page.evaluate("document.querySelector('form').submit()")  # does not wait for the answer
             await asyncio.sleep(1.5)
-            await tab.observe()  # the submission has been waiting longer than STUCK_SECONDS by now
+            await tab.observe()
             await asyncio.sleep(3)
             return await tab.observe()
-        old = browser.STUCK_SECONDS
-        browser.STUCK_SECONDS = 1
-        try:
-            view = self.run_async(check)
-        finally:
-            browser.STUCK_SECONDS = old
+        view = self.run_async(check)
         self.assertIn("Orders", view)
         self.assertNotIn("requested again", view)
+
+    def test_a_website_that_stops_answering_is_opened_again_in_a_fresh_session(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            site.hang_next = 10 ** 6  # this session gets no answer any more
+            browser = context.browser
+            fresh = FakeSite()  # a new context gets a working route, as a fresh connection would
+            original = browser.new_context
+
+            async def new_context(*args, **kwargs):
+                created = await original(*args, **kwargs)
+                await created.route(f"{SITE}/**", fresh.handle)
+                return created
+            browser.new_context = new_context
+            Tab.homes["shop"] = SITE
+            tab.home = f"{SITE}/slow"
+            view = await tab.reopen()
+            return view, tab.page.context is not context
+        view, new_context = self.run_async(check)
+        self.assertTrue(new_context)
+        self.assertIn("fresh session", view)
+        self.assertIn("Sign in", view)  # a fresh session: not signed in yet
 
     def test_a_button_named_by_its_text_is_the_button_not_a_hint(self):
         async def check(tab, site, context):

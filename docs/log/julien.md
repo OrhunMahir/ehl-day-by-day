@@ -2,6 +2,33 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 23:40 · stream-j-tweaks: a website that hangs gets a fresh session; the submission checks nothing
+
+- Test run `run_550974275152686b` (`0492559`) was cancelled at 12:43 (quality 0).
+  - The supplier portal never loaded during the whole run; every page view took over 60 s, because each one asked
+    for the hung load again.
+  - The submission agent then spent minutes in the mailbox checking a discount mail instead of entering the bid.
+- Changed:
+  - `browser.py`: a page view never asks for a load again; while one hangs it says "still loading … for N s" and
+    reads for 2 s only. `goto` makes 2 attempts of 20 s. `Tab.reopen` opens a website in a fresh session (new
+    browser context, in any browser).
+  - `browsing.py`: after 2 page loads in a row without an answer, the agent's website is opened in a fresh session,
+    in its own browser first, then in another of the run's browsers; at most twice. `simple.py` passes the run's
+    browsers.
+  - `submission.py` (stream O's file): the answer is final; the agent opens another website only for what the form
+    needs, such as the signing code.
+- Checked:
+  - 220 unit tests pass (1 skipped), among them: a page view returns in under 5 s while a load hangs; a website that
+    stops answering opens again in a new context; two unanswered loads bring the fresh session.
+  - Local run with Qwen:
+    - The bid was complete at 406 s (every rule mail recorded, all five positions with confirmed materials), so
+      investigations ended early.
+    - No website hung.
+    - Signed at 694 s; the mailbox was used only for the signing code.
+  - Still wrong in that run: one price copied as "64.853" (ambiguous) and a mass in grams read as kilograms.
+- For the others: nothing changes on `main`.
+- Next: sandbox test of this commit; then the two number errors.
+
 ## 2026-10-10 22:55 · Branch stream-j-tweaks: prices as written, every rule mail, until minute 11
 
 - Changed (`stream-j-tweaks`, from `stream-j-simple`):

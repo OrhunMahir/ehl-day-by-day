@@ -96,11 +96,19 @@ def site_agents(lead: lead_module.Orchestrator, board: Board, model: Model, refe
     """One agent per website of the run, each with that website's tab only."""
     urls = {a["siteId"]: a["url"] for a in lead.task["access"]}
     schema = schema_for()
+    browsers = []  # every browser of the run, once: a website that stops answering may be opened in another
+    for tab in lead.tabs.values():
+        try:
+            browser = tab.page.context.browser
+        except Exception:  # noqa: BLE001
+            browser = None
+        if browser is not None and all(browser is not b for b in browsers):
+            browsers.append(browser)
     return [BrowsingAgent(model, {site: tab}, lead.credentials,
                           JOB.format(site=site, url=urls.get(site, ""), reference=reference) + "\n\n"
                           + lead_module.PROVENANCE, lead.context() + "\n\n" + facts.FILLING_GUIDE,
                           name=site, deadline=lead.collect_until, max_steps=JOB_STEPS, log=lead.log,
-                          record_schema=schema, board=board)
+                          record_schema=schema, board=board, browsers=browsers)
             for site, tab in lead.tabs.items()]
 
 

@@ -386,5 +386,48 @@ class QuickStallTest(unittest.TestCase):
         self.assertIn("FOUND: y", report)
 
 
+class FreshSessionTest(unittest.TestCase):
+    def test_two_unanswered_loads_in_a_row_bring_a_fresh_session(self):
+        import time
+        import browsing
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+        reopened = []
+
+        async def observe(offset=0):
+            return "[portal] URL: https://portal.example.test/\nTitle: t\na page"
+
+        async def goto(url):
+            await asyncio.sleep(3600)  # the website never answers
+
+        async def reopen(browser=None):
+            reopened.append(browser)
+            return "[portal] fresh page"
+        tab.observe, tab.goto, tab.reopen = observe, goto, reopen
+        tab.page.context.browser = "own browser"
+
+        class GoesTwice:
+            def __init__(self):
+                self.n, self.seen = 0, []
+
+            async def chat(self, messages, tools=None, **kwargs):
+                self.n += 1
+                self.seen = [m["content"] for m in messages if m["role"] == "user"]
+                if self.n <= 2:
+                    return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "goto", '{"url": "/x"}')]})()
+                return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "finish", '{"report": "done"}')]})()
+        model = GoesTwice()
+        old = browsing.ACTION_SECONDS
+        browsing.ACTION_SECONDS = 0.2
+        try:
+            agent = BrowsingAgent(model, {"portal": tab}, {}, "task", "context", name="t",
+                                  deadline=time.time() + 60, log=lambda *a: None, browsers=["another browser"])
+            asyncio.run(agent.run())
+        finally:
+            browsing.ACTION_SECONDS = old
+        self.assertEqual(reopened, ["own browser"])  # the own browser first; it answered, so no other was needed
+        self.assertTrue(any("fresh session" in m for m in model.seen))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -63,6 +63,8 @@ PREVIOUS_VIEW_CHARS = 4000  # the page view before the newest one is cut to this
 SHORTENED = "\n... (older page view shortened to save space; your notes keep what mattered)"
 NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
 WAIT_SECONDS = 45  # one `wait` for the shared board to change; under ACTION_SECONDS
+HUNG_BEFORE_REOPEN = 2  # page loads in a row that the website did not answer before it gets a fresh session
+REOPENS = 2  # fresh sessions per website and run at most
 
 
 def tool_schemas(multi_site: bool) -> list[dict]:
@@ -175,12 +177,16 @@ finish with a one-line summary."""
 class BrowsingAgent:
     def __init__(self, model, tabs: dict[str, Tab], credentials: dict[str, dict], task: str, context: str,
                  name: str, deadline: float, max_steps: int = 60, log=print, record=None,
-                 record_schema: dict | None = None, board=None):
+                 record_schema: dict | None = None, board=None, browsers: list | None = None):
         """`record`, when given, is a function that saves typed facts (`record_schema` describes them) and returns
         what it made of them: the agent then records facts with it instead of taking notes, and needs no wrap-up
         report at the end, because whatever it recorded is already saved. `board`, when given, is the shared board
         (board.Board): the agent records there, sees before each step what changed on it, and can wait for it."""
         self.board, self.seen = board, 0
+        # browsers a website that stops answering may be opened again in, besides its own (e.g. the run's others)
+        self.browsers = list(browsers or [])
+        self.hung: dict[str, int] = {}  # website -> page loads in a row it did not answer
+        self.reopened: dict[str, int] = {}
         if board is not None and record is None:
             record = lambda facts: board.record(name, facts)  # noqa: E731
         self.record, self.record_schema = record, record_schema
@@ -416,6 +422,9 @@ class BrowsingAgent:
                 except Exception as error:  # noqa: BLE001
                     result = f"Error: {str(error).splitlines()[0][:400]}"
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+                fresh = await self._after_action(call.function.name, args, result)
+                if fresh:
+                    messages.append({"role": "user", "content": fresh})
                 if call.function.name in ("note", "record", "wait"):
                     since_note = 0
                     self.unnoted = []
@@ -432,6 +441,33 @@ class BrowsingAgent:
             return self._report("(stopped: out of steps or time; everything recorded is saved)")
         self.log(f"[{self.name}] stopped without finish; writing the report from its notes")
         return self._report(await self._wrap_up())
+
+    async def _after_action(self, name: str, args: dict, result: str) -> str:
+        """Counts the page loads in a row a website did not answer; after HUNG_BEFORE_REOPEN of them it gets a fresh
+        session, in its own browser first, then in another of the run's browsers. Returns what to tell the model."""
+        if name not in NAVIGATING or name == "look":
+            return ""
+        tab = self.last_tab
+        hung = (result.startswith("Error: the action did not finish") or "Navigation error" in result[:600]
+                or "\n(still loading " in result[:800])
+        self.hung[tab.site_id] = self.hung.get(tab.site_id, 0) + 1 if hung else 0
+        if self.hung[tab.site_id] < HUNG_BEFORE_REOPEN or self.reopened.get(tab.site_id, 0) >= REOPENS:
+            return ""
+        self.hung[tab.site_id] = 0
+        self.reopened[tab.site_id] = self.reopened.get(tab.site_id, 0) + 1
+        own = tab.page.context.browser
+        for browser in [own, *(b for b in self.browsers if b is not own)]:
+            try:
+                view = await asyncio.wait_for(tab.reopen(browser), timeout=ACTION_SECONDS)
+            except Exception as error:  # noqa: BLE001 - try the next browser
+                self.log(f"[{self.name}] {tab.site_id} did not answer in a fresh session either: "
+                         f"{str(error).splitlines()[0][:120]}")
+                continue
+            self.signed_in.discard(tab.site_id)
+            self.log(f"[{self.name}] {tab.site_id} did not answer; opened again in a fresh session")
+            return ("Your website did not answer several times; it is open again in a fresh session. Sign in again "
+                    "if it asks, then go on.\n" + view)
+        return "Your website still does not answer, not even in a fresh session. Try again later; meanwhile wait."
 
     async def _ask(self, messages: list[dict], tools: list[dict]):
         """One model step. A call can stall for minutes (a full queue, a stuck request); a fresh attempt usually

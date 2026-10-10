@@ -23,12 +23,12 @@ FETCH_JS = """async (url) => {
 READ_PAGES_MAX = 6  # pages per read_pages call
 READ_PAGES_EACH = 8000  # characters kept per page in read_pages
 FRAME_READ_SECONDS = 10  # reading one frame may take at most this long
+PENDING_READ_SECONDS = 2  # and this long while a page load is still waiting for the website's answer
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
-# The sites sometimes leave a page request unanswered for minutes, while a new request for the same address is
-# answered at once. Some are also just slow (the ERP took over 15 s per page in a sandbox run), so a load gets its
-# time: one attempt may take LOAD_SECONDS, and a plain page load is requested again only after STUCK_SECONDS.
-LOAD_SECONDS = 30
-STUCK_SECONDS = 25
+# One attempt of a page load may take this long; `goto` makes two, which stays under the browsing agent's limit for
+# one action. Reading a page never requests a load again: while one hangs, the view says so and stays quick, and a
+# website that keeps not answering gets a fresh session (Tab.reopen) from the agent.
+LOAD_SECONDS = 20
 
 
 class _HtmlText(HTMLParser):
@@ -231,31 +231,18 @@ class Tab:
             self.last_status = response.status
             self.loading = None
 
-    async def _unstick(self, force: bool = False) -> bool:
-        """A plain page load the site has left unanswered for STUCK_SECONDS is made again: a new request is usually
-        answered at once. A form submission (a sign-in, a search) is never cut short: the site may just be slow to
-        answer it, and loading another page would throw the submission away. With `force` (the page could not be
-        read at all) the current address is loaded again when nothing is in flight. Returns whether it reloaded."""
-        pending = self.loading
-        if pending and pending[1] != "GET":
-            return False
-        if pending and time.time() - pending[2] < STUCK_SECONDS:
-            return False
-        if not pending and not force:
-            return False
-        target = pending[0] if pending else self.page.url
-        if not target or target == "about:blank":
-            return False
-        waited = time.time() - pending[2] if pending else 0
-        self.loading = None
-        try:
-            await self.page.goto(target, wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
-        except Exception as error:  # noqa: BLE001 - the next read reports what is there
-            self.events.append(f"Navigation error: {error}".splitlines()[0])
-            return True
-        self.events.append(f"The page had not answered for {waited:.0f} s; it was requested again" if pending
-                           else "The page could not be read; it was loaded again")
-        return True
+    async def reopen(self, browser=None) -> str:
+        """A fresh session for this website: a new browser context (no cookies, new connections) in `browser`, or in
+        the tab's own browser, opened at the website's home address. The Tab object stays the same for whoever holds
+        it. Raises when the website does not answer there either."""
+        browser = browser or self.page.context.browser
+        context = await browser.new_context()
+        page = await context.new_page()
+        self.page, self.previous, self.loading, self.last_status = page, [], None, 0
+        self._attach(page)
+        await page.goto(self.home or "about:blank", wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
+        self.events.append("The website had not answered; it is open again in a fresh session (sign in again)")
+        return await self.observe()
 
     async def _retry_server_error(self, attempts: int = 2):
         """Flaky server error pages usually work on a retry: reload, at most `attempts` times."""
@@ -276,13 +263,14 @@ class Tab:
     async def observe(self, offset: int = 0) -> str:
         """The page as text: URL, title, each frame's content with numbered elements, and recent events."""
         await self._ensure_open()
-        await self._unstick()
         await self.settle()
         await self._retry_server_error()
-        parts, main_read = await self._read_frames()
-        if not main_read and await self._unstick(force=True):  # the page itself is stuck: load it again, read again
-            await self.settle()
-            parts, main_read = await self._read_frames()
+        # a frame in the middle of a load answers only once the load is done: with one pending, read briefly
+        parts, _ = await self._read_frames(PENDING_READ_SECONDS if self.loading else FRAME_READ_SECONDS)
+        if self.loading:  # a page load still waits for the website's answer: say so, never wait for it here
+            url, _, since = self.loading
+            parts.insert(0, f"(still loading {url} for {time.time() - since:.0f} s: the website has not answered yet; "
+                            "look again later, or goto the address to ask again)")
         text = "\n".join(parts)
         self.last_text = text
         header = f"[{self.site_id}] URL: {self.page.url}\nTitle: {await self._title()}\n"
@@ -296,7 +284,7 @@ class Tab:
             body += f"\n... (page continues: {len(text) - offset - MAX_OBSERVATION} more characters; call read_more with offset={offset + MAX_OBSERVATION})"
         return header + body
 
-    async def _read_frames(self) -> tuple[list[str], bool]:
+    async def _read_frames(self, timeout: float = FRAME_READ_SECONDS) -> tuple[list[str], bool]:
         """Every frame's text, and whether the main frame could be read."""
         parts, start, main_read = [], 0, False
         self.aid_frames = {}
@@ -305,7 +293,7 @@ class Tab:
             try:
                 result = await asyncio.wait_for(  # a frame stuck mid-navigation must not block the whole view
                     frame.evaluate(OBSERVE_JS, {"prefix": prefix, "start": start if index == 0 else 0, "full": True}),
-                    timeout=FRAME_READ_SECONDS)
+                    timeout=timeout)
             except Exception as error:  # noqa: BLE001
                 reason = "it did not respond in time" if isinstance(error, asyncio.TimeoutError) else error
                 parts.append(f"--- frame {index} ({frame.url}) could not be read: {reason}")
@@ -393,7 +381,7 @@ class Tab:
 
     async def goto(self, url: str) -> str:
         await self._ensure_open()
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 response = await self.page.goto(url, wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
                 if response is None or response.status < 500:

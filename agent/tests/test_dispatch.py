@@ -76,6 +76,38 @@ class RecordingAtTheSource(unittest.TestCase):
         self.assertEqual((material["stock"], material["setup_fee_eur"]), (10, 5))
 
 
+class RecordersNeverTakeRecordsBack(unittest.TestCase):
+    """A recorder that sent `replace_lists` emptied a local run's positions, revisions and materials in one call."""
+
+    def full(self):
+        orchestrator = lead()
+        orchestrator.record_at_source({**BRIEF_FACTS, **SPEC, "materials": [MATERIAL]})
+        return orchestrator
+
+    def test_the_report_recorder_cannot_empty_lists(self):
+        orchestrator = self.full()
+        orchestrator.add({"replace_lists": ["positions", "revisions", "materials"], "discount_approvals": []},
+                         by_lead=False)
+        data = orchestrator.builder.data
+        self.assertEqual((len(data["positions"]), len(data["revisions"]), len(data["materials"])), (1, 1, 1))
+
+    def test_a_sub_agent_cannot_empty_lists(self):
+        orchestrator = self.full()
+        orchestrator.record_at_source({"replace_lists": ["materials"]})
+        self.assertEqual(len(orchestrator.builder.data["materials"]), 1)
+
+    def test_the_lead_still_can_take_records_back(self):
+        orchestrator = self.full()
+        orchestrator.add({"replace_lists": ["materials"]})
+        self.assertEqual(orchestrator.builder.data["materials"], [])
+
+    def test_an_empty_list_does_not_erase_known_conditions(self):
+        orchestrator = self.full()
+        orchestrator.record_at_source({"materials": [{"material_number": "M1", "conditions": [], "stock": 3}]})
+        material = orchestrator.builder.data["materials"][0]
+        self.assertEqual((len(material["conditions"]), material["stock"]), (1, 3))
+
+
 class TheChecklistBeforeTheBrief(unittest.TestCase):
     def test_needs_are_known_before_reference_and_date_are_recorded(self):
         orchestrator = lead()

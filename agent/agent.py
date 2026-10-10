@@ -270,8 +270,8 @@ class Orchestrator:
     def record_at_source(self, update) -> str:
         """A browsing sub-agent's `record`: adds its update to the facts at once, so nothing it read is lost when its
         time runs out, and wakes the dispatcher. No pricing here; the state prices."""
-        if isinstance(update, dict):
-            update = {key: value for key, value in update.items() if key != "authority"}
+        if isinstance(update, dict):  # an automatic recorder never takes records back (see `add`)
+            update = {key: value for key, value in update.items() if key not in ("authority", "replace_lists")}
         try:
             summary = self.builder.add(update)
         except Exception as error:  # noqa: BLE001 - a ValueError names the bad field; the sub-agent corrects it
@@ -502,9 +502,12 @@ class Orchestrator:
         return tab
 
     def add(self, update, by_lead: bool = True, prefer_existing: bool = False) -> str:
-        """Adds an update to the facts and prices the bid; a bad update is rejected whole and named."""
+        """Adds an update to the facts and prices the bid; a bad update is rejected whole and named. Only the lead
+        may take records back with `replace_lists`: a recorder that used it emptied every list it named and did not
+        refill (positions, revisions, materials), which wiped a run's facts in one call."""
         if isinstance(update, dict):
-            update = {key: value for key, value in update.items() if key != "authority"}  # the engine's default
+            dropped = ("authority",) if by_lead else ("authority", "replace_lists")  # authority: the engine's default
+            update = {key: value for key, value in update.items() if key not in dropped}
         try:
             summary = self.builder.add(update, prefer_existing=prefer_existing)
             self.facts_changed.set()

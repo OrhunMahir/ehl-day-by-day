@@ -1,0 +1,53 @@
+bu valueya 70 mi yazayım
+
+---
+
+secretı düzelttim koşuyu başlatmadan önce her şey hazır mı openai çalışacak mı ve han gi modeli kullanacaksın
+
+---
+
+tamam gpt 6.1 sol iyi çalışırsa ama pahalı olursa gpt 6 lunayı deneriz bunlar diyatlar  ve limitlergpt 
+
+<pasted_content id="f5a2">
+Model	Token limits	Request and other limits	Batch queue limits
+gpt-6-astra
+1,000,000 TPM
+5,000 RPM
+1,350,000 TPD
+gpt-6.1-sol
+1,000,000 TPM
+5,000 RPM
+1,350,000 TPD
+gpt-6-luna
+2,000,000 TPM
+5,000 RPM
+20,000,000 TPD
+</pasted_content id="f5a2">
+
+---
+
+ama dur başlatma beni bekle
+
+---
+
+tamam runlamak için hazır mısın daha runlama
+
+---
+
+<bash-input>cd /Users/orhun/Developer/hackathon/ehl/.worktrees/openai && atira test-run agent</bash-input><bash-stdout>Test run reh_993ca4b2bb042b02 queued as run_9482f4f55a082374: 38 files, 136.6 KB compressed.
+Watch it: https://ehl-challenge.atira.ai/runs/run_9482f4f55a082374
+Logs: atira logs run_9482f4f55a082374 --follow</bash-stdout><bash-stderr></bash-stderr>
+
+---
+
+failladı neden
+
+---
+
+<task-notification>
+<task-id>bbcs3tzpl</task-id>
+<tool-use-id>toolu_01MPpwAwyxEp8rrqrRFMwQrZ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bbcs3tzpl.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait until the run makes its first model calls or reports a model error, then show only error lines and the start-up line" completed (exit code 0)</summary>
+</task-notification>

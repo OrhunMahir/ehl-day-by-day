@@ -1,0 +1,33 @@
+is there any way to test the baseline and 18-ivan locally, and somehow to boost the process. We are loosing way to much time with these 15 min test runs
+
+---
+
+but I read that somehow we have a limit of 32 qwen sessions running in parallel. Is this true?
+
+---
+
+<task-notification>
+<task-id>btaq9z9bi</task-id>
+<tool-use-id>toolu_017u6WwJ4eKgR1B7gbf1BRWz</tool-use-id>
+<output-file>C:\Users\IVANUZ~1\AppData\Local\Temp\claude\c--Users-Ivan-Uzunov-projects-ehl-day-by-day\63b2d78c-bd7f-45fe-af13-734f4d6272aa\tasks\btaq9z9bi.output</output-file>
+<status>completed</status>
+<summary>Background command "Run baseline and 18-ivan locally in parallel" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>byw3oawff</task-id>
+<tool-use-id>toolu_01H1hL8keXPjkBuC9DF3Z1GR</tool-use-id>
+<output-file>C:\Users\IVANUZ~1\AppData\Local\Temp\claude\c--Users-Ivan-Uzunov-projects-ehl-day-by-day\63b2d78c-bd7f-45fe-af13-734f4d6272aa\tasks\byw3oawff.output</output-file>
+<status>completed</status>
+<summary>Background command "Show the baseline sandbox run's lead timeline, masked" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+okay, but does it really make sense to have one agent per website. cant all be done with just 1-2 agents?
+
+---
+
+yes build the lean version.

@@ -20,6 +20,9 @@ TOOLS = [
     ("press", "Press a keyboard key on the page, e.g. Escape, Enter, F4, Tab.", {"key": "string"}),
     ("back", "Go back in the browser history.", {}),
     ("read_more", "Continue reading a long page view from a character offset.", {"offset": "integer"}),
+    ("read_pages", "Read up to 6 pages at once whose addresses you see (links '-> /path' of records, tabs, messages, "
+     "documents): they are opened in the background and returned together. Much faster than visiting them one by "
+     "one; use goto when you need to act on a page.", {"urls": "array"}),
     ("collect_pages", "Read a paged list in one step: give the number of its 'next page' or 'load more' control; it "
      "is followed until it disappears (or max_pages) and the pages are returned together.",
      {"element": "string", "max_pages": "integer"}),
@@ -50,13 +53,16 @@ WRAP_UP_RESERVE = 45  # seconds before the deadline at which browsing stops, so 
 CALL_SECONDS = 75  # one model call may take at most this long before it is retried
 CALL_ATTEMPTS = 3
 ACTION_SECONDS = 60  # one browser action may take at most this long
+PREVIOUS_VIEW_CHARS = 4000  # the page view before the newest one is cut to this length
+SHORTENED = "\n... (older page view shortened to save space; your notes keep what mattered)"
 NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
 
 
 def tool_schemas(multi_site: bool) -> list[dict]:
     schemas = []
     for name, description, params in TOOLS:
-        properties = {key: {"type": kind} for key, kind in params.items()}
+        properties = {key: ({"type": "array", "items": {"type": "string"}} if kind == "array" else {"type": kind})
+                      for key, kind in params.items()}
         required = [key for key in params if key not in OPTIONAL]
         if multi_site and name not in ("note", "finish"):
             properties["site"] = {"type": "string", "description": "which website (siteId)"}
@@ -79,6 +85,8 @@ Working rules:
   unrelated offers), decoy buttons that do nothing, error pages that work on a retry, session timeouts that send you
   back to the login (use the login tool again), paging and "load more" controls, superseded documents shown first,
   look-alike records for other references. Verify that what you read belongs to the exact reference you need.
+- Several pages to read whose addresses you can see (a record's tabs, the messages in a result list, documents):
+  use read_pages with all of them in one call instead of visiting each.
 - Paged lists and "load more": use collect_pages instead of clicking through page by page. A search that shows
   no results may be too broad or too narrow: refine it before concluding that nothing exists.
 - Prefer direct links: if an element shows "-> /some/path", you may goto that path. For files (ZIP, CSV, PDF), use
@@ -170,6 +178,16 @@ class BrowsingAgent:
         tab = self._tab(args) if name not in ("note", "finish") else None
         if tab is not None:
             self.last_tab = tab
+        if name == "read_pages":
+            urls = args.get("urls") or []
+            if isinstance(urls, str):
+                urls = [u.strip() for u in urls.replace("\n", ",").split(",") if u.strip()]
+            refused = [u for u in urls if self._foreign_site(tab, u)]
+            if refused:
+                self.refusals += len(refused)
+            args = {**args, "urls": [u for u in urls if u not in refused]}
+            if not args["urls"]:
+                return "Refused: those pages belong to other websites; stay on your own and list them under NOT CHECKED."
         if name in ("goto", "download"):
             refusal = self._foreign_site(tab, args.get("url", ""))
             if refusal:
@@ -213,6 +231,8 @@ class BrowsingAgent:
             return await tab.press(args["key"])
         if name == "back":
             return await tab.back()
+        if name == "read_pages":
+            return await tab.read_pages([str(u) for u in args["urls"]])
         if name == "collect_pages":
             return await tab.collect_pages(str(args["element"]), int(args.get("max_pages") or 10))
         if name == "read_more":
@@ -381,3 +401,6 @@ class BrowsingAgent:
         for i in views[:-keep]:
             first = messages[i]["content"].splitlines()[0][:200]
             messages[i]["content"] = f"(older page view removed to save space; it began: {first})"
+        for i in views[-keep:-1]:  # the previous view is kept short; only the newest one stays whole
+            if len(messages[i]["content"]) > PREVIOUS_VIEW_CHARS and not messages[i]["content"].endswith(SHORTENED):
+                messages[i]["content"] = messages[i]["content"][:PREVIOUS_VIEW_CHARS] + SHORTENED

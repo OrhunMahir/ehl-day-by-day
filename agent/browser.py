@@ -19,6 +19,8 @@ FETCH_JS = """async (url) => {
   response.headers.forEach((value, key) => { headers[key] = value; });
   return {status: response.status, headers, data: btoa(binary)};
 }"""
+READ_PAGES_MAX = 6  # pages per read_pages call
+READ_PAGES_EACH = 8000  # characters kept per page in read_pages
 FRAME_READ_SECONDS = 10  # reading one frame may take at most this long
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
 
@@ -105,6 +107,7 @@ class Tab:
         self.last_text = ""
         self.last_status = 0  # HTTP status of the last page load in the main frame
         self.scratch_pages: set = set()
+        self.previous: list = []  # pages below the active popup, newest last
         self._attach(page)
 
     def _attach(self, page):
@@ -132,7 +135,13 @@ class Tab:
             self.events.append(f"Download of {name!r} failed: {error}")
 
     async def _on_new_page(self, new):
-        if new is self.page:
+        if new is self.page or new in self.scratch_pages:
+            return
+        try:  # follow only popups this tab opened, not other tabs sharing the browser
+            opener = await new.opener()
+        except Exception:  # noqa: BLE001
+            opener = None
+        if opener is not self.page and opener not in self.previous:
             return
         try:
             await new.wait_for_load_state("domcontentloaded", timeout=10000)
@@ -141,8 +150,36 @@ class Tab:
         if new in self.scratch_pages or new.is_closed():
             return
         self.events.append(f"A new tab opened at {new.url}; switched to it")
+        self.previous.append(self.page)
         self.page = new
         self._attach_page_only(new)
+        new.on("close", self._on_close)
+
+    def _on_close(self, page):
+        """A popup that closes itself (e.g. a search help after a selection): go back to the page below it."""
+        if page is not self.page:
+            return
+        while self.previous and self.previous[-1].is_closed():
+            self.previous.pop()
+        if self.previous:
+            self.page = self.previous.pop()
+            self.events.append("The popup closed; back on the page that opened it")
+
+    async def _ensure_open(self):
+        """The active page must be open: fall back to an earlier page of this tab, or reopen the site."""
+        if not self.page.is_closed():
+            return
+        while self.previous and self.previous[-1].is_closed():
+            self.previous.pop()
+        if self.previous:
+            self.page = self.previous.pop()
+            self.events.append("The active page had closed; back on the previous page")
+            return
+        self.page = await self.page.context.new_page()
+        self._attach_page_only(self.page)
+        if self.home:
+            await self.page.goto(self.home, wait_until="domcontentloaded")
+        self.events.append("The active page had closed; opened the website again")
 
     def _attach_page_only(self, page):
         page.on("response", self._on_response)
@@ -189,6 +226,7 @@ class Tab:
 
     async def observe(self, offset: int = 0) -> str:
         """The page as text: URL, title, each frame's content with numbered elements, and recent events."""
+        await self._ensure_open()
         await self.settle()
         await self._retry_server_error()
         parts, start = [], 0
@@ -237,6 +275,7 @@ class Tab:
         return frame.locator(f'[data-aid="{aid}"]').first
 
     async def click(self, aid: str) -> str:
+        await self._ensure_open()
         locator = self._locate(aid)
         try:
             await locator.scroll_into_view_if_needed(timeout=3000)
@@ -250,6 +289,7 @@ class Tab:
         return await self.observe()
 
     async def fill(self, aid: str, text: str, submit: bool = False) -> str:
+        await self._ensure_open()
         locator = self._locate(aid)
         await locator.fill(text, timeout=6000)
         if submit:
@@ -258,6 +298,7 @@ class Tab:
         return await self.observe()
 
     async def select(self, aid: str, option: str) -> str:
+        await self._ensure_open()
         locator = self._locate(aid)
         try:
             await locator.select_option(label=option, timeout=4000)
@@ -267,11 +308,13 @@ class Tab:
         return await self.observe()
 
     async def press(self, key: str) -> str:
+        await self._ensure_open()
         await self.page.keyboard.press(key)
         await asyncio.sleep(0.5)
         return await self.observe()
 
     async def goto(self, url: str) -> str:
+        await self._ensure_open()
         for attempt in range(3):
             try:
                 response = await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -286,6 +329,7 @@ class Tab:
         return await self.observe()
 
     async def back(self) -> str:
+        await self._ensure_open()
         await self.page.go_back()
         return await self.observe()
 
@@ -300,24 +344,52 @@ class Tab:
             response = await self.page.context.request.get(url)
             return response.status, response.headers, await response.body()
 
+    async def _render_readonly(self, url: str) -> str:
+        """A page rendered in a background tab with this tab's session, as text: hidden decoys are filtered like in
+        any page view. Element numbers are left out (the tab closes); links keep their target."""
+        scratch = await self.page.context.new_page()
+        self.scratch_pages.add(scratch)
+        try:
+            await scratch.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(0.5)
+            parts = []
+            for index, frame in enumerate(scratch.frames):
+                try:
+                    result = await asyncio.wait_for(
+                        frame.evaluate(OBSERVE_JS, {"prefix": f"x{index}.", "start": 0, "full": True}),
+                        timeout=FRAME_READ_SECONDS)
+                    parts.append(result["text"])
+                except Exception as error:  # noqa: BLE001
+                    parts.append(f"(a frame could not be read: {type(error).__name__})")
+            return re.sub(r"\[x\d+\.\d+\] ", "", "\n".join(parts))
+        finally:
+            await scratch.close()
+
+    async def read_pages(self, urls: list[str]) -> str:
+        """Several pages the model chose, read in parallel in background tabs and returned together."""
+        urls = [u if "://" in u else self._absolute(u) for u in urls][:READ_PAGES_MAX]
+
+        async def one(url):
+            try:
+                text = await asyncio.wait_for(self._render_readonly(url), timeout=45)
+            except Exception as error:  # noqa: BLE001
+                text = f"(could not be read: {type(error).__name__} {str(error).splitlines()[0][:200] if str(error) else ''})"
+            if len(text) > READ_PAGES_EACH:
+                text = text[:READ_PAGES_EACH] + f"\n... (cut; open it with goto to read all {len(text)} characters)"
+            return f"===== {url} =====\n{text}"
+        joined = "\n".join(await asyncio.gather(*(one(u) for u in urls)))
+        self.last_text = joined
+        body = joined[:MAX_OBSERVATION]
+        if len(joined) > MAX_OBSERVATION:
+            body += f"\n... (continues: read_more with offset={MAX_OBSERVATION})"
+        return f"Read {len(urls)} pages (read-only; to act on one, goto it):\n" + body
+
     async def fetch_file(self, url: str) -> str:
         """Downloads a URL with this tab's session (cookies) and reads it: for ZIPs and documents behind links."""
         url = url if "://" in url else self._absolute(url)
         status, headers, data = await self._fetch_bytes(url)
         if "html" in headers.get("content-type", ""):
-            # a web page: render it in a scratch tab so hidden decoys are filtered like any page view
-            scratch = await self.page.context.new_page()
-            self.scratch_pages.add(scratch)
-            try:
-                await scratch.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await asyncio.sleep(0.5)
-                parts = []
-                for index, frame in enumerate(scratch.frames):
-                    result = await frame.evaluate(OBSERVE_JS, {"prefix": f"x{index}.", "start": 0, "full": True})
-                    parts.append(result["text"])
-                text = "\n".join(parts)
-            finally:
-                await scratch.close()
+            text = await self._render_readonly(url)
             return f"HTTP {status}, page {url} (read-only view; open it with goto to interact):\n" + text[:MAX_OBSERVATION]
         name = url.rstrip("/").split("/")[-1].split("?")[0] or "download"
         disposition = headers.get("content-disposition", "")

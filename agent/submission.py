@@ -29,6 +29,11 @@ How to work:
 - Use fill_form for every group of fields you can see: give all of them in one call, in the order they appear on
   the page, and name the button that continues in click_after. Dropdowns that depend on each other (one choice
   changes the options of the next) work in one call too: list them in order, each with the option text you want.
+- A field that is not on the page yet, because it only appears after an earlier choice, can be named by its
+  label instead of a number (`label`); it is looked up when its turn comes. The button in click_after can be named
+  by its text in the same way.
+- When a step repeats (e.g. one step per position), you know its fields after the first time: from then on give
+  the whole step in one call, with labels for the fields that appear later, and the button that continues.
 - A fill_form result says for every field what was set or why it failed, then shows the page as it is now. Read
   it before you go on. After a failure, continue from that field with the numbers of the new page view.
 - Enter the values of the answer exactly. Write numbers the way the form expects them (look at its examples,
@@ -54,6 +59,37 @@ IDENTITY_JS = """el => {
     tag: el.tagName, type: (el.type || "").toLowerCase(), name: el.name || "", id: el.id || "",
     label: (words.trim() || el.getAttribute("aria-label") || el.name || "").replace(/\\s+/g, " ").trim().slice(0, 60),
   };
+}"""
+
+# Finds the form control the model named by its label: the label's own words, aria-label, placeholder, name or id;
+# exact first, then one that starts with it or contains it. Marks it so it can be picked up, or lists what is there.
+LABEL_JS = """(wanted) => {
+  const norm = (s) => (s || "").replace(/\\s+/g, " ").trim().toLowerCase().replace(/[:*]+$/, "").trim();
+  const w = norm(wanted);
+  const controls = [...document.querySelectorAll(
+    "input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=image]), select, textarea")]
+    .filter((el) => el.checkVisibility({visibilityProperty: true}));
+  const names = (el) => {
+    const label = el.labels && el.labels[0];
+    const words = label ? [...label.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(" ") : "";
+    return [words.trim() ? words : (label ? label.innerText : ""), el.getAttribute("aria-label"),
+            el.getAttribute("placeholder"), el.name, el.id].map(norm).filter(Boolean);
+  };
+  const score = (el) => {
+    const all = names(el);
+    return all.includes(w) ? 3 : all.some((n) => n.startsWith(w)) ? 2 : all.some((n) => n.includes(w)) ? 1 : 0;
+  };
+  let best = null, top = 0, ties = 0;
+  for (const el of controls) {
+    const value = score(el);
+    if (value > top) { best = el; top = value; ties = 1; } else if (value === top && value > 0) { ties += 1; }
+  }
+  document.querySelectorAll("[data-fill-target]").forEach((el) => el.removeAttribute("data-fill-target"));
+  if (!best || ties > 1) {
+    return {found: false, several: ties > 1, labels: controls.map((el) => names(el)[0]).filter(Boolean).slice(0, 40)};
+  }
+  best.setAttribute("data-fill-target", "1");
+  return {found: true};
 }"""
 
 # Finds the option the model named: exact text or value first, then a text that starts with it or contains it,
@@ -87,14 +123,18 @@ def tool_schemas(sites: list[str]) -> list[dict]:
              ["site", "url"]),
         tool("click", "Click one element.", {"site": site, "element": element}, ["site", "element"]),
         tool("fill_form",
-             "Set several fields in one go, in the order given, then optionally click a button. For a text field the "
-             "value is typed; for a select it is the option's text; for a checkbox or radio button it is true or "
-             "false. Stops at the first field that fails and reports every field.",
+             "Set several fields in one go, in the order given, then optionally click a button. Name each field "
+             "by its element number, or by its label when it is not on the page yet. For a text field the value "
+             "is typed; for a select it is the option's text; for a checkbox or radio button it is true or false. "
+             "Stops at the first field that fails and reports every field.",
              {"site": site,
               "fields": {"type": "array", "items": {"type": "object", "properties": {
-                  "element": element, "value": {"type": "string"}}, "required": ["element", "value"]}},
-              "click_after": {"type": "string", "description": "element number of the button to click once every "
-                                                                "field is set, e.g. the one that continues"}},
+                  "element": element,
+                  "label": {"type": "string", "description": "the field's label, instead of element, for a field "
+                                                             "that appears only after an earlier choice"},
+                  "value": {"type": "string"}}, "required": ["value"]}},
+              "click_after": {"type": "string", "description": "element number, or text, of the button to click "
+                                                                "once every field is set, e.g. the one that continues"}},
              ["site", "fields"]),
         tool("read_more", "Continue reading a long page view from a character offset.",
              {"site": site, "offset": {"type": "integer"}}, ["site", "offset"]),
@@ -203,16 +243,17 @@ async def fill_form(tab: Tab, fields: list[dict], click_after: str | None = None
     """Sets the fields in order and clicks `click_after` if all of them were set; returns the outcome per field and
     the page as it is afterwards.
 
-    Every element is looked up before the first one is changed, because the numbers of a page view stop being
-    valid once the page changes. A field that the page has rebuilt in the meantime is found again by its id or name.
+    Every numbered element is looked up before the first one is changed, because the numbers of a page view stop
+    being valid once the page changes. A field that the page has rebuilt in the meantime is found again by its id
+    or name. A field named by its label is looked up when its turn comes, so it may appear after an earlier choice.
     """
-    targets = [await _target(tab, str(field.get("element", ""))) for field in fields]
-    button = await _target(tab, str(click_after)) if click_after else None
+    targets = [await _target(tab, field) for field in fields]
+    button = await _target(tab, {"element": str(click_after)}, button=True) if click_after else None
 
     outcomes, complete = [], True
     for field, target in zip(fields, targets):
         outcome = await _set(target, str(field.get("value", "")))
-        outcomes.append(f"[{field.get('element')}] {target['identity'].get('label') or 'field'}: {outcome}")
+        outcomes.append(f"[{target['name']}] {target['identity'].get('label') or 'field'}: {outcome}")
         if outcome.startswith("FAILED"):
             complete = False
             skipped = len(fields) - len(outcomes)
@@ -221,23 +262,56 @@ async def fill_form(tab: Tab, fields: list[dict], click_after: str | None = None
             break
 
     if button and complete:
-        outcomes.append(f"[{click_after}] click: {await _click(button)}")
+        outcomes.append(f"[{click_after}] click: {await _click(tab, button)}")
     elif button:
         outcomes.append(f"[{click_after}] not clicked, because a field failed")
     return "\n".join(outcomes) + "\n\n# The page now\n" + await tab.observe()
 
 
-async def _target(tab: Tab, aid: str) -> dict:
-    aid = aid.strip().strip("[]")
+def _is_number(aid: str) -> bool:
+    return bool(aid) and all(part.isdigit() for part in aid.replace("f", "", 1).split(".")) and aid[-1].isdigit()
+
+
+async def _target(tab: Tab, field: dict, button: bool = False) -> dict:
+    aid = str(field.get("element") or "").strip().strip("[]")
+    label = str(field.get("label") or "").strip()
+    if aid and not _is_number(aid):  # the model named it by its text
+        aid, label = "", aid
     prefix = aid[: aid.index(".") + 1] if "." in aid else ""
-    frame = tab.aid_frames.get(prefix, tab.page.main_frame)
-    target = {"frame": frame, "handle": None, "identity": {}}
-    try:
-        target["handle"] = await tab._locate(aid).element_handle(timeout=3000)
-        target["identity"] = await target["handle"].evaluate(IDENTITY_JS)
-    except Exception:  # noqa: BLE001 - reported as a failed field when it is this field's turn
-        pass
+    target = {"tab": tab, "frame": tab.aid_frames.get(prefix, tab.page.main_frame), "handle": None, "identity": {},
+              "label": label, "button": button, "name": aid or f'"{label}"'}
+    if aid:
+        try:
+            target["handle"] = await tab._locate(aid).element_handle(timeout=3000)
+            target["identity"] = await target["handle"].evaluate(IDENTITY_JS)
+        except Exception:  # noqa: BLE001 - reported as a failed field when it is this field's turn
+            pass
     return target
+
+
+async def _by_label(target: dict) -> str:
+    """Looks a labelled field up on the page as it is now, waiting a moment for it to appear. Returns "" when it
+    was found, otherwise why not."""
+    state, waited = {}, 0.0
+    while waited <= OPTION_WAIT_SECONDS:
+        for frame in target["tab"].page.frames:
+            try:
+                state = await frame.evaluate(LABEL_JS, target["label"])
+            except Exception:  # noqa: BLE001 - a frame that is navigating is skipped this round
+                continue
+            if state.get("found"):
+                handle = await frame.query_selector("[data-fill-target]")
+                if handle:
+                    target["frame"], target["handle"] = frame, handle
+                    target["identity"] = await handle.evaluate(IDENTITY_JS)
+                    return ""
+            if state.get("several"):
+                break
+        await asyncio.sleep(0.5)
+        waited += 0.5
+    if state.get("several"):
+        return f'FAILED: several fields match "{target["label"]}"; use the element number'
+    return f'FAILED: no field labelled "{target["label"]}"; the fields are: ' + " ; ".join(state.get("labels", []))
 
 
 async def _current(target: dict):
@@ -261,6 +335,10 @@ async def _current(target: dict):
 
 
 async def _set(target: dict, value: str) -> str:
+    if target["handle"] is None and target["label"]:
+        problem = await _by_label(target)
+        if problem:
+            return problem
     if target["handle"] is None:
         return "FAILED: no such element in the latest page view"
     error = ""
@@ -301,15 +379,20 @@ async def _choose(target: dict, wanted: str) -> str:
     return f'FAILED: no option "{wanted}"; the options are: ' + " ; ".join(state.get("options", []))
 
 
-async def _click(target: dict) -> str:
+async def _click(tab: Tab, target: dict) -> str:
     handle = await _current(target)
+    if handle is None and target["label"]:  # named by its text: look it up on the page as it is now
+        try:
+            handle = await tab._locate(target["label"]).element_handle(timeout=3000)
+        except Exception:  # noqa: BLE001
+            handle = None
     if handle is None:
-        return "FAILED: the button is no longer on the page"
+        return "FAILED: the button is not on the page"
     try:
         await handle.click(timeout=6000)
     except Exception:  # noqa: BLE001 - covered or off-screen: a DOM click still works
         await handle.evaluate("el => el.click()")
-    await _after_change(target["frame"])
+    await _after_change(tab.page.main_frame)
     return "clicked"
 
 

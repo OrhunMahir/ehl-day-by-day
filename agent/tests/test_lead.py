@@ -197,5 +197,115 @@ class SeveralInvestigationsOfOneWebsite(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len({id(tab) for tab, _, _ in SlowSubAgent.spans}), 1)
 
 
+def tool_call(name, arguments):
+    from types import SimpleNamespace as NS
+    return NS(content="", tool_calls=[NS(id="c", function=NS(name=name, arguments=json.dumps(arguments)))])
+
+
+class StandInModel:
+    """The lead asks for one round of investigations and then waits; the recorder turns a report into facts.
+    `recorder` decides what the recorder's calls return, one entry per call."""
+
+    def __init__(self, recorder, recorder_delay=0.0):
+        self.recorder, self.recorder_delay = list(recorder), recorder_delay
+        self.lead_calls, self.states = [], []
+
+    async def chat(self, messages, tools, **kwargs):
+        forced = kwargs.get("tool_choice", {}).get("function", {}).get("name")
+        if len(tools) == 1:  # the recorder has only add_facts
+            await asyncio.sleep(self.recorder_delay)
+            update = self.recorder.pop(0) if self.recorder else {}
+            if isinstance(update, Exception):
+                raise update
+            return tool_call("add_facts", {"facts": update})
+        self.lead_calls.append(forced or "free")
+        self.states += [m["content"] for m in messages if m["role"] == "user" and m["content"].startswith("State of the bid")]
+        if forced == "add_facts":
+            return tool_call("add_facts", {"facts": facts_with(["G1"], [MATCH_1])})
+        if forced == "submit_bid":
+            return tool_call("submit_bid", {"hints": ""})
+        if len(self.lead_calls) == 1:
+            return tool_call("investigate", {"site": "erp", "task": "read"})
+        await asyncio.sleep(0.05)
+        return tool_call("calculate", {"expression": "1"})
+
+
+class QuickSubAgent:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def run(self):
+        return "report"
+
+    def _report(self, text):
+        return text
+
+
+class Signs:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def run(self):
+        return "receipt"
+
+
+class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
+    async def run_with(self, model, investigate_for=0.4):
+        task = {**TASK, "access": [{"siteId": "erp", "url": "https://erp.example.test"}],
+                "submission": {"kind": "site", "siteId": "erp"}}
+        orchestrator = agent.Orchestrator(task, None, {"erp": FakeTab("erp", FakePage())}, model, time.time())
+        self.logged = []
+        orchestrator.log = self.logged.append
+        orchestrator.collect_until = orchestrator.submit_from = time.time() + investigate_for
+        orchestrator.deadline = time.time() + 600
+        with patch.object(agent, "BrowsingAgent", QuickSubAgent), patch.object(agent, "SubmissionAgent", Signs), \
+                patch.object(agent, "Tab", FakeTab):
+            await asyncio.wait_for(orchestrator.run(), timeout=20)
+        return orchestrator
+
+    async def test_the_lead_never_writes_facts_and_the_priced_answer_is_submitted(self):
+        model = StandInModel([facts_with(["G1", "G2"], [MATCH_1, MATCH_2])])
+        orchestrator = await self.run_with(model)
+        self.assertTrue(orchestrator.accepted)
+        self.assertEqual([p["position"] for p in orchestrator.submitted["positions"]], ["1", "2"])
+        self.assertNotIn("add_facts", model.lead_calls)
+        self.assertTrue(any('"decision": "bid"' in state for state in model.states))
+
+    async def test_a_bad_update_is_corrected_by_the_recorder(self):
+        model = StandInModel([{"bogus": 1}, facts_with(["G1"], [MATCH_1])])
+        orchestrator = await self.run_with(model)
+        self.assertEqual([p["position"] for p in orchestrator.submitted["positions"]], ["1"])
+        self.assertEqual(orchestrator.unrecorded, [])
+
+    async def test_a_report_that_cannot_be_recorded_is_named_to_the_lead_who_adds_the_facts(self):
+        # the recording fails twice: the forced call and the plain call after it
+        model = StandInModel([RuntimeError("no model")] * 2)
+        orchestrator = await self.run_with(model)
+        self.assertTrue(any("Not recorded" in state and "erp" in state for state in model.states))
+        self.assertIn("add_facts", model.lead_calls)  # without any facts the lead is made to add them
+        self.assertTrue(orchestrator.accepted)
+
+    async def test_a_recording_call_that_stalls_is_asked_again(self):
+        class StallsOnce(StandInModel):
+            stalled = False
+
+            async def chat(self, messages, tools, **kwargs):
+                if len(tools) == 1 and not self.stalled:
+                    self.stalled = True
+                    await asyncio.sleep(3600)
+                return await super().chat(messages, tools, **kwargs)
+
+        with patch.object(agent, "RECORD_CALL_SECONDS", 0.3):
+            orchestrator = await self.run_with(StallsOnce([facts_with(["G1"], [MATCH_1])]), investigate_for=0.2)
+        self.assertEqual([p["position"] for p in orchestrator.submitted["positions"]], ["1"])
+        self.assertTrue(any("took too long" in line for line in self.logged))
+
+    async def test_the_submission_waits_for_a_report_that_is_still_being_recorded(self):
+        model = StandInModel([facts_with(["G1", "G2"], [MATCH_1, MATCH_2])], recorder_delay=0.8)
+        orchestrator = await self.run_with(model, investigate_for=0.2)
+        self.assertEqual([p["position"] for p in orchestrator.submitted["positions"]], ["1", "2"])
+        self.assertNotIn("add_facts", model.lead_calls)
+
+
 if __name__ == "__main__":
     unittest.main()

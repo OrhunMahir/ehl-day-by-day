@@ -19,13 +19,15 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
      a task in plain language. Up to four investigations can work the same website at once: beyond the first,
      each gets a tab in a browser context of its own (inside the same browser) and signs in there. The sub-agent drives the browser through a text view of the page (`observe.js`,
      `Tab` in `browser.py`), takes notes, and returns one text report. Several sites run in parallel.
-   - `add_facts(facts)` adds records to a `facts.FactsBuilder` (lists grow, a record with the same identity
-     replaces the earlier one), runs the bid engine (`engine/`) and returns the priced answer, what is missing
-     (`issues`, `needed`) and whether the facts are `complete`. `price_bid()` prices again without adding.
+   - The facts of every report are recorded without the lead: when a report comes back, a separate model call
+     puts its facts into a `facts.FactsBuilder`, several reports side by side. After a round the lead gets the
+     state of the bid as the engine (`engine/`) prices it: answer, `issues`, `needed`, `complete`.
+   - `add_facts(facts)` lets the lead correct or add records itself; `price_bid()` prices again without adding.
    - `calculate(expression)` does exact decimal arithmetic (`calc.py`); a fallback since the engine exists.
    - `submit_bid(answer, hints)` checks the answer against the schema, then sends the submission agent
      (`submission.py`) to enter the bid in the tender website's form, fetch the signing code from the mailbox, sign
-     and confirm. It reads the page like a browsing sub-agent, but sets all fields of a form step in one call.
+     and confirm. It reads the page like a browsing sub-agent, but sets all fields of a form step in one call;
+     a field that only appears after an earlier choice is named by its label and looked up when its turn comes.
 3. The lead model decides what to ask next from the reports, works out the bid, and submits.
 
 The run's time is split in `agent.py`. Every run, scored or not, works with 20 minutes. One investigation is
@@ -134,7 +136,7 @@ them, and one signed bid is submitted before the clock ends, every time.
 
 **Files only this stream edits.** `agent/agent.py`, `agent/submission.py`, `agent/llm.py`, `agent/models.py`, `agent/run.py`,
 `agent/calc.py`, `agent/agent.json`, `agent/pyproject.toml`, `agent/uv.lock`, `agent/tests/test_kit.py`,
-`agent/tests/test_lead.py`,
+`agent/tests/test_lead.py`, `agent/tests/test_submission.py`,
 `README.md`, `AGENTS.md`, `CLAUDE.md`, `.gitignore`, `docs/` (except the other two push logs).
 
 **Work, in this order.**
@@ -148,8 +150,9 @@ them, and one signed bid is submitted before the clock ends, every time.
    end, which fits an investigation but not a submission (stream J's file; the task text asks it not to stop).
 4. Reports to facts: have the lead model put what the sub-agents report into the records of `facts.py`, and call
    the engine instead of the calculator, as soon as stream I delivers the first version.
-5. Submission: `submission.py` fills a whole form step per model call. Open: it has not yet been seen to reach
-   the signature on the website; the signing code from the mailbox and the receipt check are untested.
+5. Submission: `submission.py` fills a whole form step per model call, including fields that appear later
+   (by label). Bids with no or one position have been signed in the sandbox; with two positions the time ran out
+   before the label-based filling existed. Open: a sandbox run of that.
 6. `llm.py`: when a provider's environment variable is missing it falls back to the provider's public address.
    Model calls must only go through the platform's proxy, so remove these fallbacks.
 7. Dependencies requested by the other streams (`pypdf` for stream J is in).

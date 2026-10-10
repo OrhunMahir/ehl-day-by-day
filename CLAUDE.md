@@ -104,7 +104,7 @@ another stream's files. Each person's coding agent works only inside that person
 |---|---|---|---|
 | **Julien** | J: sites and reading | `browser.py`, `observe.js`, `browsing.py`, `browsers.py`, `tests/test_browser*` | Sub-agent reports that are complete and exact on each site: documents, paging, revisions, session timeouts, look-alike records; nothing tied to the public sites' layout; pitch and development story |
 | **Ivan** | I: bid engine | `facts.py`, `engine/`, `tests/test_engine*` | Rule walkthrough 01–28; typed facts; deterministic calculation in layers (core first, then advanced pricing); cases with invented numbers |
-| **Orhun** (captain) | O: lead, submission, runs | `agent.py`, `submission.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, `tests/test_lead.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
+| **Orhun** (captain) | O: lead, submission, runs | `agent.py`, `submission.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, `tests/test_lead.py`, `tests/test_submission.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
 
 How the streams meet:
 

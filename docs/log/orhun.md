@@ -2,6 +2,60 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 17:08 · Reports recorded in the background, a form step with later fields in one call
+
+- Changed: `agent/agent.py`: when a report comes back, a separate model call records its facts into the
+  `FactsBuilder` while the lead goes on; several reports are recorded side by side, a stalled call is asked again
+  after 75 seconds, a bad update is shown to the recorder to correct. After a round the lead waits up to 40
+  seconds for the recordings and gets the state of the bid (answer, issues, needed, complete); it uses `add_facts`
+  only for corrections. Before any submission the pending recordings are awaited, as long as 7 minutes stay for
+  the submission. The check whether the platform closed the run asks three times, 2 seconds apart; a model error
+  after a submission ends the run quietly. `agent/submission.py`: a field of `fill_form` can be named by its
+  label and is then looked up when its turn comes, so fields that appear after an earlier choice fit into the
+  same call; the button can be named by its text. New `agent/tests/test_submission.py`, more tests in
+  `test_lead.py`.
+- Why: the lead wrote the facts in one long call of 2 to 8 minutes after the last report, which left the
+  submission too little time; in one run that call hit its limit and was asked again from the start. In the form
+  the model could only set the fields it saw, 1 to 4 per call, because the next field appears after a choice.
+- Checked: all 180 unit tests pass (1 skipped). With stand-ins: the lead never writes facts and the priced answer
+  is submitted; a bad update is corrected by the recorder; a report that cannot be recorded is named to the lead;
+  a stalled recording is asked again; the submission waits for a pending recording. One recording with the hosted
+  model on an invented brief and report took 30 seconds and produced both materials with their price scales and
+  only the two groups the report called searched. In a local Chromium on an invented wizard: a position with four
+  fields that appear one after the other, plus the button, is entered in one call in 2.5 seconds; a missing label
+  or option stops the step and nothing is clicked. Package scan: no site values, no outbound hosts. Not checked:
+  no sandbox run of this state (Orhun asked for no further test runs until this is merged).
+- Earlier states in the sandbox since the last entries: `run_ab9be13227932b2a` (merged `main` with the facts
+  builder): eligible, quality 10. `run_047f01ee3c182580` (lead "high") and `run_bec4e23db1b46edb` (lead and
+  sub-agents "high") ended without a bid; not analysed. `run_1f4a5c1d53b0fdf0` (tabs per site): run_1f4a5c1d53b0fdf0 (test run): finished, phase done Quality 10 · eligible.
+- Learned: one recording call carries about 9,000 prompt tokens (brief, facts schema, report). A recording of the
+  brief alone stalled for 150 seconds in the local trial, so the brief is not recorded on its own; every report's
+  recording takes the tender reference and dates from the brief.
+- For the others: I — recorder failures do not count as the lead's failed updates. J — the recorder reads the
+  four-part reports: "CHECKED, NOT PRESENT" for a group searched completely becomes `searched_groups`, "NOT
+  CHECKED" is left out, so the wording of those sections matters.
+- Next: sandbox runs of the merged state; a scored submission only after two runs in a row sign.
+
+## 2026-10-10 16:51 · Several investigations per website, each in its own tab
+
+- Changed: `agent/agent.py`: a website no longer has one lock. Up to four investigations work it at the same time
+  (`TABS_PER_SITE`); the first uses the tab that is there, each further one gets a tab in a new browser context of
+  the same browser, opened on the site's address, and the sub-agent signs in. Free tabs are used again. If a
+  further tab cannot be opened, the investigation waits for a free one. The lead's prompt says to split a large
+  job on one website (e.g. one catalogue group per investigation). New tests in `agent/tests/test_lead.py`.
+- Why: in two runs no material reached the lead: one ERP tab did not get through five catalogue groups in a
+  4-minute round, and a second ERP investigation had to wait for the first.
+- Checked: unit tests with stand-ins: three investigations of one site run side by side in three tabs; free tabs
+  are reused; no more than four at once; without a further tab they take turns. In a local Chromium: two further
+  tabs open in contexts of their own, the first tab stays on its page and reports no new tab, a choice in one tab
+  does not show in another. All unit tests pass. Sandbox run of this state started; result not in. Not checked:
+  whether the ERP accepts several sessions of the same login at once.
+- Learned: `run_0ffb32eef33e6619` failed because the lead's one long call to write the facts hit the 240-second
+  limit and was asked again from the start: 8 minutes for the facts, under 3 for the submission.
+- For the others: J — further tabs are separate `Tab` objects in separate browser contexts, so one tab's pop-up
+  handling does not see another's pages; `Tab.homes` is shared per site as before. I — nothing.
+- Next: the form (a whole position per call), then the lead's writing time.
+
 ## 2026-10-10 16:43 · Stream I's review of stream O: facts builder, no-bid check, checklist, tests
 
 - Changed: merged `main` (PR #5 of stream J, PR #6 of stream I). `agent/agent.py`: the lead's facts are kept in a

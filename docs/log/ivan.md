@@ -2,6 +2,24 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 20:32 · Plan branch closed: worse in the sandbox; one last facts.py fix
+
+Branch `plan-facts-at-source`. Not to be merged; work continues on `baseline-18` (see `docs/what-we-tried.md` there).
+
+- Changed: `facts.py`: an empty text (`""`) in an update never erases a known value, like `null` and `[]` already
+  did not. One test in `tests/test_engine_builder.py`.
+- Why: recorders fill every field of the schema and send `""` for what their report did not contain. In a local run
+  this reset `bidder_domain` again and again, so the mail needs (which name the sender's domain) changed their ids
+  and were handed out a second time.
+- Checked: 218 unit tests pass (1 skipped). Sandbox test run `run_57f15cb68ad9f88a` of `24c36ea`: quality 5
+  (tender reference only, no position answered). Second local run: the catalogue-group ERP searches started 67 s
+  after the groups were known and 6 materials were recorded with attributes, but the submission ran from 637 s to
+  the end of the run and only one position was priced.
+- Learned: more agents in parallel do not shorten a chain where each site needs the previous site's answer; each new
+  hand-off added a failure mode (wiped facts, empty values, rejected updates) and more stalled model calls.
+- For the others: nothing; this branch stays unmerged. The `""` rule is worth keeping wherever facts are merged.
+- Next: `baseline-18`, the code of the 18.3 submission, improved one tested change at a time.
+
 ## 2026-10-10 19:59 · Plan branch implemented and run locally; a bug that wipes the facts (also on main)
 
 Branch `plan-facts-at-source` (changes stream J and O files at Ivan's request, for review; nothing merged).

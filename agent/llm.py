@@ -97,7 +97,8 @@ def _responses_request(args: dict) -> dict:
 
 class Model:
     def __init__(self, provider: str | None = None, model: str | None = None, reasoning_effort: str | None = None,
-                 thinking: bool | None = None, max_tokens: int | None = None, fallback: "Model | None" = None):
+                 thinking: bool | None = None, max_tokens: int | None = None, fallback: "Model | None" = None,
+                 call_seconds: float | None = None):
         # how much the model thinks before it answers; None leaves the provider's default
         self.reasoning_effort = reasoning_effort
         # False switches Qwen's thinking off entirely: a routine step (a click, copying facts) then answers in a few
@@ -111,8 +112,10 @@ class Model:
         self.provider = provider or os.environ.get("AGENT_PROVIDER") or DEFAULT_PROVIDER
         self.model = model or os.environ.get("AGENT_MODEL") or DEFAULT_MODELS[self.provider]
         base_url, api_key = _client_config(self.provider)
-        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=CALL_TIMEOUT_SECONDS, max_retries=0,
-                                  default_headers=_development_headers())
+        # A request this model normally answers in seconds can hang for minutes; with `call_seconds` it is given
+        # up after that long and sent again, instead of holding its caller for the whole general limit.
+        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=call_seconds or CALL_TIMEOUT_SECONDS,
+                                  max_retries=0, default_headers=_development_headers())
         # OpenAI's reasoning models take only their default temperature and name the answer limit differently; what
         # else a model refuses is learned from its first refusal (see `_adjust`)
         self.reasons = self.provider == "openai"

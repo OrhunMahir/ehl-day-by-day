@@ -1,5 +1,6 @@
 """The kit's plumbing against fakes: reading the run, submitting the answer, the local scouting mode, the browsers'
 CDP URLs, one call to each hosted model, and an entry point that exits cleanly without an answer."""
+import asyncio
 import io
 import json
 import os
@@ -166,6 +167,10 @@ class TheModels(Case):
         self.assertEqual(request["headers"]["Authorization"], "Bearer local")
 
 
+async def _no_sleep(seconds):
+    return None
+
+
 class TheProviderOfARun(Case):
     """The callers speak chat completions and pass the same parameters for every model; `llm.Model` sends what the
     provider takes."""
@@ -287,8 +292,26 @@ class TheProviderOfARun(Case):
                 reader = simple.reading_model(hosted)
         self.assertEqual((reader.provider, reader.model, reader.reasoning_effort, reader.fallback),
                          (simple.READER_PROVIDER, simple.READER_MODEL, simple.READER_REASONING, hosted))
+        self.assertEqual((reader.client.timeout, hosted.client.timeout),
+                         (simple.READER_CALL_SECONDS, llm.CALL_TIMEOUT_SECONDS))
         self.assertIn("reasoning low", simple.described(reader))
         self.assertIn("without thinking", simple.described(hosted))
+
+    async def test_a_call_that_hangs_is_given_up_and_sent_again(self):
+        server = self.serve({"/v1/responses": [(200, self.ANSWER), (200, self.ANSWER)]})
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": server.url + "/v1", "OPENAI_API_KEY": "sk-invented"}):
+            model = llm.Model(provider="openai", model="m", call_seconds=0.3)
+        create, hung = model.client.responses.create, []
+
+        async def first_one_hangs(**request):
+            if not hung:
+                hung.append(request)
+                await asyncio.sleep(0)
+                raise llm.APITimeoutError(request=None)
+            return await create(**request)
+        with patch.object(model.client.responses, "create", first_one_hangs), patch("llm.asyncio.sleep", new=_no_sleep):
+            self.assertEqual((await model.chat([{"role": "user", "content": "one"}])).content, "ok")
+        self.assertEqual((len(hung), len(server.requests)), (1, 1))
 
     async def test_outside_a_run_the_developers_platform_token_goes_in_a_header(self):
         with patch.dict(os.environ, {"ATIRA_TEAM_KEY": "token-invented"}):

@@ -2,6 +2,30 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 23:20 · Test run run_fed0a871a9729e24 ended without a bid: the tender portal hardly answered
+
+- Test run `run_fed0a871a9729e24` (`8118663`): failed, no answer submitted, 20 min, 141 model calls, $1.19.
+  - Three websites were read well by `gpt-6.1-sol`: by second 411 the board held 9 materials, 5 searched catalogue
+    groups, 3 revisions, 4 discount approvals, exchange rates, metal indices, a packaging tariff, a setup pool, a
+    project bonus and 5 delivery commitments. The ERP agent had nothing left to do from second 423 and waited.
+  - The tender portal's agent recorded nothing: every page load ran into the 60 s limit, it had to log in three
+    times, and three of its model calls hung for 75 s. So the board never held the bill of quantities.
+  - The submission works on the same website: in 593 s it filled three form steps and never reached the signature.
+  - The start: the brief call (Qwen) hung for its 60 s limit, so the agents started at second 101, not at about 10.
+  - 11 calls to the OpenAI model hung until the browsing agent's 75 s limit (about one call in twelve); the
+    answers that came took 2-5 s. Completion tokens were about 75 per call, so these were not long answers.
+- Changed after it: `agent/llm.py` `Model(call_seconds=...)`: a request still open after that long is given up and
+  sent again; `agent/simple.py`: the reading model gets 25 s per call, the brief call 20 s instead of 60 s;
+  `agent/tests/test_kit.py`: tests for both.
+- Why: the hung calls took a quarter of one agent's time; the hung brief call took 90 s from every agent.
+- Checked: 225 unit tests pass (1 skipped). Not checked in the sandbox.
+- Learned: one website that hardly answers ends the run when it is the one the bid is entered on: nothing in the
+  agent can replace it. Reading three websites completely took `gpt-6.1-sol` about five minutes with one agent per
+  website, so the ERP was not short of time in this run.
+- For the others: J: `simple.py` changed again (two time limits). Open: what an agent can do when its website
+  hangs (a fresh page or another browser), not built.
+- Next: one more test run of this branch to get its score.
+
 ## 2026-10-10 23:10 · Branch stream-o-board-openai: the board concept with an OpenAI model reading the websites
 
 - Changed (branch `stream-o-board-openai`, from `stream-j-simple` at `0ae9257`):

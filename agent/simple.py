@@ -44,7 +44,10 @@ JOB_STEPS = 400  # the clock ends a job long before this
 READER_PROVIDER = "openai"
 READER_MODEL = "gpt-6.1-sol"
 READER_REASONING = "low"
-BRIEF_SECONDS = 60
+# A step of this model took 2-5 s in a test run, but one call in twelve hung until the browsing agent's 75 s limit
+# (11 calls, a quarter of one agent's time). A call still open after this long is sent again.
+READER_CALL_SECONDS = 25
+BRIEF_SECONDS = 20  # the call answers in about 4 s; one that hung for 60 s held up every agent's start
 SUBMIT_ATTEMPTS = 2
 
 BRIEF = """Take from the brief of a tender: its reference, the scenario date (ISO 8601 with time and zone) and the
@@ -116,7 +119,8 @@ def reading_model(hosted: Model) -> Model:
     key the provider turns down during the run, the hosted model takes over from that call on."""
     if not os.environ.get(f"{READER_PROVIDER.upper()}_API_KEY") or not os.environ.get(f"{READER_PROVIDER.upper()}_BASE_URL"):
         return hosted
-    return Model(provider=READER_PROVIDER, model=READER_MODEL, reasoning_effort=READER_REASONING, fallback=hosted)
+    return Model(provider=READER_PROVIDER, model=READER_MODEL, reasoning_effort=READER_REASONING, fallback=hosted,
+                 call_seconds=READER_CALL_SECONDS)
 
 
 def described(model: Model) -> str:

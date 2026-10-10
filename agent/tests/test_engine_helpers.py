@@ -24,8 +24,8 @@ class Numbers(unittest.TestCase):
         self.assertEqual(dec("1,234", "de"), D("1.234"))
 
     def test_zero_width_characters(self):
-        self.assertEqual(dec("2​0​0"), D(200))
-        self.assertEqual(norm_key("K​-​1 "), "K-1")
+        self.assertEqual(dec("2\u200b0\u200b0"), D(200))
+        self.assertEqual(norm_key("K\u200b-\u200b1 "), "K-1")
 
     def test_rejects_text_without_number(self):
         with self.assertRaises(ValueError):

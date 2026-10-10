@@ -2,6 +2,30 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 15:30 · Fewer site assumptions in facts.py, randomised scenarios against a reference
+
+- Changed: `agent/facts.py` contract change: `QuantityChange`, `TechnicalAmendment` and `Assignment` take
+  `qa_number` as an optional field after the values (order: values, then `qa_number`, then `source`), so a
+  quantity, amendment or key may come from any site, not only the tender Q&A. `from_dict` rejects number text whose
+  format is ambiguous ("1.250": thousands or decimals?) instead of guessing; JSON numbers always pass.
+  `json_schema()` now has descriptions for the objects and the fields that are easy to fill wrongly (kg vs g,
+  "no certification" = null, price unit, searched groups). New `agent/tests/test_engine_random.py`.
+- Why: the final run uses other software with the information split differently across the sites; the engine must
+  not depend on where a fact was found or how the public sites write numbers.
+- Checked: 86 engine tests pass. The new test invents 300 tenders, writes them into facts with decoys (superseded,
+  look-alike, future-dated and wrong-sender records; inactive and near-miss materials; old revisions; withdrawn and
+  superseded clarifications; expired and future conditions; shuffled lists; four position-number styles) and
+  compares every answer field with a separate reference written from the rule text with Fractions. The scenarios
+  contain 816 positions and 26 no-bid cases. Twelve deliberate bugs planted one at a time in the engine (ignore
+  withdrawals, no FX rounding, wrong discount scope, no date check, no sender check, stock not pooled, bonus not
+  marginal, no end reserve, exclusive threshold, wrong condition, wrong scale, reversed tie order) were all caught.
+  Still not checked: facts read from the real websites.
+- Learned: nothing new about the sites.
+- For the others: O — if you already build `QuantityChange`, `TechnicalAmendment` or `Assignment` positionally,
+  move the Q&A number behind the values or pass it by name. Send numbers to `from_dict` as JSON numbers where
+  possible. J — nothing.
+- Next: check the facts against a real local run's reports with O.
+
 ## 2026-10-10 14:52 · facts.py first version and the bid engine
 
 - Changed: new `agent/facts.py` (typed records for everything the bid rules need, each with a `Source`: site,

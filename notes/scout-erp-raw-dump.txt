@@ -1,0 +1,181 @@
+########## /search?transaction=MM03&q=GR-6333 https://atira-rfq-erp.kyora.run/search?transaction=MM03&q=GR-6333 F4 · Materialsuchhilfe – ERP
+F4 · Materialsuchhilfe
+Bezeichnung enthält 
+Suchen
+
+Bitte gezielt suchen: Kataloggruppe aus dem Lastenheft/Datenblatt, Artikelnummer oder technische Merkmale. Maximal 20 Treffer; breite Suchen bitte eingrenzen.
+
+2 Treffer · Auswahl für MM03
+
+PRD / 100
+
+Materialauswahl
+
+Anzeigeprotokoll · Lesen ohne Änderung
+
+Organisationsebene 1000
+
+Material	Bezeichnung
+H​Z​-​9​2​7​5	Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607
+H​Z​-​9​7​0​4	Doppeltwirkender Hydraulikzylinder 40/600, 220 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 7 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607
+
+Seite 1 von 1
+
+Abbrechen
+Demonstrationssystem · Alle Angaben sind fiktiv · Zeitangaben: UTC
+----HTML
+<main><h1>F4 · Materialsuchhilfe</h1><aside id="erp-late-message" hidden="" aria-label="Aktueller Hinweis" style="padding:28px;background:#fff0bc;border:1px solid #9a7c2b">PRD / 100 · Anzeigemodus · Änderungssperre aktiv</aside>
+    <script/>
+    <section class="popup" role="dialog" aria-label="Material suchen">
+      <form method="get" action="/search"><input type="hidden" name="transaction" value="MM03"><label>Bezeichnung enthält <input name="q" value="GR-6333"></label><button type="submit">Suchen</button></form>
+      <p role="status">Bitte gezielt suchen: Kataloggruppe aus dem Lastenheft/Datenblatt, Artikelnummer oder technische Merkmale. Maximal 20 Treffer; breite Suchen bitte eingrenzen.</p><p>2 Treffer · Auswahl für MM03</p>
+      
+    <div id="erp-search-scroll" role="region" aria-label="Materialauswahl" tabindex="0"><div class="erp-record-cover"><p>PRD / 100</p><p>Materialauswahl</p><p>Anzeigeprotokoll · Lesen ohne Änderung</p><p>Organisationsebene 1000</p></div><table><thead><tr><th>Material</th><th>Bezeichnung</th></tr></thead>
+    <tbody id="results"><tr><td><a href="/mm03?material=HZ-9275" aria-label="HZ-9275" onclick="if(window.opener&amp;&amp;!window.opener.closed){window.opener.location.href=this.href;window.close();return false;}"><span role="img" aria-label="HZ-9275">H​Z​-​9​2​7​5</span></a></td><td>Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607</td></tr><tr><td><a href="/mm03?material=HZ-9704" aria-label="HZ-9704" onclick="if(window.opener&amp;&amp;!window.opener.closed){window.opener.location.href=this.href;window.close();return false;}"><span role="img" aria-label="HZ-9704">H​Z​-​9​7​0​4</span></a></td><td>Doppeltwirkender Hydraulikzylinder 40/600, 220 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 7 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607</td></tr></tbody></table>
+    <p>Seite 1 von 1</p>
+    <nav>
+    </nav>
+    <p id="load-status" role="status"></p><script/></div><a href="/mm03" onclick="if(window.opener){window.close();return false;}">Abbrechen</a></section>
+    
+########## /mm03?material=HZ-9275 https://atira-rfq-erp.kyora.run/mm03?material=HZ-9275 MM03 · Material anzeigen – ERP
+MM03 · Material anzeigen
+Material 
+F4 · Suchen
+Anzeigen
+H​Z​-​9​2​7​5 · Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607
+Grunddaten
+Technische Daten
+Disposition
+
+PRD / 100
+
+Grunddaten
+
+Anzeigeprotokoll · Lesen ohne Änderung
+
+Organisationsebene 1000
+
+Materialnummer
+H​Z​-​9​2​7​5
+Bezeichnung
+Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607
+Basismengeneinheit
+ST · Stück
+MM03 · Material anzeigen
+MMBE · Bestandsübersicht
+VK13 · Konditionen anzeigen
+Demonstrationssystem · Alle Angaben sind fiktiv · Zeitangaben: UTC
+----HTML
+<main><h1>MM03 · Material anzeigen</h1><aside id="erp-late-message" hidden="" aria-label="Aktueller Hinweis" style="padding:28px;background:#fff0bc;border:1px solid #9a7c2b">PRD / 100 · Anzeigemodus · Änderungssperre aktiv</aside>
+    <script/>
+    <form class="entry" method="get" action="/mm03">
+    <label>Material <input id="material" name="material" value="HZ-9275" maxlength="50" autocomplete="off" required=""></label>
+    <a class="button" id="material-search" href="/search?transaction=MM03" aria-label="F4 Material suchen" onclick="return !window.open(this.href,'erp-material-search','width=900,height=650')">F4 · Suchen</a>
+    <button type="submit">Anzeigen</button></form>
+    <script/><h2><span role="img" aria-label="HZ-9275">H​Z​-​9​2​7​5</span> · Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607</h2>
+        <nav class="tabs" aria-label="Bereiche"><a href="/mm03?material=HZ-9275&amp;tab=basic" aria-current="page">Grunddaten</a><a href="/mm03?material=HZ-9275&amp;tab=technical" aria-current="">Technische Daten</a><a href="/mm03?material=HZ-9275&amp;tab=planning" aria-current="">Disposition</a></nav>
+    <div id="erp-basic-scroll" role="region" aria-label="Grunddaten" tabindex="0"><div class="erp-record-cover"><p>PRD / 100</p><p>Grunddaten</p><p>Anzeigeprotokoll · Lesen ohne Änderung</p><p>Organisationsebene 1000</p></div><dl class="fields"><dt>Materialnummer</dt><dd><span role="img" aria-label="HZ-9275">H​Z​-​9​2​7​5</span></dd><dt>Bezeichnung</dt><dd>Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607</dd>
+    <dt>Basismengeneinheit</dt><dd>ST · Stück</dd></dl></div>
+        <nav aria-label="Zum Material"><a href="/mm03?material=HZ-9275">MM03 · Material anzeigen</a><a href="/mmbe?material=HZ-9275">MMBE · Bestandsübersicht</a><a href="/vk13?material=HZ-9275">VK13 · Konditionen anzeigen</a></nav>
+    
+########## /mmbe?material=HZ-9275 https://atira-rfq-erp.kyora.run/mmbe?material=HZ-9275 MMBE · Bestandsübersicht – ERP
+MMBE · Bestandsübersicht
+Material 
+F4 · Suchen
+Anzeigen
+H​Z​-​9​2​7​5 · Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607
+
+PRD / 100
+
+Werkübersicht
+
+Anzeigeprotokoll · Lesen ohne Änderung
+
+Organisationsebene 1000
+
+Verdichtete Bestandsanzeige
+
+Physischer Bestand einschließlich Prüfbestand. Lagerorte für die Verfügbarkeitsprüfung öffnen.
+
+Werk	Physischer Bestand (ST)
+1000 · Hauptwerk öffnen	127
+MM03 · Material anzeigen
+MMBE · Bestandsübersicht
+VK13 · Konditionen anzeigen
+Demonstrationssystem · Alle Angaben sind fiktiv · Zeitangaben: UTC
+----HTML
+<main><h1>MMBE · Bestandsübersicht</h1><aside id="erp-late-message" hidden="" aria-label="Aktueller Hinweis" style="padding:28px;background:#fff0bc;border:1px solid #9a7c2b">PRD / 100 · Anzeigemodus · Änderungssperre aktiv</aside>
+    <script/>
+    <form class="entry" method="get" action="/mmbe">
+    <label>Material <input id="material" name="material" value="HZ-9275" maxlength="50" autocomplete="off" required=""></label>
+    <a class="button" id="material-search" href="/search?transaction=MMBE" aria-label="F4 Material suchen" onclick="return !window.open(this.href,'erp-material-search','width=900,height=650')">F4 · Suchen</a>
+    <button type="submit">Anzeigen</button></form>
+    <script/><h2><span role="img" aria-label="HZ-9275">H​Z​-​9​2​7​5</span> · Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607</h2>
+        
+    <div id="erp-stock-scroll" role="region" aria-label="Werkübersicht" tabindex="0"><div class="erp-record-cover"><p>PRD / 100</p><p>Werkübersicht</p><p>Anzeigeprotokoll · Lesen ohne Änderung</p><p>Organisationsebene 1000</p></div>
+    <h3>Verdichtete Bestandsanzeige</h3><p>Physischer Bestand einschließlich Prüfbestand. Lagerorte für die Verfügbarkeitsprüfung öffnen.</p>
+    <table><thead><tr><th>Werk</th><th>Physischer Bestand (ST)</th></tr></thead><tbody><tr><td><a href="/mmbe?material=HZ-9275&amp;level=locations">1000 · Hauptwerk öffnen</a></td><td>127</td></tr></tbody></table></div>
+        <nav aria-label="Zum Material"><a href="/mm03?material=HZ-9275">MM03 · Material anzeigen</a><a href="/mmbe?material=HZ-9275">MMBE · Bestandsübersicht</a><a href="/vk13?material=HZ-9275">VK13 · Konditionen anzeigen</a></nav>
+    
+########## /vk13?material=HZ-9275 https://atira-rfq-erp.kyora.run/vk13?material=HZ-9275 VK13 · Konditionen anzeigen – ERP
+VK13 · Konditionen anzeigen
+Material 
+F4 · Suchen
+Anzeigen
+H​Z​-​9​2​7​5 · Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607
+
+Konditionsart PR00 · Staffelmenge in ST; Währung je Konditionssatz.
+
+Seite 1 von 1 · 1 Konditionssätze
+
+Konditionssatz 1
+
+PRD / 100
+
+Konditionsdetail
+
+Anzeigeprotokoll · Lesen ohne Änderung
+
+Organisationsebene 1000
+
+Gültig von
+01.01.2027, 00:00:00 UTC
+Gültig bis
+31.12.2027, 23:59:59 UTC
+
+Währung: EUR
+
+Preiseinheit: 1 ST · Zahlenformat: en-US
+
+Kopfdaten
+Mengenstaffeln öffnen
+
+Die Mengenstaffeln liegen im separaten Register dieses Konditionssatzes. Material, Gültigkeit und Preiseinheit bleiben beim Registerwechsel erhalten.
+
+MM03 · Material anzeigen
+MMBE · Bestandsübersicht
+VK13 · Konditionen anzeigen
+Demonstrationssystem · Alle Angaben sind fiktiv · Zeitangaben: UTC
+----HTML
+<main><h1>VK13 · Konditionen anzeigen</h1><aside id="erp-late-message" hidden="" aria-label="Aktueller Hinweis" style="padding:28px;background:#fff0bc;border:1px solid #9a7c2b">PRD / 100 · Anzeigemodus · Änderungssperre aktiv</aside>
+    <script/>
+    <form class="entry" method="get" action="/vk13">
+    <label>Material <input id="material" name="material" value="HZ-9275" maxlength="50" autocomplete="off" required=""></label>
+    <a class="button" id="material-search" href="/search?transaction=VK13" aria-label="F4 Material suchen" onclick="return !window.open(this.href,'erp-material-search','width=900,height=650')">F4 · Suchen</a>
+    <button type="submit">Anzeigen</button></form>
+    <script/><h2><span role="img" aria-label="HZ-9275">H​Z​-​9​2​7​5</span> · Doppeltwirkender Hydraulikzylinder 40/600, 210 bar, Fußbefestigung; Kataloggruppe GR-6333; Packinhalt 3 Stück/Karton; Umlagegewicht 3100 g/Stück (nicht Zuschlagsmasse); Zuschlagsmasse 625 g/Stück; Preisindex MET-4607</h2>
+        <p>Konditionsart PR00 · Staffelmenge in ST; Währung je Konditionssatz.</p>
+    <p>Seite 1 von 1 · 1 Konditionssätze</p>
+    <section aria-label="Konditionssatz 1">
+        <h2>Konditionssatz 1</h2>
+        
+    <div id="erp-price-scroll" role="region" aria-label="Konditionsdetail" tabindex="0"><div class="erp-record-cover"><p>PRD / 100</p><p>Konditionsdetail</p><p>Anzeigeprotokoll · Lesen ohne Änderung</p><p>Organisationsebene 1000</p></div>
+          <div class="erp-grid" role="region" aria-label="Gültigkeitsintervalle" tabindex="0"><dl class="fields"><dt>Gültig von</dt><dd>01.01.2027, 00:00:00 UTC</dd><dt>Gültig bis</dt><dd>31.12.2027, 23:59:59 UTC</dd></dl></div>
+          <p>Währung: EUR</p><p>Preiseinheit: <strong>1 ST</strong> · Zahlenformat: en-US</p>
+          <nav aria-label="Konditionsansicht"><a aria-current="page" href="/vk13?material=HZ-9275&amp;page=1&amp;view=header">Kopfdaten</a><a aria-current="" href="/vk13?material=HZ-9275&amp;page=1&amp;view=scales">Mengenstaffeln öffnen</a></nav>
+          <p>Die Mengenstaffeln liegen im separaten Register dieses Konditionssatzes. Material, Gültigkeit und Preiseinheit bleiben beim Registerwechsel erhalten.</p></div>
+      </section>
+    <nav aria-label="Konditionsblätter">
+      </nav>
+        <nav aria-label="Zum Material"><a href="/mm03?material=HZ-9275">MM03 · Material anzeigen</a><a href="/mmbe?material=HZ-9275">MMBE · Bestandsübersicht</a><a href="/vk13?material=HZ-9275">VK13 · Konditionen anzeigen</a></nav>
+    

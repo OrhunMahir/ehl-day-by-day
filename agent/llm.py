@@ -1,0 +1,78 @@
+"""The model behind the agent, through one OpenAI-compatible client. Switch it with environment variables only:
+
+  AGENT_PROVIDER=qwen       (default) the hosted Qwen3.8-Flash-Next: QWEN_BASE_URL, QWEN_API_KEY
+  AGENT_PROVIDER=anthropic  Claude via Anthropic's OpenAI-compatible endpoint: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY
+  AGENT_PROVIDER=openai     OpenAI (e.g. a Codex/GPT model): OPENAI_BASE_URL, OPENAI_API_KEY
+  AGENT_PROVIDER=openrouter any OpenRouter model: LLM_PROXY_URL/openrouter/v1, OPENROUTER_API_KEY
+  AGENT_MODEL=<model id>    overrides the provider's default model
+
+In a run every base URL already points at the platform's metering proxy; your own keys go in team secrets.
+"""
+import asyncio
+import os
+import time
+
+from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
+
+DEFAULT_MODELS = {
+    "qwen": "qwen3.8-flash-next",
+    "anthropic": "claude-sonnet-5-5",
+    "openai": "gpt-5.5",
+    "openrouter": "anthropic/claude-sonnet-5.5",
+}
+
+
+def _client_config(provider: str) -> tuple[str, str]:
+    env = os.environ
+    if provider == "qwen":
+        return env["QWEN_BASE_URL"], env["QWEN_API_KEY"]
+    if provider == "anthropic":
+        base = env.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
+        return base + "/v1", env["ANTHROPIC_API_KEY"]
+    if provider == "openai":
+        return env.get("OPENAI_BASE_URL", "https://api.openai.com/v1"), env["OPENAI_API_KEY"]
+    if provider == "openrouter":
+        base = env.get("LLM_PROXY_URL")
+        return (base + "/openrouter/v1") if base else "https://openrouter.ai/api/v1", env["OPENROUTER_API_KEY"]
+    raise SystemExit(f"Unknown AGENT_PROVIDER {provider!r}; use one of {', '.join(DEFAULT_MODELS)}")
+
+
+class Model:
+    def __init__(self, provider: str | None = None, model: str | None = None):
+        self.provider = provider or os.environ.get("AGENT_PROVIDER", "qwen")
+        self.model = model or os.environ.get("AGENT_MODEL") or DEFAULT_MODELS[self.provider]
+        base_url, api_key = _client_config(self.provider)
+        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=600, max_retries=0)
+        self.calls = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+
+    async def chat(self, messages: list[dict], tools: list[dict] | None = None, **kwargs):
+        """One completion with retries; returns the assistant message."""
+        delay = 2.0
+        for attempt in range(8):
+            try:
+                started = time.time()
+                args = dict(model=self.model, messages=messages, **kwargs)
+                if tools:
+                    args["tools"] = tools
+                reply = await self.client.chat.completions.create(**args)
+                self.calls += 1
+                if reply.usage:
+                    self.prompt_tokens += reply.usage.prompt_tokens or 0
+                    self.completion_tokens += reply.usage.completion_tokens or 0
+                if not reply.choices:
+                    raise APIError("empty reply", request=None, body=None)
+                reply.choices[0].message.elapsed = time.time() - started
+                return reply.choices[0].message
+            except (APIError, APITimeoutError, RateLimitError) as error:
+                status = getattr(error, "status_code", None)
+                if status in (400, 401, 403, 404) and attempt > 0:
+                    raise
+                print(f"[llm] {self.provider} call failed ({status or type(error).__name__}: {str(error)[:200]}); retrying", flush=True)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30)
+        raise RuntimeError("model unavailable after retries")
+
+    def usage(self) -> str:
+        return f"{self.calls} calls, {self.prompt_tokens} prompt + {self.completion_tokens} completion tokens"

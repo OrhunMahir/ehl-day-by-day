@@ -373,6 +373,15 @@ class FxRate:
     source: Source | None = None
 
 
+class Allocation(str, Enum):
+    """How a fee is split into cents over positions (rule 25: the Rüstpools mail states it). All start with each
+    position's floor in cents of its proportional share."""
+    LARGEST_REMAINDER = "largest_remainder"         # leftover cents one each to the largest remainders, ties by
+                                                    # ascending position id
+    LARGEST_REMAINDER_TIES_DESCENDING = "largest_remainder_ties_descending"
+    REST_TO_LARGEST_SHARE = "rest_to_largest_share"  # all leftover cents to the position with the largest weight
+
+
 @dataclass
 class SetupPool:
     """Rüstpools: one fee shared by the member positions (rule 25)."""
@@ -380,6 +389,7 @@ class SetupPool:
     key: str
     fee_eur: Decimal
     source: Source | None = None
+    allocation: Allocation = Allocation.LARGEST_REMAINDER
 
 
 @dataclass
@@ -559,6 +569,7 @@ FIELD_DOCS = {
     "IndexWindow.rate_eur_per_kg": "index rate in EUR per kg",
     "DeliveryCommitment.max_quantity": "inclusive ceiling on the total pieces of that material over all positions",
     "BonusBand.percent": "percent for the part of the total between lower and upper",
+    "SetupPool.allocation": "the cent-allocation rule the Rüstpools mail states; ask if none of these fits",
 }
 
 

@@ -62,6 +62,7 @@ class Quantity(unittest.TestCase):
         f.revisions[1].requirements[1] = replace(f.revisions[1].requirements[1], pieces_per_set=None)
         result = evaluate(f)
         self.assertEqual([p["position"] for p in result.answer["positions"]], ["1"])
+        self.assertEqual(result.omitted, ["2"])                                         # rule 9
         self.assertTrue(any("pieces per set" in i for i in result.issues))
 
 

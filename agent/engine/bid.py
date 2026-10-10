@@ -37,6 +37,8 @@ class BidResult:
     issues: list[str] = field(default_factory=list)
     lines: list[Line] = field(default_factory=list)
     incomplete: list[str] = field(default_factory=list)   # positions whose unit price could not be fully computed
+    omitted: list[str] = field(default_factory=list)      # tender positions not in the answer; mark them in the
+                                                          # form as "Position auslassen" (rule 9)
 
 
 def build_bid(facts: Facts) -> dict:
@@ -85,10 +87,11 @@ def evaluate(facts: Facts) -> BidResult:
     _scopes(facts, priced, issues)
     _lead_times(facts, priced, issues)
 
-    out, incomplete, total = [], [], ZERO
+    out, incomplete, omitted, total = [], [], [], ZERO
     for ln in lines:
         if ln.material is None or ln.pieces is None:
             issues.append(f"position {ln.position}: left out (material or quantity unknown)")
+            omitted.append(ln.position)
             continue
         ln.unit_price = _unit_price(ln, percent)
         if ln.unit_price is None:
@@ -97,7 +100,7 @@ def evaluate(facts: Facts) -> BidResult:
         total += ln.pieces * unit_price
         out.append(_position(ln, unit_price, issues))
     answer = _answer(facts, "bid", percent, out, half_up(total))
-    return BidResult(answer, _dedupe(issues), lines, incomplete)
+    return BidResult(answer, _dedupe(issues), lines, incomplete, omitted)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -161,7 +164,7 @@ def _setup_pools(facts: Facts, lines: list[Line], issues: list[str]):
         if sum(weights.values(), ZERO) == 0:
             issues.append(f"setup pool {key}: all weights are zero, fee not allocated")
             continue
-        shares = allocate_cents(pool.fee_eur, weights)
+        shares = allocate_cents(pool.fee_eur, weights, pool.allocation.value)
         for ln in members:
             ln.pool = shares[ln.position]
 

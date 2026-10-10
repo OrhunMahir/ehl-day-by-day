@@ -2,6 +2,25 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 15:10 · Re-read of /start and /challenges/rfq: pool allocation rule and omitted positions
+
+- Changed: `facts.SetupPool.allocation` (new enum `facts.Allocation`) carries the cent-allocation rule the Rüstpools
+  mail states; the default is floor plus largest remainders with ties by ascending position, as in rule 26.
+  `engine.evaluate()` now returns `omitted`, the tender positions left out of the answer.
+- Why: rule 25 says the pool is allocated "using the cent-allocation rule in that mail", so the method can differ in
+  the private dataset; the engine had it fixed. Rule 9 requires unfinished positions to be omitted explicitly in the
+  form ("Position auslassen / Teilpunkte"); the submission step could not tell which ones.
+- Checked: the rule text on /challenges/rfq is unchanged since the engine was written (diffed against the copy from
+  `atira challenge rfq`); /docs/scoring.md and /docs/fair-play.md read again. 90 engine tests pass.
+- Learned: the leaderboard's leader has quality 21.5 after two submissions; most teams are not eligible yet.
+  /docs/scoring.md: a wrong decision costs only its points; extra or duplicate positions cost one position's share
+  each; test runs show points per answer field, scored runs do not.
+- For the others: O — mark every position in `result.omitted` as "Position auslassen" in the configurator, sign
+  anyway. Have the lead set `SetupPool.allocation` from the Rüstpools mail's wording. Worth deciding as a team:
+  opt in to best of three for the final (`atira final --best-of 3`, before the final starts; only own-key calls
+  cost up to 3x). J — nothing.
+- Next: check the facts against a real local run's reports with O.
+
 ## 2026-10-10 15:05 · Fewer site assumptions in facts.py, randomised scenarios against a reference
 
 - Changed: `agent/facts.py` contract change: `QuantityChange`, `TechnicalAmendment` and `Assignment` take

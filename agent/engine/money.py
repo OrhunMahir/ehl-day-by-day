@@ -28,10 +28,11 @@ def position_key(position: str):
     return tuple((0, int(p), "") if p.isdigit() else (1, 0, p) for p in parts if p != "")
 
 
-def allocate_cents(total: Decimal, weights: dict[str, Decimal]) -> dict[str, Decimal]:
+def allocate_cents(total: Decimal, weights: dict[str, Decimal],
+                   method: str = "largest_remainder") -> dict[str, Decimal]:
     """Split `total` (EUR, whole cents) over `weights` proportionally, in cents: everyone gets the floor of their
-    share, the remaining cents go one each to the largest fractional remainders, ties by ascending position id.
-    Rules 25 and 26."""
+    share; by default the remaining cents go one each to the largest fractional remainders, ties by ascending
+    position id (rule 26, and rule 25 unless the Rüstpools mail says otherwise; see `facts.Allocation`)."""
     cents = int(half_up(total) / CENT)
     weight_sum = sum(weights.values(), Decimal(0))
     if not weights:
@@ -41,7 +42,16 @@ def allocate_cents(total: Decimal, weights: dict[str, Decimal]) -> dict[str, Dec
     shares = {k: div(Decimal(cents) * w, weight_sum) for k, w in weights.items()}
     floors = {k: int(s.to_integral_value(rounding=ROUND_FLOOR)) for k, s in shares.items()}
     left = cents - sum(floors.values())
-    order = sorted(weights, key=lambda k: (-(shares[k] - floors[k]), position_key(k)))
-    for k in order[:left]:
-        floors[k] += 1
+    if method == "rest_to_largest_share":
+        largest = min(weights, key=lambda k: (-weights[k], position_key(k)))
+        floors[largest] += left
+    elif method in ("largest_remainder", "largest_remainder_ties_descending"):
+        if method == "largest_remainder":
+            order = sorted(weights, key=lambda k: (-(shares[k] - floors[k]), position_key(k)))
+        else:
+            order = sorted(sorted(weights, key=position_key, reverse=True), key=lambda k: -(shares[k] - floors[k]))
+        for k in order[:left]:
+            floors[k] += 1
+    else:
+        raise ValueError(f"unknown allocation method {method!r}")
     return {k: Decimal(c) * CENT for k, c in floors.items()}

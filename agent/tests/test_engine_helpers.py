@@ -68,6 +68,22 @@ class Money(unittest.TestCase):
         # 1.00 over 1:2 -> 33.33 / 66.67 cents -> 33 / 66 floor, the cent goes to the larger remainder (0.67)
         self.assertEqual(allocate_cents(D("1.00"), {"1": D(1), "2": D(2)}), {"1": D("0.33"), "2": D("0.67")})
 
+    def test_allocation_ties_descending(self):
+        self.assertEqual(allocate_cents(D("10.00"), {"10": D(1), "9": D(1), "2": D(1)},
+                                        "largest_remainder_ties_descending"),
+                         {"10": D("3.34"), "9": D("3.33"), "2": D("3.33")})
+
+    def test_allocation_rest_to_largest_share(self):
+        # 1.00 over 1:1:2 -> 25 / 25 / 50 cents exactly; 0.10 over 1:1:1 -> 3 / 3 / 3 and 1 cent to the first largest
+        self.assertEqual(allocate_cents(D("0.10"), {"3": D(1), "1": D(1), "2": D(1)}, "rest_to_largest_share"),
+                         {"3": D("0.03"), "1": D("0.04"), "2": D("0.03")})
+        self.assertEqual(allocate_cents(D("0.11"), {"1": D(1), "2": D(3)}, "rest_to_largest_share"),
+                         {"1": D("0.02"), "2": D("0.09")})
+
+    def test_unknown_allocation_method(self):
+        with self.assertRaises(ValueError):
+            allocate_cents(D("1.00"), {"1": D(1)}, "something_else")
+
     def test_allocation_sums_to_total(self):
         shares = allocate_cents(D("517.29"), {str(i): D(i * 7 + 3) for i in range(1, 8)})
         self.assertEqual(sum(shares.values()), D("517.29"))

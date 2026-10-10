@@ -7,7 +7,7 @@ from decimal import Decimal as D
 from test_engine_base import DIRECTOR, DOMAIN, REF, at, condition, core_facts, mail, material
 
 from engine import build_bid, evaluate
-from facts import (Assignment, AssignmentKind as K, Attr, BonusBand, ConditionGroupRule, DeliveryCommitment,
+from facts import (Allocation, Assignment, AssignmentKind as K, Attr, BonusBand, ConditionGroupRule, DeliveryCommitment,
                    DiscountApproval, DiscountScope, EndReserve, Facts, FxRate, IndexWindow, MetalIndex,
                    PackagingTariff, ProjectBonus, Requirement, SetupPool, SpecRevision, TechnicalAmendment,
                    TenderPosition, Unit, Withdrawal)
@@ -207,6 +207,12 @@ class SetupPools(unittest.TestCase):
         assign(f, K.SETUP_POOL, "RP-1", position="2")
         lines = {ln.position: ln for ln in evaluate(f).lines}
         self.assertEqual((lines["1"].pool, lines["2"].pool), (D("2.50"), D("7.50")))
+
+    def test_allocation_rule_from_the_mail(self):                                       # rule 25
+        f = self.facts()
+        f.setup_pools[0] = replace(f.setup_pools[0], allocation=Allocation.LARGEST_REMAINDER_TIES_DESCENDING)
+        lines = {ln.position: ln for ln in evaluate(f).lines}
+        self.assertEqual((lines["10"].pool, lines["2"].pool), (D("3.34"), D("3.33")))
 
     def test_pool_never_discounted(self):
         f = self.facts()

@@ -72,6 +72,15 @@ class FakeSite:
             "/popup": '<h1>Catalogue</h1><p>Item list</p><div role="dialog" aria-modal="true"><p>Quick survey</p>'
                       '<button>Close</button></div>',
             "/flaky": "<h1>Report</h1><p>All good</p>",
+            "/form": '<h1>Order form</h1><a href="/picker" target="_blank">Search help</a>',
+            "/picker": '<h1>Pick an item</h1><button onclick="window.close()">Take Valve</button>',
+            "/modern": '<h1>Stock</h1><div role="grid"><div role="row"><span role="columnheader">Item</span>'
+                       '<span role="columnheader">Qty</span></div><div role="row"><span role="gridcell">Valve</span>'
+                       '<span role="gridcell">14</span></div></div><div role="combobox" tabindex="0">Plant 2</div>'
+                       '<price-card></price-card><script>customElements.define("price-card", class extends '
+                       'HTMLElement { connectedCallback() { this.attachShadow('
+                       '{mode: "open"}).innerHTML = "<p>Unit price 4.20 EUR</p><button>Details</button>"; } });'
+                       '</script>',
             "/viewer": '<h1>Viewer</h1><details><summary>Open document</summary>'
                        '<iframe loading="lazy" src="/doc"></iframe></details>',
             "/doc": "<h1>Document</h1><p>Clause 7 applies</p>",
@@ -208,6 +217,54 @@ class BrowserPagesTest(unittest.TestCase):
         self.assertIn("notes/readme.txt", zipped)
         self.assertIn("Quantities are in pieces.", zipped)
         self.assertIn("Pressure 160 bar", pdf)
+
+    def test_aria_grids_shadow_dom_and_custom_controls_are_read(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            return await tab.goto(f"{SITE}/modern")
+        view = self.run_async(check)
+        self.assertIn("| Item | Qty |", view)
+        self.assertIn("| Valve | 14 |", view)
+        self.assertRegex(view, r'\[\d+\] combobox "Plant 2"')
+        self.assertIn("Unit price 4.20 EUR", view)
+        self.assertRegex(view, r'\[\d+\] button "Details"')
+
+    def test_read_pages_reads_several_pages_in_one_step(self):
+        async def check(tab, site, context):
+            agent = self.agent(tab)
+            await agent._run_tool("login", {})
+            Tab.homes["inbox"] = "https://inbox.example.test"  # another website of the run
+            view = await agent._run_tool("read_pages", {"urls": ["/orders/2", f"{SITE}/list?page=2",
+                                                                 "https://inbox.example.test/m/1"]})
+            return agent, view
+        agent, view = self.run_async(check)
+        self.assertIn("Read 2 pages", view)
+        self.assertIn("Total 17 units", view)
+        self.assertNotIn("999", view)
+        self.assertIn("Message 2a", view)
+        self.assertNotRegex(view, r"\[x\d")
+        self.assertIn('link "Next page" -> /list?page=3', view)
+        self.assertEqual(agent.refusals, 1)
+
+    def test_a_popup_that_closes_itself_returns_to_its_opener(self):
+        async def check(tab, site, context):
+            agent = self.agent(tab)
+            await agent._run_tool("login", {})
+            view = await tab.goto(f"{SITE}/form")
+            import re
+            view = await agent._run_tool("click", {"element": re.search(r'\[(\d+)\] link "Search help"', view).group(1)})
+            await asyncio.sleep(1.5)  # the popup is picked up asynchronously
+            view = await tab.observe()
+            self.assertIn("Pick an item", view)
+            view = await agent._run_tool("click", {"element": re.search(r'\[(\d+)\] button "Take Valve"', view).group(1)})
+            await asyncio.sleep(0.5)
+            after = await tab.observe()
+            again = await tab.goto(f"{SITE}/orders")
+            return view + after, again
+        closing, again = self.run_async(check)
+        self.assertIn("Order form", closing)
+        self.assertIn("back on the page that opened it", closing)
+        self.assertIn("Orders", again)
 
 
 if __name__ == "__main__":

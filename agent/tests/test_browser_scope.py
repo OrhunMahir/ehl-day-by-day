@@ -248,5 +248,17 @@ class StallingModelTest(unittest.TestCase):
         self.assertEqual(agent.stalls, 1)
         self.assertIn("FOUND: x", report)
 
+class ForgetViewsTest(unittest.TestCase):
+    def test_only_the_newest_view_stays_whole(self):
+        import browsing
+        views = [{"role": "tool", "tool_call_id": str(i), "content": f"[s] URL: page{i}\n" + "x" * 9000} for i in range(3)]
+        messages = [{"role": "user", "content": "task"}] + views
+        BrowsingAgent._forget_old_views(messages)
+        self.assertTrue(messages[1]["content"].startswith("(older page view removed"))
+        self.assertTrue(messages[2]["content"].endswith(browsing.SHORTENED))
+        self.assertLess(len(messages[2]["content"]), 4200)
+        self.assertEqual(len(messages[3]["content"]), len("[s] URL: page2\n") + 9000)
+
+
 if __name__ == "__main__":
     unittest.main()

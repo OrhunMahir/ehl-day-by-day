@@ -51,7 +51,8 @@
     if (["BUTTON", "SELECT", "TEXTAREA", "SUMMARY"].includes(t)) return true;
     if (t === "INPUT") return el.type !== "hidden";
     const role = el.getAttribute("role");
-    if (["button", "link", "tab", "menuitem", "checkbox", "radio", "option", "switch"].includes(role)) return true;
+    if (["button", "link", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "checkbox", "radio", "option",
+         "switch", "combobox", "treeitem", "searchbox", "textbox", "spinbutton", "slider"].includes(role)) return true;
     if (el.hasAttribute("onclick") || el.hasAttribute("data-action")) return true;
     return false;
   };
@@ -95,8 +96,10 @@
   };
 
   // inline text of a node, with interactive descendants inlined as [id] markers
+  // children of a node, including the content of an open shadow root (web components)
+  const kids = (node) => (node.shadowRoot ? [...node.shadowRoot.childNodes, ...node.childNodes] : [...node.childNodes]);
   const inline = (node, out) => {
-    for (const c of node.childNodes) {
+    for (const c of kids(node)) {
       if (c.nodeType === 3) { out.push(c.textContent); continue; }
       if (c.nodeType !== 1 || SKIP.has(c.tagName)) continue;
       if (hidden(c)) {
@@ -125,6 +128,19 @@
     if (t === "IFRAME") { lines.push(`[iframe name="${el.name || ""}" src="${(el.getAttribute("src") || "").slice(0, 120)}" — its content follows as a separate frame]`); return; }
     if (t === "CANVAS") { const s = el.getAttribute("aria-label") || el.getAttribute("title") || ""; lines.push(`[canvas${s ? ": " + clean(s) : ""}]`); return; }
     if (t === "IMG") { const a = el.getAttribute("alt") || el.getAttribute("title"); if (a) lines.push(`[image: ${clean(a)}]`); return; }
+    const tableRole = el.getAttribute("role");
+    if (t !== "TABLE" && (tableRole === "table" || tableRole === "grid" || tableRole === "treegrid")) {
+      // a table built from elements with ARIA roles: render its rows like a table's
+      lines.push("<table>");
+      for (const row of el.querySelectorAll('[role="row"]')) {
+        if (row.closest('[role="table"], [role="grid"], [role="treegrid"]') !== el || hidden(row)) continue;
+        const cells = [...row.querySelectorAll('[role="cell"], [role="gridcell"], [role="columnheader"], [role="rowheader"]')]
+          .filter((c) => c.closest('[role="row"]') === row);
+        lines.push("| " + cells.map((c) => clean(inline(c, []).join(" "))).join(" | ") + " |");
+      }
+      lines.push("</table>");
+      return;
+    }
     if (t === "TABLE") {
       const cap = el.querySelector(":scope > caption");
       if (cap) lines.push(`## ${clean(cap.innerText)}`);
@@ -149,13 +165,14 @@
     }
     if (el.getAttribute("data-agent-done")) { el.removeAttribute("data-agent-done"); return; }
     if (shownFirst.has(el)) return;
+    if (el.shadowRoot) { for (const c of kids(el)) walk(c, depth + 1); return; }
     const hasBlockChild = [...el.children].some((c) => BLOCK.has(c.tagName) || c.tagName === "TABLE" || c.tagName === "IFRAME" || c.tagName === "CANVAS");
     if (!hasBlockChild) {
       const s = clean(inline(el, []).join(" "));
       if (s) lines.push(/^H[1-6]$/.test(t) ? `${"#".repeat(+t[1])} ${s}` : s);
       return;
     }
-    for (const c of el.childNodes) walk(c, depth + 1);
+    for (const c of kids(el)) walk(c, depth + 1);
   };
 
   document.querySelectorAll("[data-aid]").forEach((e) => e.removeAttribute("data-aid"));

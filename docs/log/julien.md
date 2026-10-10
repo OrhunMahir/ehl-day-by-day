@@ -2,6 +2,44 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 20:10 · Generalisation and fewer steps: ARIA grids, shadow DOM, read_pages, popups
+
+- Changed:
+  - `observe.js` (step 5, generalisation): tables built from elements with ARIA roles (`grid`, `row`, `cell`)
+    render as rows; content inside open shadow roots (web components) is read; more control roles are numbered
+    (`combobox`, `treeitem`, `textbox`, `slider` and others).
+  - `browser.py`:
+    - New `read_pages`: up to 6 pages the model chose, rendered in parallel background tabs and returned in one
+      step (step 6).
+    - Popups: only popups this tab opened are followed. When a popup closes itself, the tab returns to the page
+      that opened it. If the active page closed for any other reason, it falls back to an earlier page or reopens
+      the site.
+  - `browsing.py`: the `read_pages` tool (addresses of other websites are refused one by one); the page view
+    before the newest is cut to 4000 characters.
+  - Tests: ARIA grid, shadow DOM and combobox; `read_pages`; a popup that closes itself; view shortening.
+- Why:
+  - Step 5: the private dataset uses different software. A string search found nothing tied to the public sites
+    in stream J's files, so the work went into page structures the public sites do not use.
+  - Step 6: sub-agents spent most turns opening pages whose links they could already see.
+  - In one survey the ERP sub-agent's tab stayed on a popup that had closed itself, and every later action failed.
+- Checked:
+  - 25 stream-J tests pass. The popup test fails on the previous `browser.py` with the same error the survey
+    showed, and passes now.
+  - Survey 5 (with `read_pages`): all four sub-agents finished by themselves for the first time; the mail sub-agent
+    noted 11 facts instead of 4.
+  - Survey 6: no closed-page errors, and the ERP report reaches the price scales.
+- Not as hoped:
+  - Survey 6 finished only 1/4 by itself. Five model calls stalled (75 s each), so the two surveys are not
+    comparable on finishing.
+  - Input tokens per call fell only about 3 % (12.0k to 11.7k); the brief and the newest view dominate.
+  - `read_pages` raised the total input tokens of a survey by about 30 %, because more page content is read.
+- Learned:
+  - Survey results vary strongly with Qwen load; compare several runs before drawing conclusions on speed.
+  - Websites open helper popups that close themselves after a choice.
+- For the others: O: sub-agents receive the lead's full brief as context. Giving them only the task part would
+  shrink every call, though the brief is a stable, cached prefix. I: nothing.
+- Next: steps 0–6 are done. Next is a full local run of `agent.py` and the score of a sandbox test run (through O).
+
 ## 2026-10-10 19:10 · Versions, look-alikes, and two kinds of "not found"
 
 - Changed: `browsing.py`:

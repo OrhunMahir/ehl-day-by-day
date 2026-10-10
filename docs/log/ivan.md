@@ -2,6 +2,43 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 16:29 · Code review of the whole package: fixes in stream I, findings for J and O
+
+- Changed (stream I only): a requirement without a Kataloggruppe no longer counts as searched, so it cannot cause
+  a no_bid (rule 10 names one for every requirement; it is now a "find" entry). The discount's minimum order
+  value, checked while positions are still unpriced, is reported as possibly too low (issue and "verify" entry).
+  Certifications compare without spaces ("EN 1234" = "EN1234"). With several matching active materials the choice
+  no longer depends on the order of the facts. The invisible characters in the cleaning pattern of `facts.py` are
+  written as escapes: raw zero-width and direction marks in source are what linters flag as obfuscated code, and an
+  AI reviewer reads the package. Removed an unused function and an unused parameter. Merged `main` (PR #2, #4).
+- Checked: 116 engine tests pass on Python 3.12 and 3.14; ruff clean; 3000 doubly damaged tenders: no crash, no
+  invalid answer, no unnamed gap. Read every file of the package on `main` and `agent.py`, `submission.py`, `llm.py`
+  on `stream-o`. Findings in other streams' files are below; none of those files was changed.
+- For the others:
+  - O, high: `price()` on `stream-o` merges the facts by top-level field, so a later `price_bid` that sends only new
+    `materials` (or any list) replaces the whole list and the earlier items are lost. `facts.FactsBuilder.add`
+    merges items by identity and validates only the update.
+  - O, high: `without_hasty_no_bid` counts every issue as an open question. Issues such as "sender unknown" are
+    common, so in a scenario whose right answer is no_bid the bid would still go out as a partial bid (the no_bid
+    decision is worth 75 points). Better: treat the no_bid as final when `result.needed()` has no "find" entry for
+    the unmatched positions; the engine already refuses a no_bid unless the Kataloggruppe was searched.
+  - O, medium: `main` still has the `llm.py` with fallbacks to the providers' public addresses and a 600 s call
+    timeout; `stream-o` fixes both. Until `stream-o` is merged, a submission from `main` carries them.
+  - O, low: give the lead `result.needed()` and `result.complete` with every `price_bid` (new since the last merge).
+    `run.py`: a 200 answer whose body is not JSON raises instead of retrying.
+  - J, medium: `observe.js` line 11 has raw invisible characters (zero-width and direction marks) in its regex, the
+    same pattern linters flag as obfuscated code; write them as `​`-style escapes. `browser.py` line 12 reads
+    `observe.js` without `encoding="utf-8"` (fails on Windows).
+  - J, medium: `observe.js` prints the value of password inputs (`input(password) ... value="..."`), so a filled
+    login password or TAN goes into the model's prompt and the run log.
+  - J, low: `browser.py` `_HtmlText`: a stray `</script>` makes `skip` negative and drops the rest of the text
+    (use `max(0, ...)`). `fetch_file` loads an HTML URL twice (fetch, then a scratch tab), which repeats a GET with
+    side effects (e.g. a logout link). `browsing.py`: a `finish` sent in the same turn before a `note` loses that
+    note; `_shows_sign_in` takes any visible password field (e.g. a TAN field) for an expired session, which only
+    matters for the investigation agents (the submission agent on `stream-o` has its own steps).
+- Next: read the next test run with the engine (points only), then the check of the brief's rules against the
+  engine.
+
 ## 2026-10-10 16:19 · Checklist of what is still missing: result.needed() and result.complete
 
 - Changed: new `agent/engine/needs.py`. `result.needed()` lists what the lead still has to find or verify, each

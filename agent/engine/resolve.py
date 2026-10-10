@@ -198,12 +198,6 @@ def mismatches(m: Material, req: Requirement) -> list[str]:
     return out
 
 
-def has_withdrawn_change(facts: Facts, pos: TenderPosition) -> bool:
-    gone = withdrawn_numbers(facts)
-    return any(norm_key(c.qa_number) and norm_key(c.qa_number) in gone for c in facts.quantity_changes
-               if norm_key(c.position) == norm_key(pos.position))
-
-
 def final_pieces(facts: Facts, pos: TenderPosition, req: Requirement | None, issues: list[str]) -> int | None:
     """Rule 17: the final quantity in pieces; a Satz is converted with the governing specification's pieces per set."""
     q = stated_quantity(facts, pos)
@@ -281,8 +275,9 @@ _NO_CERT = {"", "-", "–", "—", "keine", "keine gefordert", "nicht gefordert"
 
 
 def _cert(text: str | None) -> str:
+    """Certification for comparison: "none required" in its usual wordings is "", spaces do not count."""
     t = norm_text(text).rstrip(".")
-    return "" if t in _NO_CERT else t
+    return "" if t in _NO_CERT else t.replace(" ", "")
 
 
 def _same(a, b) -> bool:
@@ -302,17 +297,18 @@ def requirement_complete(req: Requirement) -> bool:
 
 def searched(facts: Facts, req: Requirement) -> bool:
     """The ERP was searched for this requirement: its Kataloggruppe is recorded as searched or a candidate of that
-    group is known. Without a Kataloggruppe, any known material counts as a search."""
+    group is known. A requirement without a Kataloggruppe was not read completely (rule 10 names one for each), so
+    no search of it counts as conclusive."""
     group = norm_key(req.catalogue_group)
     if not group:
-        return bool(facts.materials)
+        return False
     return (group in {norm_key(g) for g in facts.searched_groups}
             or any(norm_key(m.catalogue_group) == group for m in facts.materials))
 
 
 def select_material(facts: Facts, req: Requirement, position: str, issues: list[str]) -> Material | None:
     """Rule 3: the active material whose bore, stroke, pressure, mounting and certification match exactly."""
-    hits = [m for m in facts.materials if matches(m, req)]
+    hits = sorted((m for m in facts.materials if matches(m, req)), key=lambda m: norm_key(m.material_number))
     active = [m for m in hits if m.active is True]
     if not active:
         unknown = [m for m in hits if m.active is None]

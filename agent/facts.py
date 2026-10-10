@@ -40,7 +40,7 @@ class Source:
 # ---------------------------------------------------------------------------------------------------------------------
 # Parsing helpers (for whoever fills the facts)
 
-_INVISIBLE = re.compile("[​-‏⁠﻿­]")
+_INVISIBLE = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")  # zero-width, direction marks, soft hyphen
 
 
 @functools.lru_cache(maxsize=65536)
@@ -663,6 +663,8 @@ FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you 
   director_address = the sales director's address as the brief names it (without it, approvals from anyone count).
 - Record what you read, not what you concluded. Keep superseded, withdrawn, look-alike and later records too, each
   with its own source: the engine picks the one that counts. Do not do any arithmetic yourself.
+- Dates with their time and time zone: ISO 8601 with the offset the site states (2030-01-24T17:00:00+01:00) or in
+  UTC; a time without a zone is read as UTC.
 - source: for every mail value the sender's full address, the mail's date and time, and the exact tender reference
   it names (a reference with an extra suffix is another tender). For Q&A answers their number and date; for
   documents their revision.
@@ -824,13 +826,12 @@ class FactsBuilder:
                         groups.append(clean(str(g)))
                 merged[name] = groups
             elif value is not None:
-                if name == "authority" and isinstance(value, dict):
-                    value = {**merged.get(name, {}), **value}
+                new = {**merged.get(name, {}), **value} if name == "authority" and isinstance(value, dict) else value
                 try:
-                    _convert(hints[name], value)
+                    _convert(hints[name], new)
                 except (ValueError, TypeError) as exc:
                     raise ValueError(f"Facts.{name}: {exc}") from exc
-                merged[name] = copy.deepcopy(value)
+                merged[name] = copy.deepcopy(new)
         for name in replace - set(update):
             merged[name] = []
         self.data = merged

@@ -69,7 +69,12 @@ def needs(facts: Facts, result) -> list[Need]:
         c.add("find", TENDER, "the positions of the bill of quantities (number, quantity, unit, requirement)", 1)
     if not (facts.quantity_changes or facts.withdrawals or facts.amendments or facts.assignments):
         c.add("verify", TENDER, "bidder Q&A read? No quantity change, withdrawal, amendment or key recorded yet", 1)
-    if resolve.discount_approval(facts, []) is None:
+    approval = resolve.discount_approval(facts, [])
+    unpriced = result.omitted or result.incomplete or any(ln.base is None for ln in result.lines)
+    if approval is not None and approval.min_order_value is not None and unpriced:
+        c.add("verify", MAIL, "the discount's minimum order value was checked with positions still unpriced; it is "
+                             "decided again once they are complete", 16)
+    if approval is None:
         c.add("verify", MAIL, "no discount approval for this exact tender reference found (inbox and archive); "
                              "without one the discount is 0 %", 5)
 
@@ -139,6 +144,8 @@ def _position(facts: Facts, revision, pos, ln, c: _Collector):
         return
     if not resolve.requirement_complete(req):
         return
+    if not norm_key(req.catalogue_group):
+        c.add("find", SPEC, f"the Kataloggruppe of requirement {req.requirement} (the ERP search key)", 10, p)
     if ln.material is None:
         if not resolve.searched(facts, req):
             c.add("find", ERP, f"search Kataloggruppe {req.catalogue_group or '(none stated)'} and record every "

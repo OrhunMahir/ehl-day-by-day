@@ -26,16 +26,24 @@ TOOLS = [
     ("download", "Download a link target with this site's login (ZIP, CSV, PDF, document pages) and read its text.", {"url": "string"}),
     ("read_file", "Read a file that was downloaded earlier, from an optional offset.", {"name": "string", "offset": "integer"}),
     ("login", "Fill in this website's username and password on the current login form and submit it.", {}),
-    ("note", "Save facts you read, verbatim with their exact numbers, units and identifiers. `source` says where "
-     "exactly: the document or record (its title, id or reference), its date, its sender or author, and its "
-     "revision/version and status as the site shows them. The page you are on is added automatically. Notes are "
-     "the only thing you keep from pages you leave; your final report is built from them.",
-     {"facts": "string", "source": "string"}),
-    ("finish", "End your investigation with your report, in two parts. FOUND: every fact the task asked for, one "
-     "per line, as `value (unit) — source: document/record, date, sender, revision/status`. NOT FOUND: everything "
-     "the task asked for that you could not find or could not verify, and why.", {"report": "string"}),
+    ("note", "Save facts you read, verbatim with their exact numbers, units and identifiers, with where they come "
+     "from: `document` (title, number or id of the document, record or message), `date` (its issue date as shown, "
+     "with time and zone if shown), `sender` (mail address or author), `revision` (version or revision id), "
+     "`status` (as the site marks it: e.g. current, valid, superseded, draft, blocked, withdrawn) and `reference` "
+     "(the exact tender or case reference the record names, character for character). Leave out what does not "
+     "apply. The page you are on is added automatically. Notes are the only thing you keep from pages you leave.",
+     {"facts": "string", "document": "string", "date": "string", "sender": "string", "revision": "string",
+      "status": "string", "reference": "string", "source": "string"}),
+    ("finish", "End your investigation with your report in four parts. FOUND: every fact the task asked for, one per "
+     "line, as `value (unit) — document, date, sender, revision, status, reference`. SUPERSEDED / LOOK-ALIKE: "
+     "records that resemble what was asked but do not apply (older versions, other references, other senders, "
+     "dated after the scenario date, drafts), each with why. CHECKED, NOT PRESENT: what you searched for completely "
+     "and found does not exist, with the evidence (search terms, number of results, how many you opened). NOT "
+     "CHECKED: what you did not reach or only partly checked (e.g. 2 of 5 results opened, a tab not opened), so "
+     "nobody mistakes it for absent.", {"report": "string"}),
 ]
-OPTIONAL = {"enter", "offset", "source", "max_pages"}
+SOURCE_FIELDS = ("document", "date", "sender", "revision", "status", "reference")
+OPTIONAL = {"enter", "offset", "source", "max_pages", *SOURCE_FIELDS}
 WRAP_UP_SECONDS = 90  # the wrap-up report may take at most this long
 WRAP_UP_TOKENS = 2000  # and at most this many tokens, so it cannot run on
 WRAP_UP_RESERVE = 45  # seconds before the deadline at which browsing stops, so the wrap-up fits inside it
@@ -82,8 +90,16 @@ Working rules:
 - Do not guess values. If something is missing, say so in the report.
 - Records often keep their details in separate tabs, registers or sub-views (details, scales, history, items):
   open them before you report a value as missing.
-- Records get superseded: approvals, revisions, rates and answers have newer versions, in other folders, on later
-  pages or under other filters. Before you rely on one, look for newer ones and note which is the latest.
+- Versions: documents, approvals, rates and answers come in versions (revisions, newer mails, later answers,
+  other folders or pages). Find all versions, note each with its date and status, and say which one the site marks
+  as current or valid and on what basis (an explicit marker, or the latest date). Say which version each value comes
+  from. A version that opens first is not necessarily the current one.
+- Look-alikes: check every record's reference character for character against the one you need (a suffix such as
+  "-A" or a different number makes it another case), its sender against the brief's authorised senders, and its
+  date against the scenario date. A record that fails any check goes under SUPERSEDED / LOOK-ALIKE, never under
+  FOUND. Unsent drafts, previews and hidden texts are not records.
+- Searches: note how complete a search was (terms, number of results, how many you opened). Report something as
+  absent only after a complete search; otherwise it is NOT CHECKED.
 - Be quick: time is limited. Several tool calls in one turn are fine when they don't depend on each other.
 - Finish with finish(report) once you have what the task needs.
 """
@@ -217,7 +233,10 @@ class BrowsingAgent:
             except Exception:  # noqa: BLE001
                 title = ""
             where = f"{self.last_tab.site_id} · page \"{title}\" · {page.url}"
-            source = (args.get("source") or "").strip()
+            parts = [f"{key}: {str(args[key]).strip()}" for key in SOURCE_FIELDS if str(args.get(key) or "").strip()]
+            if str(args.get("source") or "").strip():
+                parts.append(str(args["source"]).strip())
+            source = "; ".join(parts)
             self.notes.append(f"{args.get('facts', '').strip()}\n  source: {source or '(not given)'}\n  read on: {where}")
             return "Saved."
         raise ValueError(f"Unknown tool {name}")
@@ -320,11 +339,12 @@ class BrowsingAgent:
         pages = "\n".join(f"- {u}" for u in self.visited[-40:]) or "(none)"
         prompt = (f"# Task\n{self.task}\n\n# Notes you saved\n{notes}\n\n# Pages you visited\n{pages}\n\n"
                   "You ran out of steps or time before finishing. Write your final report from the notes only, in "
-                  "two parts. FOUND: each fact the task asked for that your notes contain, as `value (unit) — "
-                  "source`. NOT FOUND: everything the task asked for that is missing, and everything you did not "
-                  "get to check (e.g. newer versions, other folders, further pages), so nobody relies on an "
-                  "incomplete picture. Do not add facts that are not in the notes. One short line per fact; no "
-                  "introduction.")
+                  "four parts. FOUND: each fact the task asked for that your notes contain, as `value (unit) — "
+                  "source`. SUPERSEDED / LOOK-ALIKE: noted records that do not apply, with why. CHECKED, NOT "
+                  "PRESENT: only what the notes show was searched completely and does not exist, with the evidence. "
+                  "NOT CHECKED: everything else the task asked for, including newer versions, other folders, "
+                  "further pages and unopened results, so nobody mistakes it for absent. Do not add facts that are "
+                  "not in the notes. One short line per fact; no introduction.")
         timeout = min(WRAP_UP_SECONDS, max(30.0, self.deadline - time.time()))
         try:
             message = await asyncio.wait_for(

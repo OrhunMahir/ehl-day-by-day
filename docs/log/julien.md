@@ -2,6 +2,39 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 19:10 · Versions, look-alikes, and two kinds of "not found"
+
+- Changed: `browsing.py`:
+  - `note` takes structured source fields shaped like `facts.Source`: `document`, `date`, `sender`, `revision`,
+    `status` and `reference` (free `source` text stays optional).
+  - Reports and the wrap-up now have four parts: FOUND; SUPERSEDED / LOOK-ALIKE; CHECKED, NOT PRESENT (with
+    search evidence); NOT CHECKED.
+  - Prompt rules:
+    - Find all versions and say which one is marked current and on what basis.
+    - Check every record's reference character for character, its sender and its date against the scenario date.
+    - Report something as absent only after a complete search.
+  - Test for the source fields in `tests/test_browser_scope.py`.
+- Why: a sandbox test run scored 5 of 100 because the lead answered no_bid after the ERP data never arrived; "not
+  found" was read as "does not exist". The bid engine's `resolve.searched()` also counts a catalogue group as
+  searched as soon as one candidate is known, so reports must say how complete a search was.
+- Checked:
+  - 13 scope tests pass.
+  - Live survey with Qwen on the mailbox and the supplier portal, compared with what is on the websites:
+    - The governing record is under FOUND with all source fields.
+    - Look-alike references, drafts and a record dated after the scenario date are under SUPERSEDED /
+      LOOK-ALIKE.
+    - The current revision is named with its basis, and the older revisions are listed as superseded.
+    - Every note has a source.
+- Not checked: the mail sub-agent ran out of steps before the archive and the second result page. It listed the
+  result page under NOT CHECKED but not the archive folder.
+- Learned: a record dated after the scenario date is easy to miss without an explicit date check; with the rule
+  the model rejected one.
+- For the others:
+  - O: use the four parts. Only CHECKED, NOT PRESENT supports a no_bid; NOT CHECKED means unknown.
+  - I: `resolve.searched()` would be safer if a group counted as searched only when a report confirms the search
+    was complete.
+- Next: Step 5 (generalisation check), then Step 6 (fewer steps per report).
+
 ## 2026-10-10 18:30 · Paged lists, documents, model stalls, wrap-up inside the deadline
 
 - Changed:

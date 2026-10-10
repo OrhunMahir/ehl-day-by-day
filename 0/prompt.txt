@@ -1251,3 +1251,32 @@ run a local test to see if everything works as intended. If that is the case, ru
 <event>[ 405.9s] [run] the bid is complete at 406 s: investigations end
 [ 405.9s] [lead] engine working:</event>
 </task-notification>
+
+---
+
+<task-notification>
+<task-id>bidhlxl1e</task-id>
+<summary>Monitor event: "local tweaks run: records, fresh sessions, early end, submission"</summary>
+<event>[ 693.8s] [submit] finished after 29 steps
+Ihr Angebot ist verbindlich eingegangen.</event>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bzur3jlp2</task-id>
+<tool-use-id>toolu_01LbyhYmFzUVBMExAQ1kj2zr</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-julienhartzer-ehl-hackathon/fd212338-599c-4aa2-a6fc-bee2055537fd/tasks/bzur3jlp2.output</output-file>
+<status>completed</status>
+<summary>Background command "Run the whole agent locally against the public sites" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bc02okob9</task-id>
+<tool-use-id>toolu_01BW9E45EGa8VEiXqRDcPe9i</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-julienhartzer-ehl-hackathon/fd212338-599c-4aa2-a6fc-bee2055537fd/tasks/bc02okob9.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the local submission and check mail use" completed (exit code 0)</summary>
+</task-notification>

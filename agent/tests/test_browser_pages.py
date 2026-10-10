@@ -49,6 +49,7 @@ class FakeSite:
 
     def __init__(self):
         self.fail_next = 0
+        self.hang_next = 0  # requests of /slow that get no answer (the server leaves them hanging)
         self.hits: dict[str, int] = {}
 
     async def handle(self, route):
@@ -60,6 +61,14 @@ class FakeSite:
             # answered in place: Chromium does not follow redirects fulfilled for a form POST
             return await route.fulfill(status=200, content_type="text/html", headers={"set-cookie": "session=ok; Path=/"},
                                        body='<h1>Orders</h1><a href="/orders/2">Order 2</a>')
+        if path.startswith("/slow") and self.hang_next:
+            self.hang_next -= 1
+            await asyncio.sleep(20)
+            try:
+                await route.fulfill(status=200, content_type="text/html", body="<h1>Too late</h1>")
+            except Exception:  # noqa: BLE001 - the page has moved on
+                pass
+            return
         if path.startswith("/flaky") and self.fail_next:
             self.fail_next -= 1
             return await route.fulfill(status=503, content_type="text/html", body="<h1>Service unavailable</h1>")
@@ -74,6 +83,11 @@ class FakeSite:
             "/popup": '<h1>Catalogue</h1><p>Item list</p><div role="dialog" aria-modal="true"><p>Quick survey</p>'
                       '<button>Close</button></div>',
             "/flaky": "<h1>Report</h1><p>All good</p>",
+            "/slow": "<h1>Inbox</h1><p>3 messages</p>",
+            "/to-slow": '<h1>Start</h1><a href="/slow">Inbox</a>',
+            "/steps": '<h1>Step 1</h1><p>Changes are only saved with "Next".</p><button onclick="document.body.'
+                      'innerHTML = \'<h1>Step 2</h1>\'">Next</button><button onclick="document.body.innerHTML = '
+                      '\'<h1>Step 0</h1>\'">Back</button>',
             "/secret": '<h1>Profile</h1><label>Password <input type="password" name="pw" value="hunter2-invented"></label>'
                        '<label>Other <input type="password" name="pw2"></label>',
             "/sign": '<h1>Sign the offer</h1><form><label>Signing code <input type="password" name="code"></label>'
@@ -162,6 +176,39 @@ class BrowserPagesTest(unittest.TestCase):
             return await tab.goto(f"{SITE}/flaky")
         view = self.run_async(check)
         self.assertIn("All good", view)
+
+    def test_a_page_the_server_leaves_unanswered_is_requested_again(self):
+        import browser
+
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            site.hang_next = 1
+            started = time.time()
+            by_goto = await tab.goto(f"{SITE}/slow")
+            took = time.time() - started
+            site.hang_next = 1
+            await tab.goto(f"{SITE}/to-slow")
+            await tab.page.click("text=Inbox", no_wait_after=True)  # the click starts a load that never answers
+            await asyncio.sleep(1.5)
+            by_click = await tab.observe()
+            return by_goto, took, by_click
+        old = browser.LOAD_SECONDS, browser.STUCK_SECONDS
+        browser.LOAD_SECONDS, browser.STUCK_SECONDS = 3, 1
+        try:
+            by_goto, took, by_click = self.run_async(check)
+        finally:
+            browser.LOAD_SECONDS, browser.STUCK_SECONDS = old
+        self.assertIn("3 messages", by_goto)
+        self.assertLess(took, 12)
+        self.assertIn("3 messages", by_click)
+        self.assertIn("requested again", by_click)
+
+    def test_a_button_named_by_its_text_is_the_button_not_a_hint(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            await tab.goto(f"{SITE}/steps")
+            return await tab.click("Next")
+        self.assertIn("Step 2", self.run_async(check))
 
     def test_expired_session_signs_in_again_and_returns(self):
         async def check(tab, site, context):

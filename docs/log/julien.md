@@ -2,6 +2,50 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 20:15 · Test run run_a1424b6668fbc7f4; the submission no longer goes round in a circle
+
+- Test run `run_a1424b6668fbc7f4`, package `stream-j` at `8b7a460`: quality 10 (decision 5, tender reference 5),
+  eligible, 18:38, $0.27.
+  - The ERP was searched by all four catalogue groups in the second round, and 7 materials and 4 searched groups
+    reached the facts.
+  - One position had a matching material. In the configurator the submission agent filled the conditions step,
+    then clicked a number it remembered from an earlier page. On that page the number was the back button. It
+    then pressed "leave position out" on the page before and arrived at the same step again, about 30 times,
+    until its time was up. The second attempt signed a bid without positions.
+  - The browser windows that looked stuck (the ERP at its sign-in page, the webmail behind its notice pop-up) were
+    investigations the lead started a few seconds before investigations ended. They opened a page and stopped.
+  - The platform's stored log of this run starts at 501 s; the earlier lines are gone.
+- Reproduced with the scouting logins, using a harness outside the repository that runs the agent's own
+  submission step:
+  - The configurator selects the material in a cascade: a selection, then a button that applies it, and only
+    then is the next selection enabled. The agent could not get past it and gave up after 7 minutes.
+  - The webmail sometimes leaves a page request unanswered for over 30 s; a new request is answered at once.
+- Changed:
+  - `browser.py`: a page request still unanswered after 8 s is made again, and a page that cannot be read at all
+    is loaded again. `goto` gives a load 15 s instead of 30 s. An element named by its text is a button or link
+    with exactly that name before any text that only contains it.
+  - `submission.py` (stream O's file, for Orhun to confirm):
+    - `fill_form` can press a button between fields (`{"click": "<text>"}`), so a cascade fits into one call.
+    - A disabled selection says what usually enables it.
+    - Every click result names the button it pressed.
+    - The same action that leads back to the same page a third time gets a note that the agent is going round in
+      a circle.
+    - The prompt says that element numbers belong to one page view, and that buttons and fields are best named by
+      their text.
+  - `agent.py` (stream O's file, for Orhun to confirm):
+    - No investigation starts with less than 120 s left.
+    - The submission task lists each position's material with its bore, stroke, pressure, mounting and
+      certification from the ERP, so the agent can choose them in such a cascade.
+  - Tests in `tests/test_browser_pages.py`, `tests/test_submission.py` and `tests/test_lead.py`. The new ones fail
+    on the previous code.
+- Checked:
+  - 202 unit tests pass (1 skipped).
+  - With the scouting logins, the agent's own submission step entered a bid with one fully priced position and
+    four left out. It chose the material through the cascade, signed with the TAN from the webmail and got the
+    receipt in 383 s. Before these changes, the same step stopped after 7 minutes without a signature.
+- For the others: O: please look at the `submission.py` and `agent.py` changes above. I: nothing.
+- Next: sandbox test run of this commit.
+
 ## 2026-10-10 19:10 · Test run run_969ce72f14a980ac; the ERP search is asked for as soon as the groups are known
 
 - Test run `run_969ce72f14a980ac`, package `stream-j` at `2a030cd`: `main` + `stream-o` up to `3a0362e` +

@@ -171,6 +171,14 @@ class SeveralInvestigationsOfOneWebsite(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*(self.lead.investigate("erp", f"job {n}") for n in range(count)))
             return time.time() - started
 
+    async def test_no_investigation_starts_with_too_little_time_left(self):
+        self.lead.collect_until = time.time() + agent.MIN_INVESTIGATION_SECONDS - 5
+        with patch.object(agent, "BrowsingAgent", SlowSubAgent), patch.object(agent, "Tab", FakeTab):
+            reply = await self.lead.investigate("erp", "one more job")
+        self.assertIn("Too little time", reply)
+        self.assertEqual(SlowSubAgent.spans, [])
+        self.assertEqual(self.lead.tab_count["erp"], 1)  # no further tab was opened
+
     async def test_they_run_side_by_side_each_in_a_tab_of_its_own(self):
         took = await self.ask(3)
         self.assertLess(took, 0.45)
@@ -259,7 +267,7 @@ class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
         orchestrator.collect_until = orchestrator.submit_from = time.time() + investigate_for
         orchestrator.deadline = time.time() + 600
         with patch.object(agent, "BrowsingAgent", QuickSubAgent), patch.object(agent, "SubmissionAgent", Signs), \
-                patch.object(agent, "Tab", FakeTab):
+                patch.object(agent, "Tab", FakeTab), patch.object(agent, "MIN_INVESTIGATION_SECONDS", 0):
             await asyncio.wait_for(orchestrator.run(), timeout=20)
         return orchestrator
 

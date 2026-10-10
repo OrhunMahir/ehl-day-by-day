@@ -102,6 +102,9 @@ WORKER_REASONING: str | None = None  # browsing sub-agents and the submission ag
 WORKER_THINKING = False
 # A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
 INVESTIGATION_GRACE_SECONDS = 30
+# An investigation that would get less time than this is not started: after its sign-in and its wrap-up nothing
+# is left for the site (in a test run such late ones opened tabs and stopped at once)
+MIN_INVESTIGATION_SECONDS = 120
 RECORD = """You record facts for a bid engine. Below are the brief of a tender and one report of an assistant who
 read a website. Put what the report states into the facts and call `add_facts` once. Take the tender reference,
 the scenario date, the sales director's address and our own mailbox domain from the brief.
@@ -213,6 +216,8 @@ class Orchestrator:
                 return "No time left to investigate: call submit_bid now with what you have."
             longest = FIRST_ROUND_SECONDS if self.rounds <= 1 else INVESTIGATION_SECONDS
             until = min(self.collect_until, time.time() + longest)
+            if until - time.time() < MIN_INVESTIGATION_SECONDS:
+                return "Too little time left for another investigation: work with what the reports gave."
             tab = await self.take_tab(site)
             agent = BrowsingAgent(self.worker_model, {site: tab}, self.credentials, f"{task}\n\n{PROVENANCE}",
                                   self.context(), name=site, deadline=until, log=self.log)
@@ -390,7 +395,7 @@ class Orchestrator:
                 "recompute. Report the receipt or any validation message verbatim. A bid that is entered but not "
                 "signed and confirmed counts for nothing: if you are told that time is almost up, do not stop; sign "
                 "and confirm what is entered, then report.\n\nANSWER:\n"
-                + json.dumps(answer, ensure_ascii=False, indent=1) + self.left_out(answer)
+                + json.dumps(answer, ensure_ascii=False, indent=1) + self.left_out(answer) + self.materials(answer)
                 + (f"\n\nHINTS:\n{hints}" if hints else ""))
         agent = SubmissionAgent(self.worker_model, sites, self.credentials, task, self.context(),
                                 deadline=self.deadline, log=self.log)
@@ -401,6 +406,28 @@ class Orchestrator:
             return report + "\n\nThe platform has closed the run: the bid was accepted."
         return report + ("\n\nThe run is still open, so no bid has been accepted yet. Call submit_bid again and say "
                          "in the hints what is already entered and what went wrong.")
+
+    def materials(self, answer: dict) -> str:
+        """The attributes of each position's material as the ERP records them: a form may choose the material
+        through them (one selection after another) rather than by its number."""
+        if not self.priced:
+            return ""
+        wanted = {str(p.get("position")) for p in answer.get("positions", [])}
+        lines = []
+        for line in self.priced.lines:
+            m = line.material
+            if m is None or line.position not in wanted:
+                continue
+            attributes = [f"{name} {value}" for name, value in (
+                ("bore", f"{m.bore_mm} mm" if m.bore_mm is not None else None),
+                ("stroke", f"{m.stroke_mm} mm" if m.stroke_mm is not None else None),
+                ("pressure", f"{m.pressure_bar} bar" if m.pressure_bar is not None else None),
+                ("mounting", m.mounting), ("certification", m.certification)) if value]
+            lines.append(f"- position {line.position}: material {m.material_number}: " + ", ".join(attributes))
+        if not lines:
+            return ""
+        return ("\n\nMATERIALS (from the ERP; if the form selects a material through such attributes, choose these so "
+                "that the answer's material is offered):\n" + "\n".join(lines))
 
     def left_out(self, answer: dict) -> str:
         if not self.priced or answer is not self.priced.answer or not self.priced.omitted:

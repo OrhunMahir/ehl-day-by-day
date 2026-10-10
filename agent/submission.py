@@ -34,6 +34,15 @@ How to work:
   by its text in the same way.
 - When a step repeats (e.g. one step per position), you know its fields after the first time: from then on give
   the whole step in one call, with labels for the fields that appear later, and the button that continues.
+- Selections that depend on each other (each one enables the next) go in one fill_form call in their order. When
+  a form enables the next field only after a button applies the choice, put that button between the fields as
+  {"click": "<button text>"}. Name such fields by their label: numbers shift when a popup appears.
+- Element numbers belong to one page view: after every step take them from the newest view, never from an earlier
+  page, where the same number may be another button. Name the button that continues by its visible text in
+  click_after; it is looked up on the page as it is then. A button that goes back discards the later steps: use
+  it only to correct an earlier step on purpose.
+- If you come back to a page you have already filled, you are going round in a circle: read the newest view and
+  the button texts before you act again.
 - A fill_form result says for every field what was set or why it failed, then shows the page as it is now. Read
   it before you go on. After a failure, continue from that field with the numbers of the new page view.
 - Enter the values of the answer exactly. Write numbers the way the form expects them (look at its examples,
@@ -47,6 +56,12 @@ How to work:
 - When the site confirms the bid, call finish with the receipt text exactly as shown. If you cannot get there,
   call finish and say exactly what is entered, what is missing and what stopped you.
 """
+
+BUTTON_TEXT_JS = "el => (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim()"
+REPEATS_BEFORE_WARNING = 3  # the same action this often means the agent is going round in a circle
+CIRCLE = ("\n\nNote: this is the {n}th time you did exactly this, so the form keeps bringing you back here: you are "
+          "going round in a circle. Element numbers change from page to page; check in the newest view what the "
+          "button you click says (a button that goes back discards the later steps), then continue forward.")
 
 SIGN_NOW = ("Time is nearly over. Stop filling optional fields: go on to signing and confirming the bid now, with "
             "what is entered. If positions are still empty and the form can leave a position out, use that.")
@@ -126,13 +141,17 @@ def tool_schemas(sites: list[str]) -> list[dict]:
              "Set several fields in one go, in the order given, then optionally click a button. Name each field "
              "by its element number, or by its label when it is not on the page yet. For a text field the value "
              "is typed; for a select it is the option's text; for a checkbox or radio button it is true or false. "
+             "An entry {\"click\": \"<button text>\"} presses that button at its place in the sequence. "
              "Stops at the first field that fails and reports every field.",
              {"site": site,
               "fields": {"type": "array", "items": {"type": "object", "properties": {
                   "element": element,
                   "label": {"type": "string", "description": "the field's label, instead of element, for a field "
                                                              "that appears only after an earlier choice"},
-                  "value": {"type": "string"}}, "required": ["value"]}},
+                  "value": {"type": "string"},
+                  "click": {"type": "string", "description": "instead of a field: the text (or number) of a button "
+                            "to press at this point, e.g. one that applies a choice so that the next field is "
+                            "enabled"}}}},
               "click_after": {"type": "string", "description": "element number, or text, of the button to click "
                                                                 "once every field is set, e.g. the one that continues"}},
              ["site", "fields"]),
@@ -165,6 +184,7 @@ class SubmissionAgent:
         ]
         tools = tool_schemas(list(self.tabs))
         told_to_sign = False
+        done: dict[str, int] = {}  # how often each exact action led to the same page
         for step in range(self.max_steps):
             remaining = self.deadline - time.time()
             if remaining < STOP_SECONDS:
@@ -202,6 +222,14 @@ class SubmissionAgent:
                     result = "Error: the action did not finish in time. Look at the page again."
                 except Exception as error:  # noqa: BLE001 - the model reads the failure and decides what to do
                     result = f"Error: {str(error).splitlines()[0][:400]}"
+                # the same action that brings the agent to the same page again; leaving out one position after
+                # another repeats the action too, but each time on the next position's page
+                action = (call.function.name + json.dumps(args, sort_keys=True, ensure_ascii=False)
+                          + _where(result))
+                done[action] = done.get(action, 0) + 1
+                if done[action] >= REPEATS_BEFORE_WARNING and call.function.name in ("click", "fill_form"):
+                    self.log(f"[submit] the same {call.function.name} for the {done[action]}th time: told it is going in a circle")
+                    result += CIRCLE.format(n=done[action])
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
             _forget_old_views(messages)
         self.log("[submit] stopped without finish")
@@ -229,7 +257,12 @@ class SubmissionAgent:
             url = str(args["url"])
             return await tab.goto(url if "://" in url else tab._absolute(url))
         if name == "click":
-            return await tab.click(str(args["element"]))
+            element = str(args["element"])
+            try:
+                text = await _text_of(await (await tab.find(element)).element_handle(timeout=3000))
+            except Exception:  # noqa: BLE001 - the click reports what is wrong
+                text = "?"
+            return f'Clicked [{element}] "{text}".\n' + await tab.click(element)
         if name == "read_more":
             return tab.read_more(int(args.get("offset") or 0))
         if name == "login":
@@ -247,14 +280,19 @@ async def fill_form(tab: Tab, fields: list[dict], click_after: str | None = None
     being valid once the page changes. A field that the page has rebuilt in the meantime is found again by its id
     or name. A field named by its label is looked up when its turn comes, so it may appear after an earlier choice.
     """
-    targets = [await _target(tab, field) for field in fields]
+    targets = [await _target(tab, {"element": str(field["click"])}, button=True) if _is_click(field)
+               else await _target(tab, field) for field in fields]
     button = await _target(tab, {"element": str(click_after)}, button=True) if click_after else None
 
     outcomes, complete = [], True
     for field, target in zip(fields, targets):
-        outcome = await _set(target, str(field.get("value", "")))
-        outcomes.append(f"[{target['name']}] {target['identity'].get('label') or 'field'}: {outcome}")
-        if outcome.startswith("FAILED"):
+        if _is_click(field):  # a button pressed between fields, e.g. one that applies a choice
+            outcome = await _click(tab, target)
+            outcomes.append(f"[{target['name']}] {outcome}")
+        else:
+            outcome = await _set(target, str(field.get("value", "")))
+            outcomes.append(f"[{target['name']}] {target['identity'].get('label') or 'field'}: {outcome}")
+        if "FAILED" in outcome:
             complete = False
             skipped = len(fields) - len(outcomes)
             if skipped:
@@ -262,10 +300,22 @@ async def fill_form(tab: Tab, fields: list[dict], click_after: str | None = None
             break
 
     if button and complete:
-        outcomes.append(f"[{click_after}] click: {await _click(tab, button)}")
+        outcomes.append(f"[{click_after}] {await _click(tab, button)}")
     elif button:
         outcomes.append(f"[{click_after}] not clicked, because a field failed")
     return "\n".join(outcomes) + "\n\n# The page now\n" + await tab.observe()
+
+
+def _where(view: str) -> str:
+    """Which page a result ends on: its address and headings (numbers and values left out)."""
+    page = view.split("# The page now", 1)[-1]
+    lines = page.splitlines()
+    address = next((line for line in lines if " URL: " in line), "")
+    return address + "|" + "|".join(line for line in lines if line.startswith("#"))
+
+
+def _is_click(field: dict) -> bool:
+    return bool(str(field.get("click") or "").strip()) and not str(field.get("value") or "").strip()
 
 
 def _is_number(aid: str) -> bool:
@@ -375,7 +425,8 @@ async def _choose(target: dict, wanted: str) -> str:
         await asyncio.sleep(0.5)
         waited += 0.5
     if state.get("disabled"):
-        return "FAILED: the select is disabled"
+        return ('FAILED: the select is disabled. An earlier choice enables it, often only once a button applies that '
+                'choice: put that button between the fields as {"click": "<its text>"}')
     return f'FAILED: no option "{wanted}"; the options are: ' + " ; ".join(state.get("options", []))
 
 
@@ -383,17 +434,26 @@ async def _click(tab: Tab, target: dict) -> str:
     handle = await _current(target)
     if handle is None and target["label"]:  # named by its text: look it up on the page as it is now
         try:
-            handle = await tab._locate(target["label"]).element_handle(timeout=3000)
+            handle = await (await tab.find(target["label"])).element_handle(timeout=3000)
         except Exception:  # noqa: BLE001
             handle = None
     if handle is None:
-        return "FAILED: the button is not on the page"
+        return "click: FAILED: the button is not on the page"
+    text = await _text_of(handle)
     try:
         await handle.click(timeout=6000)
     except Exception:  # noqa: BLE001 - covered or off-screen: a DOM click still works
         await handle.evaluate("el => el.click()")
     await _after_change(tab.page.main_frame)
-    return "clicked"
+    return f'clicked "{text}"'
+
+
+async def _text_of(handle) -> str:
+    """What a button or link says, so a result can name what was clicked."""
+    try:
+        return (await handle.evaluate(BUTTON_TEXT_JS))[:80]
+    except Exception:  # noqa: BLE001
+        return "?"
 
 
 async def _after_change(frame) -> None:

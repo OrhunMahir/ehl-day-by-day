@@ -48,6 +48,7 @@ Filling the facts JSON:
 - Give every fact its `source`: site, page or document, date, and the revision of a versioned document. For a
   value from a message also give the sender's address in `source` and the exact tender reference the message
   names in the fact's `reference`.
+- Give every material read in the ERP its `catalogue_group`, also the ones that do not match.
 - `searched_groups` lists a catalogue group only when the ERP was searched by that group and every result of
   the search was read; then also list a search that found nothing. A group of which you only happen to know some
   materials is not searched: leave it out, and leave those materials out too.
@@ -75,11 +76,17 @@ INVESTIGATION_GRACE_SECONDS = 30
 FORCE_SUBMIT = {"type": "function", "function": {"name": "submit_bid"}}
 FORCE_PRICE = {"type": "function", "function": {"name": "price_bid"}}
 PRICE_ATTEMPTS = 2  # forced price_bid calls that may fail before the lead has to hand in an answer of its own
+# Thinking: the lead plans and fills the facts, so it thinks, but briefly. Browsing and submitting are routine steps
+# (a click, a form field) and do not think at all; a call of theirs that has not answered by then is asked again.
+LEAD_REASONING = "low"
+WORKER_CALL_SECONDS = 60
 
 
 class Orchestrator:
-    def __init__(self, task: dict, token: str | None, tabs: dict[str, Tab], model: Model, started: float):
+    def __init__(self, task: dict, token: str | None, tabs: dict[str, Tab], model: Model, started: float,
+                 worker: Model | None = None):
         self.task, self.token, self.tabs, self.model = task, token, tabs, model
+        self.worker = worker or model  # the model of the browsing and submission agents
         self.credentials = {a["siteId"]: a.get("credentials", {}) for a in task["access"]}
         self.started = started
         now = time.time()
@@ -144,7 +151,7 @@ class Orchestrator:
             if time.time() >= self.collect_until:
                 return "No time left to investigate: call submit_bid now with what you have."
             until = min(self.collect_until, time.time() + INVESTIGATION_SECONDS)
-            agent = BrowsingAgent(self.model, {site: self.tabs[site]}, self.credentials, f"{task}\n\n{PROVENANCE}",
+            agent = BrowsingAgent(self.worker, {site: self.tabs[site]}, self.credentials, f"{task}\n\n{PROVENANCE}",
                                   self.context(), name=site, deadline=until, log=self.log)
             try:
                 return await asyncio.wait_for(agent.run(), timeout=until - time.time() + INVESTIGATION_GRACE_SECONDS)
@@ -164,24 +171,28 @@ class Orchestrator:
         except Exception as error:  # noqa: BLE001 - a ValueError names the bad field; the model corrects it
             self.price_failures += 1
             return f"The facts could not be priced: {error}. Correct this and call price_bid again."
+        if merged != self.facts_data:  # the platform keeps only the end of a long log: log facts once per change
+            self.log("[lead] facts " + json.dumps(merged, ensure_ascii=False))
         self.facts_data, self.priced = merged, result
-        self.log("[lead] facts " + json.dumps(merged, ensure_ascii=False))
         return json.dumps({"answer": result.answer, "issues": result.issues, "incomplete": result.incomplete,
                            "omitted": result.omitted}, ensure_ascii=False)
 
     def without_hasty_no_bid(self, collected: facts.Facts, result: engine.BidResult) -> engine.BidResult:
         """A "no bid" is final only when the engine has nothing else to report and every position without a
-        material had its catalogue group searched on purpose. While facts are still missing, the positions without
-        a material are left out instead and the others are bid."""
+        material had its catalogue group searched on purpose, with the results of that search recorded (a group
+        marked as searched without one recorded result is a search whose results were lost, not an empty group).
+        While facts are still missing, the positions without a material are left out instead and the others are
+        bid."""
         if result.answer.get("decision") != "no_bid":
             return result
         unresolved = [line.position for line in result.lines if line.material is None]
-        searched = {facts.norm_key(group) for group in collected.searched_groups}
+        recorded = {facts.norm_key(m.catalogue_group) for m in collected.materials if m.catalogue_group}
+        searched = {facts.norm_key(group) for group in collected.searched_groups} & recorded
 
         def conclusive(position: facts.TenderPosition) -> bool:
             groups = {facts.norm_key(requirement.catalogue_group)
                       for revision in collected.revisions for requirement in revision.requirements
-                      if facts.norm_key(requirement.requirement) == facts.norm_key(position.requirement)}
+                      if facts.norm_key(requirement.requirement) == facts.norm_key(position.requirement)} - {""}
             return bool(groups) and groups <= searched
 
         if len(result.issues) <= 1 and all(conclusive(p) for p in collected.positions if p.position in unresolved):
@@ -223,7 +234,7 @@ class Orchestrator:
                 "and confirm what is entered, then report.\n\nANSWER:\n"
                 + json.dumps(answer, ensure_ascii=False, indent=1) + self.left_out(answer)
                 + (f"\n\nHINTS:\n{hints}" if hints else ""))
-        agent = SubmissionAgent(self.model, sites, self.credentials, task, self.context(),
+        agent = SubmissionAgent(self.worker, sites, self.credentials, task, self.context(),
                                 deadline=self.deadline, log=self.log)
         self.submitted = answer
         report = await agent.run()
@@ -389,7 +400,8 @@ def validate(answer: dict, schema: dict) -> list[str]:
 async def main() -> int:
     started = time.time()
     task, token = contract.load_run()
-    model = Model()
+    model = Model(reasoning_effort=LEAD_REASONING)
+    worker = Model(thinking=False, timeout=WORKER_CALL_SECONDS)
     print(f"Run {task.get('run_id') or '(local scouting run)'}; model {model.provider}/{model.model}; "
           f"sites: {', '.join(a['siteId'] for a in task['access'])}", flush=True)
     async with async_playwright() as playwright:
@@ -401,9 +413,9 @@ async def main() -> int:
                 page = await page.context.new_page()
             await page.goto(access["url"], wait_until="domcontentloaded")
             tabs[access["siteId"]] = Tab(access["siteId"], page)
-        lead = Orchestrator(task, token, tabs, model, started)
+        lead = Orchestrator(task, token, tabs, model, started, worker)
         await lead.run()
-    print(f"Done in {time.time() - started:.0f}s; {model.usage()}; submitted: "
+    print(f"Done in {time.time() - started:.0f}s; lead {model.usage()}; agents {worker.usage()}; submitted: "
           f"{json.dumps(lead.submitted, ensure_ascii=False) if lead.submitted else 'nothing'}", flush=True)
     return 0
 

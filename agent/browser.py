@@ -9,7 +9,7 @@ import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 
-OBSERVE_JS = (Path(__file__).parent / "observe.js").read_text()
+OBSERVE_JS = (Path(__file__).parent / "observe.js").read_text(encoding="utf-8")
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
 
 

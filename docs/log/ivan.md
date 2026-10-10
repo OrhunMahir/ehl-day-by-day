@@ -2,6 +2,32 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 20:46 · Branch `18-ivan`: the baseline without overthinking, a stricter no-bid guard
+
+Branch `18-ivan`, from `baseline-18` (touches stream J and O files at Ivan's request, for review; nothing merged).
+
+- Changed:
+  - `llm.py`: `Model(reasoning_effort=..., thinking=..., timeout=...)`. `thinking=False` switches Qwen's thinking
+    off (`chat_template_kwargs.enable_thinking`), the same switch as on `exp-speed`.
+  - `agent.py`: the lead thinks at reasoning effort "low"; the browsing and submission agents get a second model
+    without thinking whose calls are asked again after 60 s (the baseline thought at the default level on every
+    click and waited up to 240 s for a hung call). The facts are logged only when they change, so the platform keeps
+    more of the log.
+  - `agent.py` `without_hasty_no_bid`: a no-bid is final only when every unmatched position's group is marked as
+    searched **and** at least one material of that group is recorded; otherwise those positions are left out and the
+    rest is bid. Also fixed: an older revision without a catalogue group made every no-bid inconclusive. The lead's
+    prompt asks for the `catalogue_group` of every material read in the ERP.
+  - `browser.py`: `observe.js` read as UTF-8, so local runs work on Windows without `PYTHONUTF8`.
+  - `tests/test_baseline_fixes.py`: the thinking switch and the no-bid guard.
+- Why: the plan branch's sandbox run lost everything to a whole-tender no-bid made on a group whose results were not
+  recorded; thinking on routine steps cost minutes in every earlier analysis.
+- Checked: 110 of 113 unit tests pass; the 3 errors are the old `test_kit.py` tests that call a removed `solve`. No
+  local or sandbox run of this branch yet.
+- Learned: the discount was lost after the 18.3 submission because the mail agent listed the approval messages without
+  opening them ("details not extracted"); in the 18.3 run it quoted the body. A reading problem, not the engine.
+- For the others: nothing merged. Sandbox run `run_bbc5ee20dcadfbee` (baseline unchanged) is running.
+- Next: compare `run_bbc5ee20dcadfbee` with the 18.3 run, then a sandbox run of this branch.
+
 ## 2026-10-10 20:40 · New branch `baseline-18`: the code of the 18.3 submission, on top of current main
 
 Branch `baseline-18` (agreed with Ivan; touches every stream's files under `agent/`, for the team to review).

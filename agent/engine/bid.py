@@ -39,6 +39,12 @@ class BidResult:
     incomplete: list[str] = field(default_factory=list)   # positions whose unit price could not be fully computed
     omitted: list[str] = field(default_factory=list)      # tender positions not in the answer; mark them in the
                                                           # form as "Position auslassen" (rule 9)
+    facts: Facts | None = None
+
+    def explain(self) -> str:
+        """Plain text for the run log: what each value was computed from and which records counted."""
+        from .explain import explain
+        return explain(self.facts, self)
 
 
 def build_bid(facts: Facts) -> dict:
@@ -74,7 +80,7 @@ def evaluate(facts: Facts) -> BidResult:
         issues.append(f"no active material matches position(s) {', '.join(no_match)}: no bid (rule 3)")
         percent = approval.percent if approval and approval.min_order_value is None else ZERO
         answer = _answer(facts, "no_bid", percent, [], ZERO)
-        return BidResult(answer, _dedupe(issues), lines, [])
+        return BidResult(answer, _dedupe(issues), lines, [], [], facts)
 
     priced = [ln for ln in lines if ln.material is not None and ln.pieces is not None]
     for ln in priced:
@@ -100,7 +106,7 @@ def evaluate(facts: Facts) -> BidResult:
         total += ln.pieces * unit_price
         out.append(_position(ln, unit_price, issues))
     answer = _answer(facts, "bid", percent, out, half_up(total))
-    return BidResult(answer, _dedupe(issues), lines, incomplete, omitted)
+    return BidResult(answer, _dedupe(issues), lines, incomplete, omitted, facts)
 
 
 # ---------------------------------------------------------------------------------------------------------------------

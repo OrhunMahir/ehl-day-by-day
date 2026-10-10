@@ -2,6 +2,26 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 15:32 · Explanation of the bid for the run log, guide for filling the facts
+
+- Changed: `result.explain()` (new `agent/engine/explain.py`) returns plain text for the run log: per position
+  how the quantity came about (which Q&A answers, which withdrawn), the governing requirement, the chosen material
+  and why the other candidates of its group were not, the price condition and scale, every price component, the
+  discount scope, the lead-time inputs; per mail key which record counts and how many were ignored and why (older,
+  other tender reference, after the scenario date, sender not authorized). It decides nothing itself.
+  `facts.FILLING_GUIDE` is a text for the lead's prompt: which fact goes into which field, with the traps from the
+  rules and no values. The engine now reports an issue when `director_address` is empty, because then approvals
+  from any sender count. The builder from the previous entry (not pushed then) is part of this push.
+- Why: a test run shows only points per field; with the explanation in the log a lost point can be traced to a
+  wrong fact or a wrong calculation. The guide keeps the prompt and the facts' meaning in one place.
+- Checked: 105 engine tests pass; the explanation runs on all 300 random tenders and names the deciding facts in
+  a hand-checked case; a test fails if the guide names a field that does not exist. Full suite with
+  `PYTHONUTF8=1`: only the three known `test_kit` failures.
+- For the others: O — put `facts.FILLING_GUIDE` into the lead's prompt (next to the facts tool), set
+  `director_address` and `bidder_domain` from the brief, and print `result.explain()` into the run log after every
+  `price_bid`. J — nothing.
+- Next: read O's first test run with the engine; trace lost points with the explanation.
+
 ## 2026-10-10 15:25 · Facts in pieces: FactsBuilder, update_schema, to_dict
 
 - Changed: `agent/facts.py` gains `FactsBuilder` (collects the facts over several tool calls), `update_schema()`

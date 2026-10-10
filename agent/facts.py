@@ -647,6 +647,40 @@ def _schema(tp) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# What a model filling the facts must know. For the lead's prompt; it states the rules' traps, no values.
+
+FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you only record what the sites show):
+
+- tender_reference and scenario_date from the brief or the tender; bidder_domain from our own mailbox address;
+  director_address = the sales director's address as the brief names it (without it, approvals from anyone count).
+- Record what you read, not what you concluded. Keep superseded, withdrawn, look-alike and later records too, each
+  with its own source: the engine picks the one that counts. Do not do any arithmetic yourself.
+- source: for every mail value the sender's full address, the mail's date and time, and the exact tender reference
+  it names (a reference with an extra suffix is another tender). For Q&A answers their number and date; for
+  documents their revision.
+- Quantities stay in the unit the tender or Q&A states (sets stay sets); the engine converts with the requirement's
+  pieces_per_set. A Q&A answer that withdraws an earlier one goes into withdrawals with that answer's number.
+- Requirements come from every revision you saw; mark the one the site marks as current/valid with current=true.
+  A technical amendment names the revision and requirement it applies to; record it with that revision even if it
+  is not the current one. For usable travel (nutzbarer Weg) enter the stated travel as stroke_mm, set
+  usable_travel=true and the end-reserve key; the reserve comes from the matching Technikfreigabe record.
+- Materials: every candidate from the ERP search, also inactive ones and near misses, with status, attributes,
+  stock, lead times, carton size, masses in kg (625 g = 0.625), metal index code, setup fee and every price
+  condition with its validity, currency, FX key, price unit and all quantity scales. List every Kataloggruppe you
+  searched in searched_groups, also when the search found nothing.
+- Keys that tie a position to a rule record (Konditionsgruppe, packaging tariff, delivery commitment, setup pool,
+  project bonus) go into assignments, wherever you read them.
+- Mail rule records: one record per key per mail. Konditionsgruppe wording -> scope base / base_and_surcharge /
+  none. Metal indices with every validity window as stated. Bonus bands as lower/upper/percent. A setup pool's
+  allocation = the listed method that matches the mail's wording.
+- Discount: every approval-like mail for the tender with its sender, date, percent and any minimum order value; a
+  mail that refuses or withdraws the discount is an approval with percent 0.
+- Numbers as JSON numbers where you can; text numbers only with an unambiguous format. Unknown = leave it out
+  (null); never guess. 0 only when the site states zero.
+"""
+
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Building the facts piece by piece, as the reports come in
 
 # Which fields identify an item of each list, so a re-sent item corrects the earlier one instead of adding a copy.

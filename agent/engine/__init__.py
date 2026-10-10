@@ -17,6 +17,7 @@ plain JSON back, e.g. for the run log. Then:
     result.issues       # what is missing or ambiguous; send the lead back to investigate these
     result.incomplete   # positions whose unit price lacks a component (still listed, priced without it)
     result.omitted      # positions left out of the answer; mark them "Position auslassen" in the form (rule 9)
+    result.explain()    # plain text for the run log: what each value came from, which records counted
 
 Positions whose material or quantity is unknown are left out of `answer`; the decision is `no_bid` only when a
 searched requirement has no matching active material (rule 3).

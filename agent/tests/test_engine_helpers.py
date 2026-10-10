@@ -175,6 +175,22 @@ class Json(unittest.TestCase):
         self.assertIn("conditions", material["properties"])
         json.dumps(schema)
 
+    def test_filling_guide_names_real_fields(self):
+        import re
+        from facts import FILLING_GUIDE, json_schema
+        names = set()
+
+        def collect(schema):
+            for name, sub in schema.get("properties", {}).items():
+                names.add(name)
+                for part in (sub, sub.get("items", {}), *sub.get("anyOf", [])):
+                    if isinstance(part, dict):
+                        collect(part.get("items", part) if part.get("type") == "array" else part)
+        collect(json_schema())
+        used = set(re.findall(r"\b[a-z]+_[a-z_]+\b", FILLING_GUIDE)) - {"base_and_surcharge"}
+        self.assertTrue(used, "no field names found")
+        self.assertEqual(used - names, set())
+
     def test_mass(self):
         from facts import mass_kg
         self.assertEqual(mass_kg("625 g/Stück"), D("0.625"))

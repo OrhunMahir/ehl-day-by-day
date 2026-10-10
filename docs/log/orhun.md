@@ -2,7 +2,7 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
-## 2026-10-10 14:45 · Work streams described in detail
+## 2026-10-10 14:10 · Work streams described in detail
 
 - Changed: new `docs/streams.md` with, for each of the three streams, the goal, the files only that stream edits,
   what the other streams rely on, the work in order and what "done" means, plus how the streams hand over to each
@@ -12,14 +12,14 @@ Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Pu
 - Checked: read `agent.py`, `browsing.py`, `browser.py`, `llm.py` and `pyproject.toml` to describe the interfaces
   as they are. Not checked by running: the two gaps named below were found by reading the code.
 - Learned: `browser.py` reads PDFs with `pypdf`, which is not a declared dependency, so PDFs cannot be read in the
-  sandbox yet. In a test run the platform's expiry is up to two hours away and the agent plans with all of it; that is
-  the likely reason the first test run is still going well past 20 minutes (not confirmed from its logs).
+  sandbox yet. In a test run the platform's expiry is up to two hours away and the agent plans with all of it (read
+  from the code, not yet confirmed in a run).
 - For the others: A — the PDF gap is listed as your item 2, the dependency comes from C. B — you can start now;
   `facts.py` and `engine/` are yours and nothing depends on the websites. Everyone — read your section of
   `docs/streams.md`.
 - Next: baseline score from the running test run, then the time budget cap and the `pypdf` dependency.
 
-## 2026-10-10 14:15 · Entire setup, working agreement, first test run
+## 2026-10-10 14:00 · Entire setup, working agreement, first test run
 
 - Changed: added the Entire setup files (`.entire/` and the agent hook configs at the repository root), the working
   agreement (`AGENTS.md`, `CLAUDE.md`), the root `README.md`, the briefs and notes under `docs/`, and the push logs

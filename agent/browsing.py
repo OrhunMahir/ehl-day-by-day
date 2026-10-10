@@ -50,7 +50,7 @@ TOOLS = [
 RECORD_TOOL = ("record", "Record facts you just read into the bid's facts, at once: an object with only the new "
                "records, e.g. {'materials': [{...}]}, each item with its `source`. Answers what was added, or the "
                "field that was wrong (correct it and record again).", {"facts": "object"})
-RECORD_EVERY = 4  # actions without a record before an agent with a recorder is reminded to record what it read
+RECORD_EVERY = 3  # actions without a record before an agent with a recorder is reminded to record what it read
 RECORD_RULES = """
 Recording facts: you have a `record` tool that writes facts into the bid's facts at once. Record every record you
 read as soon as you have read it, in the next step, not at the end: anything not recorded is lost if your time runs

@@ -81,7 +81,8 @@ entering and signing the bid takes the rest of the time."""
 
 # Appended to every investigation task, so each reported value can be turned into a fact with its source.
 PROVENANCE = ("For every value you report, say where it is from: the website, the page or document, its date, the "
-              "sender's address if it is a message, and the revision if the document has revisions.")
+              "sender's address if it is a message, and the revision if the document has revisions. Record each "
+              "record with `record` in the step right after you read it, not at the end.")
 
 SCORED_RUN_SECONDS = 20 * 60
 # How the working time is spent, as shares of it. Entering and signing the bid gets everything after SUBMIT_SHARE.
@@ -114,7 +115,10 @@ DISPATCH = True  # a "find" need of the engine's checklist is started as a small
 TASK_SECONDS = 150  # a dispatched investigation, one need each
 TASK_STEPS = 20
 ATTEMPTS_PER_NEED = 2  # a need still open after this many investigations is left to the lead
-ASSIGN_CALL_SECONDS = 45  # the call that assigns new needs to websites
+ASSIGN_CALL_SECONDS = 30  # the call that assigns new needs to websites
+ASSIGN_BRIEF_CHARS = 2500  # the beginning of the brief, where the websites are described, for that call
+BUNDLE_STEPS = 6  # more steps per further need in a bundle
+BUNDLE_SECONDS = 30  # and more seconds
 DISPATCH_IDLE_SECONDS = 3  # how often the dispatcher looks again when no fact arrives
 DISPATCH_LAST_SECONDS = 45  # no new investigation is started this close to the end of the investigations
 WAIT_SECONDS = 60  # the lead's `wait` returns after this long at the latest
@@ -186,6 +190,7 @@ class Orchestrator:
         self.timeline: dict[str, dict] = {}  # need id -> {"raised", "handed", "resolved"} in run seconds
         self.digest: list[str] = []  # the first lines of each report, for the assigner
         self.dispatcher: asyncio.Task | None = None
+        self.role_sites: dict[str, str] = {}  # site role of a need -> website an earlier assignment chose for it
         self.submitted = None  # the last answer a submission was attempted with
         self.sent_without_lead = False
         self.accepted = False  # the platform took the bid; nothing more to do
@@ -240,20 +245,24 @@ class Orchestrator:
                     "answer": {"type": "object"}}, "required": []}}},
         ]
 
-    async def investigate(self, site: str, task: str, need: str | None = None) -> str:
+    async def investigate(self, site: str, task: str, need: str | None = None, steps: int | None = None,
+                          seconds: float | None = None) -> str:
         if site not in self.tabs:
             return f"Unknown site {site}; choose one of {', '.join(self.tabs)}"
         async with self.tab_slots[site]:
             if time.time() >= self.collect_until:
                 return "No time left to investigate: call submit_bid now with what you have."
-            longest = TASK_SECONDS if need else FIRST_ROUND_SECONDS if self.rounds <= 1 else INVESTIGATION_SECONDS
+            if need:
+                longest = seconds or TASK_SECONDS
+            else:
+                longest = FIRST_ROUND_SECONDS if self.rounds <= 1 else INVESTIGATION_SECONDS
             until = min(self.collect_until, time.time() + longest)
             tab = await self.take_tab(site)
             recording = ({"recorder": self.record_at_source, "field_reference": facts.field_reference()}
                          if RECORD_AT_SOURCE else {})
             name = f"{site}#{self.handed.get(need, 0)}" if need else site
             agent = BrowsingAgent(self.worker_model, {site: tab}, self.credentials, f"{task}\n\n{PROVENANCE}",
-                                  self.context(), name=name, deadline=until, max_steps=TASK_STEPS if need else 60,
+                                  self.context(), name=name, deadline=until, max_steps=(steps or TASK_STEPS) if need else 60,
                                   log=self.log, **recording)
             try:
                 report = await asyncio.wait_for(agent.run(), timeout=until - time.time() + INVESTIGATION_GRACE_SECONDS)
@@ -397,34 +406,61 @@ class Orchestrator:
                          f"{req.pressure_bar} bar, mounting {req.mounting}, certification {req.certification or 'none'}")
         return ("\nMatch against: " + "; ".join(lines)) if lines else ""
 
-    async def assign(self, needs: list[dict]) -> list[tuple[dict, str, str]]:
-        """Asks the lead model, in a call of its own (not the lead's conversation), which website should work each
-        new need and with which task. Returns (need, site, task) for every need it placed."""
-        row = {"type": "object", "properties": {"need": {"type": "string"},
+    def bundles(self, needs: list[dict]) -> list[list[dict]]:
+        """Needs one investigation works together: those of one site role and one rule (e.g. every key of one kind
+        of mail), each catalogue-group search alone so that they run side by side, and at most as many bundles per
+        role as a website has tabs (more are merged in turn)."""
+        groups: dict[tuple, list[dict]] = {}
+        for need in needs:
+            alone = need["what"].startswith("search Kataloggruppe")
+            groups.setdefault((need["site"], need["id"] if alone else need.get("rule")), []).append(need)
+        by_role: dict[str, list[list[dict]]] = {}
+        for (role, _), group in groups.items():
+            by_role.setdefault(role, []).append(group)
+        out = []
+        for role_groups in by_role.values():
+            if len(role_groups) > TABS_PER_SITE:
+                merged: list[list[dict]] = [[] for _ in range(TABS_PER_SITE)]
+                for i, group in enumerate(role_groups):
+                    merged[i % TABS_PER_SITE].extend(group)
+                role_groups = merged
+            out.extend(role_groups)
+        return out
+
+    async def assign(self, bundles: list[list[dict]]) -> list[tuple[list[dict], str, str]]:
+        """Asks the lead model, in a short call of its own (not the lead's conversation), which website should work
+        each bundle of needs and with which task. If the call fails, a bundle whose site role an earlier answer
+        placed goes to that website again with the needs as its task. Returns (bundle, site, task)."""
+        row = {"type": "object", "properties": {"bundle": {"type": "string"},
                                                 "site": {"type": "string", "enum": list(self.tabs)},
                                                 "task": {"type": "string"}},
-               "required": ["need", "site", "task"]}
+               "required": ["bundle", "site", "task"]}
         tool = {"type": "function", "function": {
-            "name": "assign", "description": "Assign needs to websites, one short task each.",
+            "name": "assign", "description": "Assign bundles of needs to websites, one short task each.",
             "parameters": {"type": "object", "properties": {"assignments": {"type": "array", "items": row}},
                            "required": ["assignments"]}}}
-        # short numbers instead of the needs' long ids: a small model copies "n2" reliably
-        numbered = {f"n{i}": n for i, n in enumerate(needs, 1)}
-        listing = "\n".join(f"- {key}: {n['what']}"
-                            + (f" (positions {', '.join(n['positions'])})" if n.get("positions") else "")
-                            for key, n in numbered.items())
+        # short numbers instead of the needs' long ids: a small model copies "b2" reliably
+        numbered = {f"b{i}": bundle for i, bundle in enumerate(bundles, 1)}
+        lines = []
+        for key, bundle in numbered.items():
+            whats = "; ".join(n["what"] + (f" (positions {', '.join(n['positions'])})" if n.get("positions") else "")
+                              for n in bundle)
+            lines.append(f"- {key} (usually on: {bundle[0]['site']}): {whats}")
         websites = "\n".join(f"- {a['siteId']}: {a['url']}" for a in self.task["access"])
-        messages = [{"role": "system", "content": ASSIGN},
-                    {"role": "user", "content": f"{self.context()}\n\n# Websites\n{websites}\n\n"
-                                                f"# Reports so far (first lines)\n{chr(10).join(self.digest) or '(none yet)'}"
-                                                f"\n\n# Open needs (use the number before the colon)\n{listing}"}]
+        brief = self.task.get("brief", "")[:ASSIGN_BRIEF_CHARS]
+        reports = "\n".join(self.digest) or "(none yet)"
+        content = (f"# The brief (beginning)\n{brief}\n\n# Websites\n{websites}\n\n# Reports so far (first lines)\n"
+                   f"{reports}\n\n# Open needs (use the bundle number before the colon)\n" + "\n".join(lines))
+        messages = [{"role": "system", "content": ASSIGN}, {"role": "user", "content": content}]
         try:
             message = await asyncio.wait_for(
                 self.ask(messages, [tool], {"type": "function", "function": {"name": "assign"}}),
                 timeout=ASSIGN_CALL_SECONDS)
-        except Exception as error:  # noqa: BLE001 - asked again with the next fact
-            self.log(f"[dispatch] assigning failed: {type(error).__name__}")
-            return []
+        except Exception as error:  # noqa: BLE001 - the fallback below, then asked again with the next fact
+            self.log(f"[dispatch] assigning failed: {type(error).__name__}; placing the roles known so far")
+            return [(bundle, self.role_sites[bundle[0]["site"]],
+                     "Find and record: " + "; ".join(n["what"] for n in bundle))
+                    for bundle in bundles if bundle[0]["site"] in self.role_sites]
         out = []
         for call in message.tool_calls or []:
             try:
@@ -432,15 +468,16 @@ class Orchestrator:
             except (ValueError, AttributeError):
                 continue
             for item in rows if isinstance(rows, list) else []:
-                need = numbered.get(str(item.get("need", "")).strip().lower()) if isinstance(item, dict) else None
-                if need and item.get("site") in self.tabs and str(item.get("task", "")).strip():
-                    out.append((need, item["site"], str(item["task"]).strip()))
+                bundle = numbered.get(str(item.get("bundle", "")).strip().lower()) if isinstance(item, dict) else None
+                if bundle and item.get("site") in self.tabs and str(item.get("task", "")).strip():
+                    self.role_sites[bundle[0]["site"]] = item["site"]
+                    out.append((bundle, item["site"], str(item["task"]).strip()))
         return out
 
     async def dispatch(self) -> None:
-        """Starts an investigation for every new "find" need as soon as the facts raise it, up to the tabs a website
-        has, until the investigations end. Survey needs (positions, revisions) wait for the lead's first round;
-        needs for the brief stay with the lead."""
+        """Starts an investigation for every new bundle of "find" needs as soon as the facts raise it, until the
+        investigations end. Survey needs (positions, revisions) wait for the lead's first round; needs for the brief
+        stay with the lead."""
         while time.time() < self.collect_until and not self.accepted:
             try:
                 await asyncio.wait_for(self.facts_changed.wait(), timeout=DISPATCH_IDLE_SECONDS)
@@ -454,23 +491,31 @@ class Orchestrator:
                      and (self.first_round_done or not n.get("survey"))]
             if not fresh or self.collect_until - time.time() < DISPATCH_LAST_SECONDS:
                 continue
-            for need, site, task in await self.assign(fresh):
-                if need["id"] in self.in_flight:
+            for bundle, site, task in await self.assign(self.bundles(fresh)):
+                if any(n["id"] in self.in_flight for n in bundle):
                     continue
-                self.in_flight[need["id"]] = site
-                self.handed[need["id"]] = self.handed.get(need["id"], 0) + 1
-                self.timeline.setdefault(need["id"], {})["handed"] = round(time.time() - self.started)
-                self.log(f"[dispatch] {site} <- {need['id']}")
-                asyncio.ensure_future(self.work_on(need, site, task))
+                now = round(time.time() - self.started)
+                for need in bundle:
+                    self.in_flight[need["id"]] = site
+                    self.handed[need["id"]] = self.handed.get(need["id"], 0) + 1
+                    self.timeline.setdefault(need["id"], {})["handed"] = now
+                self.log(f"[dispatch] {site} <- {len(bundle)} need(s): " + " | ".join(n["id"] for n in bundle))
+                asyncio.ensure_future(self.work_on(bundle, site, task))
 
-    async def work_on(self, need: dict, site: str, task: str) -> None:
+    async def work_on(self, bundle: list[dict], site: str, task: str) -> None:
+        extra = len(bundle) - 1
+        done_when = "; ".join(n["what"] for n in bundle)
         try:
-            await self.investigate(site, f"{task}\nThis task is done when you have recorded: {need['what']}."
-                                   + self.context_for(need), need=need["id"])
-        except Exception as error:  # noqa: BLE001 - the need stays open and may be handed out once more
+            await self.investigate(
+                site, f"{task}\nThis task is done when you have recorded: {done_when}."
+                + "".join(self.context_for(n) for n in bundle), need=bundle[0]["id"],
+                steps=min(TASK_STEPS + BUNDLE_STEPS * extra, 40),
+                seconds=min(TASK_SECONDS + BUNDLE_SECONDS * extra, INVESTIGATION_SECONDS))
+        except Exception as error:  # noqa: BLE001 - the needs stay open and may be handed out once more
             self.log(f"[dispatch] {site} task failed: {type(error).__name__}")
         finally:
-            self.in_flight.pop(need["id"], None)
+            for need in bundle:
+                self.in_flight.pop(need["id"], None)
             self.facts_changed.set()
 
     def timeline_summary(self) -> str:

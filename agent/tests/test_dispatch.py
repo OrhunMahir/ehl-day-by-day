@@ -40,8 +40,8 @@ class Assigner:
 
     async def chat(self, messages, tools=None, **kwargs):
         self.asked += 1
-        numbers = [line.split(":")[0][2:] for line in messages[-1]["content"].splitlines() if line.startswith("- n")]
-        rows = [{"need": n, "site": self.site, "task": "Search it and record what you read."} for n in numbers]
+        numbers = [line.split(" ")[1] for line in messages[-1]["content"].splitlines() if line.startswith("- b")]
+        rows = [{"bundle": n, "site": self.site, "task": "Search it and record what you read."} for n in numbers]
         return type("M", (), {"content": "", "tool_calls": [Call("assign", {"assignments": rows})]})()
 
 
@@ -129,7 +129,7 @@ class Dispatching(unittest.IsolatedAsyncioTestCase):
         orchestrator.builder.add({**BRIEF_FACTS, **SPEC})
         started = []
 
-        async def investigate(site, task, need=None):
+        async def investigate(site, task, need=None, **kwargs):
             started.append((site, need, task))
             orchestrator.record_at_source({"materials": [MATERIAL], "searched_groups": ["G1"]})
             return "report"
@@ -147,7 +147,7 @@ class Dispatching(unittest.IsolatedAsyncioTestCase):
         orchestrator.builder.add(BRIEF_FACTS)
         started = []
 
-        async def investigate(site, task, need=None):
+        async def investigate(site, task, need=None, **kwargs):
             started.append(need)
             await asyncio.sleep(5)
         orchestrator.investigate = investigate
@@ -162,7 +162,7 @@ class Dispatching(unittest.IsolatedAsyncioTestCase):
         orchestrator.builder.add({**BRIEF_FACTS, **SPEC})
         started = []
 
-        async def investigate(site, task, need=None):
+        async def investigate(site, task, need=None, **kwargs):
             started.append(need)
             return "nothing found"
         orchestrator.investigate = investigate
@@ -176,7 +176,7 @@ class Dispatching(unittest.IsolatedAsyncioTestCase):
         orchestrator.builder.add({**SPEC, "tender_reference": "T-1", "scenario_date": "2030-01-01"})
         started = []
 
-        async def investigate(site, task, need=None):
+        async def investigate(site, task, need=None, **kwargs):
             started.append(need)
         orchestrator.investigate = investigate
         await self.run_dispatch(orchestrator)
@@ -187,7 +187,7 @@ class Dispatching(unittest.IsolatedAsyncioTestCase):
         orchestrator.builder.add({**BRIEF_FACTS, **SPEC})
         started = []
 
-        async def investigate(site, task, need=None):
+        async def investigate(site, task, need=None, **kwargs):
             started.append(need)
         orchestrator.investigate = investigate
         await self.run_dispatch(orchestrator)
@@ -196,12 +196,46 @@ class Dispatching(unittest.IsolatedAsyncioTestCase):
     async def test_an_assignment_to_an_unknown_site_or_need_is_dropped(self):
         class Confused(Assigner):
             async def chat(self, messages, tools=None, **kwargs):
-                rows = [{"need": "n1", "site": "nowhere", "task": "x"}, {"need": "n99", "site": "erp", "task": "x"},
-                        {"need": "n1", "site": "erp", "task": ""}]
+                rows = [{"bundle": "b1", "site": "nowhere", "task": "x"}, {"bundle": "b99", "site": "erp", "task": "x"},
+                        {"bundle": "b1", "site": "erp", "task": ""}]
                 return type("M", (), {"content": "", "tool_calls": [Call("assign", {"assignments": rows})]})()
         orchestrator = lead(Confused())
         orchestrator.builder.add({**BRIEF_FACTS, **SPEC})
-        self.assertEqual(await orchestrator.assign(orchestrator.open_needs()), [])
+        needs = [n for n in orchestrator.open_needs() if n["kind"] == "find"]
+        self.assertEqual(await orchestrator.assign(orchestrator.bundles(needs)), [])
+
+    async def test_when_assigning_fails_a_known_role_goes_to_its_website_again(self):
+        class Fails(Assigner):
+            async def chat(self, messages, tools=None, **kwargs):
+                raise RuntimeError("no answer")
+        orchestrator = lead(Fails())
+        orchestrator.builder.add({**BRIEF_FACTS, **SPEC})
+        needs = [n for n in orchestrator.open_needs() if n["kind"] == "find"]
+        self.assertEqual(await orchestrator.assign(orchestrator.bundles(needs)), [])   # nothing known yet
+        orchestrator.role_sites["ERP"] = "erp"
+        placed = await orchestrator.assign(orchestrator.bundles(needs))
+        self.assertEqual([(len(b), site) for b, site, _ in placed], [(1, "erp")])
+        self.assertTrue(placed[0][2].startswith("Find and record: search Kataloggruppe G1"))
+
+
+class Bundling(unittest.TestCase):
+    def need(self, role, rule, what):
+        return {"id": f"find|{role}|{rule}|{what}", "kind": "find", "site": role, "rule": rule, "what": what}
+
+    def test_one_bundle_per_role_and_rule_and_each_group_search_alone(self):
+        orchestrator = lead()
+        needs = [self.need("mailbox", 24, f"Terminfreigabe: record for key K{i}") for i in range(5)]
+        needs += [self.need("mailbox", 12, "Konditionsregeln: record for key A"),
+                  self.need("ERP", 10, "search Kataloggruppe G1: ..."), self.need("ERP", 10, "search Kataloggruppe G2: ...")]
+        sizes = sorted(len(b) for b in orchestrator.bundles(needs))
+        self.assertEqual(sizes, [1, 1, 1, 5])
+
+    def test_no_more_bundles_per_role_than_tabs(self):
+        orchestrator = lead()
+        needs = [self.need("ERP", 10, f"search Kataloggruppe G{i}: ...") for i in range(agent.TABS_PER_SITE + 3)]
+        bundles = orchestrator.bundles(needs)
+        self.assertEqual(len(bundles), agent.TABS_PER_SITE)
+        self.assertEqual(sum(len(b) for b in bundles), agent.TABS_PER_SITE + 3)
 
 
 class ContextForATask(unittest.TestCase):

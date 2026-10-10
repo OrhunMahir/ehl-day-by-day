@@ -45,6 +45,23 @@ TOOLS = [
      "CHECKED: what you did not reach or only partly checked (e.g. 2 of 5 results opened, a tab not opened), so "
      "nobody mistakes it for absent.", {"report": "string"}),
 ]
+# Recording at the source: the agent writes what it reads straight into the run's facts, so a timeout loses nothing
+# it has recorded. The description is completed with the facts' field reference when the agent gets a recorder.
+RECORD_TOOL = ("record", "Record facts you just read into the bid's facts, at once: an object with only the new "
+               "records, e.g. {'materials': [{...}]}, each item with its `source`. Answers what was added, or the "
+               "field that was wrong (correct it and record again).", {"facts": "object"})
+RECORD_EVERY = 4  # actions without a record before an agent with a recorder is reminded to record what it read
+RECORD_RULES = """
+Recording facts: you have a `record` tool that writes facts into the bid's facts at once. Record every record you
+read as soon as you have read it, in the next step, not at the end: anything not recorded is lost if your time runs
+out. Copy values and identifiers character for character, numbers as JSON numbers, masses in kg, dates as shown with
+their time and zone. Give each item its `source` (site, page or document, date, and for a message the sender's
+address). Record what you see, including superseded versions, look-alikes and later-dated records, each with its own
+source: the bid engine decides which one counts. In an ERP result list record every result with the attributes the
+list shows; open the details only of results that match what you are looking for. When you have searched a
+catalogue group and read every result, add the group to `searched_groups`. Use `note` only for what has no field.
+Fields:
+"""
 SOURCE_FIELDS = ("document", "date", "sender", "revision", "status", "reference")
 OPTIONAL = {"enter", "offset", "source", "max_pages", *SOURCE_FIELDS}
 WRAP_UP_SECONDS = 90  # the wrap-up report may take at most this long
@@ -64,13 +81,13 @@ SHORTENED = "\n... (older page view shortened to save space; your notes keep wha
 NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
 
 
-def tool_schemas(multi_site: bool) -> list[dict]:
+def tool_schemas(multi_site: bool, recording: bool = False) -> list[dict]:
     schemas = []
-    for name, description, params in TOOLS:
+    for name, description, params in TOOLS + ([RECORD_TOOL] if recording else []):
         properties = {key: ({"type": "array", "items": {"type": "string"}} if kind == "array" else {"type": kind})
                       for key, kind in params.items()}
         required = [key for key in params if key not in OPTIONAL]
-        if multi_site and name not in ("note", "finish"):
+        if multi_site and name not in ("note", "finish", "record"):
             properties["site"] = {"type": "string", "description": "which website (siteId)"}
             required.append("site")
         schemas.append({"type": "function", "function": {
@@ -158,8 +175,12 @@ def _no_thinking(model) -> dict:
 
 class BrowsingAgent:
     def __init__(self, model, tabs: dict[str, Tab], credentials: dict[str, dict], task: str, context: str,
-                 name: str, deadline: float, max_steps: int = 60, log=print):
+                 name: str, deadline: float, max_steps: int = 60, log=print, recorder=None,
+                 field_reference: str = ""):
         self.model, self.tabs, self.credentials = model, tabs, credentials
+        # recorder(update) -> str adds a facts update to the run's facts and says what was added or what was wrong
+        self.recorder, self.field_reference = recorder, field_reference
+        self.records = 0  # updates the recorder accepted
         self.task, self.context, self.name = task, context, name
         self.deadline, self.max_steps, self.log = deadline, max_steps, log
         self.notes: list[str] = []
@@ -199,6 +220,8 @@ class BrowsingAgent:
         return await tab.observe()
 
     async def _run_tool(self, name: str, args: dict) -> str:
+        if name == "record":
+            return self._record(args)
         tab = self._tab(args) if name not in ("note", "finish") else None
         if tab is not None:
             self.last_tab = tab
@@ -286,11 +309,27 @@ class BrowsingAgent:
             return "Saved."
         raise ValueError(f"Unknown tool {name}")
 
+    def _record(self, args: dict) -> str:
+        if self.recorder is None:
+            return "Error: recording is not available; use note."
+        update = args.get("facts", args)
+        if isinstance(update, str):
+            try:
+                update = json.loads(update)
+            except ValueError:
+                return "Error: `facts` must be a JSON object, e.g. {'materials': [{...}]}."
+        outcome = self.recorder(update)
+        if not outcome.startswith(("Error", "The update was not added")):
+            self.records += 1
+            self.notes.append("(recorded) " + outcome.splitlines()[0][:300])
+        return outcome
+
     async def run(self) -> str:
         sites = "\n".join(f"- {site_id}: {tab.page.url if tab.page.url != 'about:blank' else ''} (login with the login tool)"
                           for site_id, tab in self.tabs.items())
+        system = SYSTEM + (RECORD_RULES + self.field_reference if self.recorder else "")
         messages = [
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": f"{self.context}\n\n# Your websites\n{sites}\n\n# Your task\n{self.task}"},
         ]
         # open each site so the model starts from a real page view
@@ -300,9 +339,9 @@ class BrowsingAgent:
             except asyncio.TimeoutError:
                 view = f"[{tab.site_id}] (the page did not respond in time; use look or goto)"
             messages[1]["content"] += "\n\n# Current page\n" + view
-        tools = tool_schemas(self.multi)
+        tools = tool_schemas(self.multi, recording=self.recorder is not None)
         warned_time = warned_steps = False
-        since_note = 0
+        since_note = since_record = 0
         for step in range(self.max_steps):
             remaining = self.deadline - time.time()
             if remaining < WRAP_UP_RESERVE:  # leave the wrap-up its time inside the deadline
@@ -315,7 +354,11 @@ class BrowsingAgent:
                 warned_steps = True
                 messages.append({"role": "user", "content": f"Only {self.max_steps - step} steps left: save unsaved "
                                                             "facts with note, then call finish."})
-            if since_note >= NOTE_EVERY:
+            if self.recorder is not None and since_record >= RECORD_EVERY:
+                since_record = 0
+                messages.append({"role": "user", "content": f"You have taken {RECORD_EVERY} actions without a record. "
+                                 "If the pages you read held facts, record them now with `record`, each with source."})
+            if since_note >= NOTE_EVERY and self.recorder is None:
                 since_note = 0
                 messages.append({"role": "user", "content": f"You have taken {NOTE_EVERY} actions without a note. If "
                                  "the pages you read held facts the task needs, save them with note now, with source."})
@@ -353,13 +396,16 @@ class BrowsingAgent:
                 except Exception as error:  # noqa: BLE001
                     result = f"Error: {str(error).splitlines()[0][:400]}"
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
-                if call.function.name == "note":
+                if call.function.name in ("note", "record"):
                     since_note = 0
+                    if call.function.name == "record":
+                        since_record = 0
                     self.unnoted = []
                 else:
                     if call.function.name != "login" and not result.startswith(("Error", "Refused")):
                         self.unnoted = [*self.unnoted, f"{call.function.name} -> {result[:UNNOTED_CHARS]}"][-UNNOTED_KEPT:]
                     since_note += 1
+                    since_record += 1
                     url = self.last_tab.page.url
                     if url not in self.visited:
                         self.visited.append(url)

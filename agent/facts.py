@@ -736,21 +736,28 @@ def _ident(item: dict, paths: tuple[str, ...]) -> tuple:
     return tuple(out)
 
 
-def _merge_fields(old: dict, new: dict) -> dict:
-    """Fields of `new` override `old`; a null never erases a known value; requirements merge by their id."""
+def _known(value) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _merge_fields(old: dict, new: dict, prefer_existing: bool = False) -> dict:
+    """Fields of `new` override `old`; a null never erases a known value; requirements merge by their id. With
+    `prefer_existing`, `new` only fills fields that `old` does not know yet."""
     merged = dict(old)
     for name, value in new.items():
         if value is None:
             continue
         if name == "requirements" and isinstance(value, list) and isinstance(old.get(name), list):
-            merged[name] = _merge_list(old[name], value, ("requirement",), field_merge=True)[0]
-        else:
+            merged[name] = _merge_list(old[name], value, ("requirement",), True, prefer_existing)[0]
+        elif not (prefer_existing and _known(old.get(name))):
             merged[name] = value
     return merged
 
 
-def _merge_list(old: list, new: list, paths: tuple[str, ...], field_merge: bool) -> tuple[list, list[int]]:
-    """The merged list (items are never changed in place) and the indexes of the items that are new or changed."""
+def _merge_list(old: list, new: list, paths: tuple[str, ...], field_merge: bool,
+                prefer_existing: bool = False) -> tuple[list, list[int]]:
+    """The merged list (items are never changed in place) and the indexes of the items that are new or changed.
+    With `prefer_existing`, a known item is only completed (field merge) or kept as it is (whole-item lists)."""
     items = list(old)
     index = {}
     for i, existing in enumerate(items):
@@ -765,8 +772,11 @@ def _merge_list(old: list, new: list, paths: tuple[str, ...], field_merge: bool)
             index[key] = len(items)
             changed.append(len(items))
             items.append(copy.deepcopy(item))
-        else:
-            items[at] = _merge_fields(items[at], copy.deepcopy(item)) if field_merge else copy.deepcopy(item)
+        elif field_merge:
+            items[at] = _merge_fields(items[at], copy.deepcopy(item), prefer_existing)
+            changed.append(at)
+        elif not prefer_existing:
+            items[at] = copy.deepcopy(item)
             changed.append(at)
     return items, changed
 
@@ -790,11 +800,16 @@ class FactsBuilder:
         if data:
             self.add(data)
 
-    def add(self, update: dict) -> str:
+    def add(self, update: dict, prefer_existing: bool = False) -> str:
+        """Merges one update. With `prefer_existing` (a second source, e.g. a report recorded after the browsing
+        agent recorded at the source) the update only adds what is not known yet: it never overwrites a value,
+        never replaces a record and never empties a list."""
         if not isinstance(update, dict):
             raise ValueError("the update must be an object")
         update = dict(update)
         replace = set(update.pop("replace_lists", None) or [])
+        if prefer_existing:
+            replace = set()
         unknown = replace - set(_IDENTITY) - {"searched_groups"}
         if unknown:
             raise ValueError(f"replace_lists: unknown list(s) {', '.join(sorted(unknown))}")
@@ -811,7 +826,7 @@ class FactsBuilder:
                 if not isinstance(value, list):
                     raise ValueError(f"Facts.{name}: expected a list")
                 base = [] if name in replace else merged.get(name, [])
-                items, changed = _merge_list(base, value, _IDENTITY[name], name in _FIELD_MERGE)
+                items, changed = _merge_list(base, value, _IDENTITY[name], name in _FIELD_MERGE, prefer_existing)
                 cls = _item_class(name)
                 for i in changed:
                     try:
@@ -828,6 +843,8 @@ class FactsBuilder:
                         groups.append(clean(str(g)))
                 merged[name] = groups
             elif value is not None:
+                if prefer_existing and _known(merged.get(name)):
+                    continue
                 new = {**merged.get(name, {}), **value} if name == "authority" and isinstance(value, dict) else value
                 try:
                     _convert(hints[name], new)
@@ -861,3 +878,48 @@ def update_schema() -> dict:
     schema["description"] = ("Add facts as they are found; send only what is new or corrected. An item with the "
                              "same identity (e.g. the same material_number) updates the earlier one.")
     return schema
+
+
+def field_reference() -> str:
+    """The facts' fields as compact text for a model that records facts while it browses: much shorter than the JSON
+    Schema of `update_schema()`. `*` marks a field an item needs; every list item may carry a `source`."""
+    def kind(tp) -> str:
+        options, _ = _members(tp)
+        if datetime in options or date in options:
+            return "date"
+        if str in options and Decimal in options:
+            return "number or text"
+        tp = options[0]
+        origin = typing.get_origin(tp)
+        if origin is list:
+            inner = typing.get_args(tp)[0]
+            return "list of {" + describe(inner) + "}" if is_dataclass(inner) else "list of " + kind(inner)
+        if origin is dict:
+            return "object"
+        if isinstance(tp, type) and issubclass(tp, Enum):
+            return "|".join(m.value for m in tp)
+        if is_dataclass(tp):
+            return "{" + describe(tp) + "}"
+        return {Decimal: "number", bool: "true/false", int: "integer", str: "text"}.get(tp, "text")
+
+    def describe(cls) -> str:
+        hints = typing.get_type_hints(cls)
+        parts = []
+        for f in fields(cls):
+            if f.name == "source":
+                continue
+            mark = "*" if f.default is MISSING and f.default_factory is MISSING else ""
+            k = kind(hints[f.name])
+            parts.append(f"{f.name}{mark}" + ("" if k == "text" else f": {k}"))
+        return ", ".join(parts)
+
+    lines = []
+    for f in fields(Facts):
+        if f.name == "authority":
+            continue
+        line = f"- {f.name}: {kind(typing.get_type_hints(Facts)[f.name])}"
+        doc = FIELD_DOCS.get(f"Facts.{f.name}")
+        lines.append(line + (f" ({doc})" if doc else ""))
+    lines.append("- every list item: source: {" + describe(Source) + "} (where it was read; for a message its "
+                 "sender's address and date)")
+    return "\n".join(lines)

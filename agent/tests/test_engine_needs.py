@@ -91,6 +91,15 @@ class Needs(unittest.TestCase):
         searches = [n for n in evaluate(f).needed() if n["what"].startswith("search Kataloggruppe")]
         self.assertEqual([(n["what"].split()[2], n["positions"]) for n in searches], [("G-B:", ["2"])])
 
+    def test_need_ids_are_stable_while_positions_join(self):
+        f = core_facts()
+        f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
+        early = core_facts()
+        early.materials, early.positions = list(f.materials), []
+        ids = lambda facts: {n["id"] for n in evaluate(facts).needed() if n["what"].startswith("search Kataloggruppe G-B")}
+        self.assertEqual(ids(early), ids(f))
+        self.assertEqual(len(ids(f)), 1)
+
     def test_no_bid_asks_for_a_recheck(self):
         f = core_facts()
         f.materials = [m for m in f.materials if m.material_number != "M-B1"]

@@ -30,13 +30,21 @@ class Need:
     what: str
     rule: int | None = None
     positions: list[str] = field(default_factory=list)
+    survey: bool = False            # what a first survey of the site covers; worth a task of its own only after it
+
+    @property
+    def id(self) -> str:
+        """Stable while the need is open: kind, site role, rule and what is missing; positions join it later."""
+        return f"{self.kind}|{self.site}|{self.rule or ''}|{self.what}"
 
     def as_dict(self) -> dict:
-        out = {"kind": self.kind, "site": self.site, "what": self.what}
+        out = {"id": self.id, "kind": self.kind, "site": self.site, "what": self.what}
         if self.rule:
             out["rule"] = self.rule
         if self.positions:
             out["positions"] = self.positions
+        if self.survey:
+            out["survey"] = True
         return out
 
 
@@ -44,8 +52,8 @@ class _Collector:
     def __init__(self):
         self.items: dict[tuple, Need] = {}
 
-    def add(self, kind, site, what, rule=None, position=None):
-        need = self.items.setdefault((kind, site, what), Need(kind, site, what, rule))
+    def add(self, kind, site, what, rule=None, position=None, survey=False):
+        need = self.items.setdefault((kind, site, what), Need(kind, site, what, rule, survey=survey))
         if position is not None and position not in need.positions:
             need.positions.append(position)
 
@@ -66,7 +74,8 @@ def needs(facts: Facts, result) -> list[Need]:
     if not facts.bidder_domain:
         c.add("find", BRIEF, "bidder_domain: the domain of our own mailbox", 21)
     if not facts.positions:
-        c.add("find", TENDER, "the positions of the bill of quantities (number, quantity, unit, requirement)", 1)
+        c.add("find", TENDER, "the positions of the bill of quantities (number, quantity, unit, requirement)", 1,
+              survey=True)
     if not (facts.quantity_changes or facts.withdrawals or facts.amendments or facts.assignments):
         c.add("verify", TENDER, "bidder Q&A read? No quantity change, withdrawal, amendment or key recorded yet", 1)
     approval = resolve.discount_approval(facts, [])
@@ -80,9 +89,9 @@ def needs(facts: Facts, result) -> list[Need]:
 
     revision = resolve.governing_revision(facts, [])
     if not facts.revisions:
-        c.add("find", SPEC, "the specification revisions and which one is marked current", 2)
+        c.add("find", SPEC, "the specification revisions and which one is marked current", 2, survey=True)
     elif sum(1 for r in facts.revisions if r.current) != 1:
-        c.add("find", SPEC, "which specification revision the site marks as current/valid", 2)
+        c.add("find", SPEC, "which specification revision the site marks as current/valid", 2, survey=True)
     if revision is not None:
         # The ERP search by catalogue group needs nothing but the group: ask for it as soon as the specification is
         # read, not only once the positions and every attribute of the requirement are recorded, so that it can run

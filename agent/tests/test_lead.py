@@ -147,7 +147,7 @@ class SlowSubAgent:
 
     spans: list = []
 
-    def __init__(self, model, tabs, credentials, task, context, name, deadline, log):
+    def __init__(self, model, tabs, credentials, task, context, name, deadline, log, **kwargs):
         self.tab = next(iter(tabs.values()))
 
     async def run(self):
@@ -157,6 +157,7 @@ class SlowSubAgent:
         return "report"
 
 
+@patch.object(agent, "DISPATCH", False)  # the rounds of the lead alone; dispatch has tests of its own
 class SeveralInvestigationsOfOneWebsite(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         SlowSubAgent.spans = []
@@ -249,6 +250,7 @@ class Signs:
         return "receipt"
 
 
+@patch.object(agent, "DISPATCH", False)
 class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
     async def run_with(self, model, investigate_for=0.4):
         task = {**TASK, "access": [{"siteId": "erp", "url": "https://erp.example.test"}],
@@ -307,12 +309,13 @@ class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("add_facts", model.lead_calls)
 
 
+@patch.object(agent, "DISPATCH", False)
 class TheFirstRoundIsShorter(unittest.IsolatedAsyncioTestCase):
     async def test_first_investigations_get_less_time_than_follow_ups(self):
         deadlines = []
 
         class Notes:
-            def __init__(self, model, tabs, credentials, task, context, name, deadline, log):
+            def __init__(self, model, tabs, credentials, task, context, name, deadline, log, **kwargs):
                 deadlines.append(deadline - time.time())
 
             async def run(self):

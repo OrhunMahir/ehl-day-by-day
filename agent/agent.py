@@ -27,7 +27,9 @@ ORCHESTRATOR = """You are the lead sales engineer preparing exactly one tender r
 you direct browsing assistants, one per website, and they report back. You make the decisions.
 
 Approach:
-1. Read the brief and its rules closely; they define the one correct answer. Plan which facts you need.
+1. Read the brief and its rules closely; they define the one correct answer. Plan which facts you need. In your
+   first turn also call `add_facts` with what the brief itself states: tender_reference, scenario_date (if the
+   brief gives it), director_address and bidder_domain. The engine can only plan once these are recorded.
 2. Send assistants to the websites with `investigate` — several in one turn run in parallel, also up to
    {tabs} on the same website, each in a browser tab of its own. Split a large job on one website into several
    investigations (e.g. one catalogue group each) instead of one long one. Give each a precise
@@ -38,13 +40,18 @@ Approach:
    cookie walls and gates, page through lists and note sources by themselves. Long tasks cost minutes of writing.
 3. Time allows two rounds of investigations. The first round is short (about {first_minutes} minutes per
    investigation): give every assistant one narrow job, the one the other sites depend on. Typical first jobs: the
-   tender's positions with their requirement identifiers and all clarifications; the current specification
+   tender's positions with their requirement identifiers, and the clarifications (Q&A), as two investigations of
+   the tender website side by side; the current specification
    revision with every requirement's attributes and catalogue group; the messages that name this exact tender
    reference; in the ERP only how materials are searched by catalogue group and which pages a material has.
    The second round (about {round_minutes} minutes per investigation) is for what depends on another site's
    answer: one ERP investigation per catalogue group, reading every result of the search and each candidate's
    attributes, status, stock, lead times and price conditions; amendments applied to the right revision.
-4. The facts of every report are recorded for you and the bid is priced from them in code. After a round you get
+4. The assistants record the facts they read themselves, as they read them; their reports are recorded for you
+   as well. Follow-ups for the `needed` entries of kind "find" are started automatically as soon as a recorded fact
+   makes them possible (e.g. the ERP search of a catalogue group once the specification names it): you are asked
+   to name the website and write the task, and the state lists them as in progress. Do not send investigations for
+   needs that are in progress; use `wait` to let them work. The bid is priced from the facts in code. After a round you get
    the state of the bid: the priced answer, `issues` (what is missing or ambiguous), `needed` (what to find or
    verify next, and on which site), `incomplete` and `omitted` positions. Do not price anything yourself. Use
    `add_facts` only to correct a record, or to add records of a report the state names as not recorded.
@@ -100,6 +107,17 @@ RECORDER_THINKING = False
 RECORD_MAX_TOKENS = 8000  # the facts of one report as JSON
 WORKER_REASONING: str | None = None  # browsing sub-agents and the submission agent
 WORKER_THINKING = False
+# Facts at the source and work started by what is missing (docs/plan-facts-at-source.md). Both can be switched off
+# to compare with the rounds of the lead alone.
+RECORD_AT_SOURCE = True  # browsing sub-agents record facts while they read; the recorder only fills gaps
+DISPATCH = True  # a "find" need of the engine's checklist is started as a small investigation as soon as it appears
+TASK_SECONDS = 150  # a dispatched investigation, one need each
+TASK_STEPS = 20
+ATTEMPTS_PER_NEED = 2  # a need still open after this many investigations is left to the lead
+ASSIGN_CALL_SECONDS = 45  # the call that assigns new needs to websites
+DISPATCH_IDLE_SECONDS = 3  # how often the dispatcher looks again when no fact arrives
+DISPATCH_LAST_SECONDS = 45  # no new investigation is started this close to the end of the investigations
+WAIT_SECONDS = 60  # the lead's `wait` returns after this long at the latest
 # A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
 INVESTIGATION_GRACE_SECONDS = 30
 RECORD = """You record facts for a bid engine. Below are the brief of a tender and one report of an assistant who
@@ -129,6 +147,11 @@ SUBMISSION_RESERVE_SECONDS = 420  # recording never eats into this much time for
 FORCE_SUBMIT = {"type": "function", "function": {"name": "submit_bid"}}
 FORCE_ADD = {"type": "function", "function": {"name": "add_facts"}}
 ADD_ATTEMPTS = 2  # forced add_facts calls that may fail before the lead has to hand in an answer of its own
+ASSIGN = """You assign the open needs of a tender bid to websites. Each need says what is missing and on which kind of
+website it usually is (its role); the websites of this run, the brief and the reports so far show which website has
+that role here. For every need you can place, give the website and a short task (at most about 50 words) for an
+assistant who browses that website: what to find, which identifiers to search for, and to record what it reads.
+A website can hold information of another role: follow the reports. Leave out needs no website can answer."""
 RUN_CLOSED_CHECKS = 3  # the platform closes a run a moment after it accepts the bid; ask this often, 2 s apart
 
 
@@ -156,6 +179,13 @@ class Orchestrator:
         self.unrecorded: list[str] = []  # reports whose facts could not be recorded
         self.priced: engine.BidResult | None = None  # what the bid engine made of the latest facts
         self.add_failures = 0
+        self.facts_changed = asyncio.Event()  # set whenever facts are added: the dispatcher looks again
+        self.first_round_done = False  # the lead's first investigations have all reported
+        self.handed: dict[str, int] = {}  # need id -> investigations started for it
+        self.in_flight: dict[str, str] = {}  # need id -> site of the investigation working on it right now
+        self.timeline: dict[str, dict] = {}  # need id -> {"raised", "handed", "resolved"} in run seconds
+        self.digest: list[str] = []  # the first lines of each report, for the assigner
+        self.dispatcher: asyncio.Task | None = None
         self.submitted = None  # the last answer a submission was attempted with
         self.sent_without_lead = False
         self.accepted = False  # the platform took the bid; nothing more to do
@@ -192,6 +222,11 @@ class Orchestrator:
                 "parameters": {"type": "object", "properties": {"facts": facts_schema()},
                                "required": ["facts"]}}},
             {"type": "function", "function": {
+                "name": "wait",
+                "description": "Wait while investigations that were started automatically work (up to 60 s, or "
+                               "until new facts arrive); returns the state of the bid.",
+                "parameters": {"type": "object", "properties": {}, "required": []}}},
+            {"type": "function", "function": {
                 "name": "price_bid",
                 "description": "Price the bid again from the facts added so far, without adding any.",
                 "parameters": {"type": "object", "properties": {}, "required": []}}},
@@ -205,17 +240,21 @@ class Orchestrator:
                     "answer": {"type": "object"}}, "required": []}}},
         ]
 
-    async def investigate(self, site: str, task: str) -> str:
+    async def investigate(self, site: str, task: str, need: str | None = None) -> str:
         if site not in self.tabs:
             return f"Unknown site {site}; choose one of {', '.join(self.tabs)}"
         async with self.tab_slots[site]:
             if time.time() >= self.collect_until:
                 return "No time left to investigate: call submit_bid now with what you have."
-            longest = FIRST_ROUND_SECONDS if self.rounds <= 1 else INVESTIGATION_SECONDS
+            longest = TASK_SECONDS if need else FIRST_ROUND_SECONDS if self.rounds <= 1 else INVESTIGATION_SECONDS
             until = min(self.collect_until, time.time() + longest)
             tab = await self.take_tab(site)
+            recording = ({"recorder": self.record_at_source, "field_reference": facts.field_reference()}
+                         if RECORD_AT_SOURCE else {})
+            name = f"{site}#{self.handed.get(need, 0)}" if need else site
             agent = BrowsingAgent(self.worker_model, {site: tab}, self.credentials, f"{task}\n\n{PROVENANCE}",
-                                  self.context(), name=site, deadline=until, log=self.log)
+                                  self.context(), name=name, deadline=until, max_steps=TASK_STEPS if need else 60,
+                                  log=self.log, **recording)
             try:
                 report = await asyncio.wait_for(agent.run(), timeout=until - time.time() + INVESTIGATION_GRACE_SECONDS)
             except TimeoutError:
@@ -223,15 +262,29 @@ class Orchestrator:
                 report = agent._report("(cut off: out of time; only the notes below were saved)")
             finally:
                 self.free_tabs[site].append(tab)
-        self.record_later(site, report)
+        self.digest = [*self.digest, f"{site}: " + " ".join(report.split())[:300]][-12:]
+        # what the agent recorded at the source wins; the report only fills gaps then (plan, review gap 7)
+        self.record_later(site, report, prefer_existing=getattr(agent, "records", 0) > 0)
         return report
 
-    def record_later(self, source: str, report: str) -> None:
-        task = asyncio.ensure_future(self.record(source, report))
+    def record_at_source(self, update) -> str:
+        """A browsing sub-agent's `record`: adds its update to the facts at once, so nothing it read is lost when its
+        time runs out, and wakes the dispatcher. No pricing here; the state prices."""
+        if isinstance(update, dict):
+            update = {key: value for key, value in update.items() if key != "authority"}
+        try:
+            summary = self.builder.add(update)
+        except Exception as error:  # noqa: BLE001 - a ValueError names the bad field; the sub-agent corrects it
+            return f"The update was not added: {error}. Correct this and record again; earlier facts are kept."
+        self.facts_changed.set()
+        return "Recorded. " + summary
+
+    def record_later(self, source: str, report: str, prefer_existing: bool = False) -> None:
+        task = asyncio.ensure_future(self.record(source, report, prefer_existing))
         self.records.add(task)
         task.add_done_callback(self.records.discard)
 
-    async def record(self, source: str, report: str) -> None:
+    async def record(self, source: str, report: str, prefer_existing: bool = False) -> None:
         """Has a model put one report's facts into the facts, apart from the lead, so the lead does not have to
         write them out itself. A bad update is shown to the model once to correct."""
         tool = next(t for t in self.tools() if t["function"]["name"] == "add_facts")
@@ -260,7 +313,7 @@ class Orchestrator:
             except ValueError:
                 arguments = None
             outcome = self.add(arguments.get("facts", arguments) if isinstance(arguments, dict) else arguments,
-                               by_lead=False)
+                               by_lead=False, prefer_existing=prefer_existing)
             if not outcome.startswith("The update was not added"):
                 self.log(f"[{source}] facts recorded in {time.time() - started:.0f} s: {outcome.splitlines()[0][:300]}")
                 return
@@ -278,6 +331,9 @@ class Orchestrator:
     def state(self) -> str:
         """The bid as the recorded facts price it, for the lead's next decision."""
         parts = [self.price() if self.builder.data.get("tender_reference") else "No facts are recorded yet."]
+        if self.in_flight:
+            parts.append("In progress (started automatically; do not send these again): "
+                         + "; ".join(f"{site}: {need.split('|')[-1][:120]}" for need, site in self.in_flight.items()))
         still = sum(not task.done() for task in self.records)
         if still:
             parts.append(f"{still} report(s) are still being recorded.")
@@ -285,6 +341,145 @@ class Orchestrator:
             parts.append("Not recorded; add their facts yourself with add_facts: " + ", ".join(self.unrecorded))
             self.unrecorded = []
         return "\n".join(parts)
+
+    # ---- work started by what is missing -------------------------------------------------------------------------
+    # Fair play: this code does not browse and does not choose where to look. It asks the engine which facts the bid
+    # rules still need, hands new ones to the lead model, which names the website and writes the task, and starts
+    # that task as an investigation in which the browsing model navigates and decides (rule 11).
+
+    def open_needs(self) -> list[dict]:
+        """The engine's checklist for the facts so far. Before the brief's facts are recorded it is evaluated with a
+        placeholder reference and a far scenario date: good enough to see what is missing, never used for a price."""
+        data = dict(self.builder.data)
+        data.setdefault("tender_reference", "(not recorded yet)")
+        data.setdefault("scenario_date", "2100-01-01")
+        try:
+            return engine.evaluate(facts.from_dict(facts.Facts, data)).needed()
+        except Exception as error:  # noqa: BLE001 - a checklist that cannot be made is retried with the next fact
+            self.log(f"[dispatch] checklist not available: {str(error)[:200]}")
+            return []
+
+    def observe(self, needs: list[dict]) -> None:
+        """The timeline: when each "find" need was raised and resolved, in run seconds."""
+        now = round(time.time() - self.started)
+        open_ids = {n["id"] for n in needs if n["kind"] == "find"}
+        for need_id in open_ids:
+            times = self.timeline.setdefault(need_id, {})
+            if "raised" not in times or "resolved" in times:
+                times["raised"] = now
+                times.pop("resolved", None)
+                self.log(f"[timeline] {now}s raised {need_id}")
+        for need_id, times in self.timeline.items():
+            if need_id not in open_ids and "resolved" not in times:
+                times["resolved"] = now
+                self.log(f"[timeline] {now}s resolved {need_id} (raised {times.get('raised')}s, handed "
+                         f"{times.get('handed', '-')}s)")
+
+    def context_for(self, need: dict) -> str:
+        """What a small task needs to know from the facts: for a catalogue-group search, the requirements it must
+        match, so the agent opens only matching results. A stroke still waiting for its end reserve is not given."""
+        if not need["what"].startswith("search Kataloggruppe"):
+            return ""
+        group = facts.norm_key(need["what"].split()[2].rstrip(":"))
+        try:
+            collected = self.builder.facts()
+        except ValueError:
+            return ""
+        revision = engine.resolve.governing_revision(collected, [])
+        lines = []
+        for base in revision.requirements if revision else []:
+            if facts.norm_key(base.catalogue_group) != group:
+                continue
+            req = engine.resolve.requirement(collected, revision, base.requirement, []) or base
+            stroke = (f"{req.stroke_mm} mm" if req.stroke_mm is not None
+                      else "not yet known (usable travel plus end reserves): do not filter by stroke")
+            lines.append(f"requirement {req.requirement}: bore {req.bore_mm} mm, stroke {stroke}, pressure "
+                         f"{req.pressure_bar} bar, mounting {req.mounting}, certification {req.certification or 'none'}")
+        return ("\nMatch against: " + "; ".join(lines)) if lines else ""
+
+    async def assign(self, needs: list[dict]) -> list[tuple[dict, str, str]]:
+        """Asks the lead model, in a call of its own (not the lead's conversation), which website should work each
+        new need and with which task. Returns (need, site, task) for every need it placed."""
+        row = {"type": "object", "properties": {"need": {"type": "string"},
+                                                "site": {"type": "string", "enum": list(self.tabs)},
+                                                "task": {"type": "string"}},
+               "required": ["need", "site", "task"]}
+        tool = {"type": "function", "function": {
+            "name": "assign", "description": "Assign needs to websites, one short task each.",
+            "parameters": {"type": "object", "properties": {"assignments": {"type": "array", "items": row}},
+                           "required": ["assignments"]}}}
+        # short numbers instead of the needs' long ids: a small model copies "n2" reliably
+        numbered = {f"n{i}": n for i, n in enumerate(needs, 1)}
+        listing = "\n".join(f"- {key}: {n['what']}"
+                            + (f" (positions {', '.join(n['positions'])})" if n.get("positions") else "")
+                            for key, n in numbered.items())
+        websites = "\n".join(f"- {a['siteId']}: {a['url']}" for a in self.task["access"])
+        messages = [{"role": "system", "content": ASSIGN},
+                    {"role": "user", "content": f"{self.context()}\n\n# Websites\n{websites}\n\n"
+                                                f"# Reports so far (first lines)\n{chr(10).join(self.digest) or '(none yet)'}"
+                                                f"\n\n# Open needs (use the number before the colon)\n{listing}"}]
+        try:
+            message = await asyncio.wait_for(
+                self.ask(messages, [tool], {"type": "function", "function": {"name": "assign"}}),
+                timeout=ASSIGN_CALL_SECONDS)
+        except Exception as error:  # noqa: BLE001 - asked again with the next fact
+            self.log(f"[dispatch] assigning failed: {type(error).__name__}")
+            return []
+        out = []
+        for call in message.tool_calls or []:
+            try:
+                rows = json.loads(call.function.arguments or "{}").get("assignments", [])
+            except (ValueError, AttributeError):
+                continue
+            for item in rows if isinstance(rows, list) else []:
+                need = numbered.get(str(item.get("need", "")).strip().lower()) if isinstance(item, dict) else None
+                if need and item.get("site") in self.tabs and str(item.get("task", "")).strip():
+                    out.append((need, item["site"], str(item["task"]).strip()))
+        return out
+
+    async def dispatch(self) -> None:
+        """Starts an investigation for every new "find" need as soon as the facts raise it, up to the tabs a website
+        has, until the investigations end. Survey needs (positions, revisions) wait for the lead's first round;
+        needs for the brief stay with the lead."""
+        while time.time() < self.collect_until and not self.accepted:
+            try:
+                await asyncio.wait_for(self.facts_changed.wait(), timeout=DISPATCH_IDLE_SECONDS)
+            except TimeoutError:
+                pass
+            self.facts_changed.clear()
+            needs = self.open_needs()
+            self.observe(needs)
+            fresh = [n for n in needs if n["kind"] == "find" and n["site"] != "brief"
+                     and n["id"] not in self.in_flight and self.handed.get(n["id"], 0) < ATTEMPTS_PER_NEED
+                     and (self.first_round_done or not n.get("survey"))]
+            if not fresh or self.collect_until - time.time() < DISPATCH_LAST_SECONDS:
+                continue
+            for need, site, task in await self.assign(fresh):
+                if need["id"] in self.in_flight:
+                    continue
+                self.in_flight[need["id"]] = site
+                self.handed[need["id"]] = self.handed.get(need["id"], 0) + 1
+                self.timeline.setdefault(need["id"], {})["handed"] = round(time.time() - self.started)
+                self.log(f"[dispatch] {site} <- {need['id']}")
+                asyncio.ensure_future(self.work_on(need, site, task))
+
+    async def work_on(self, need: dict, site: str, task: str) -> None:
+        try:
+            await self.investigate(site, f"{task}\nThis task is done when you have recorded: {need['what']}."
+                                   + self.context_for(need), need=need["id"])
+        except Exception as error:  # noqa: BLE001 - the need stays open and may be handed out once more
+            self.log(f"[dispatch] {site} task failed: {type(error).__name__}")
+        finally:
+            self.in_flight.pop(need["id"], None)
+            self.facts_changed.set()
+
+    def timeline_summary(self) -> str:
+        rows = []
+        for need_id, t in self.timeline.items():
+            resolved = f"{t['resolved']}s" if "resolved" in t else "open"
+            rows.append(f"{need_id}: raised {t.get('raised', '-')}s, handed {t.get('handed', '-')}s, "
+                        f"resolved {resolved}")
+        return "\n".join(rows) or "(no needs)"
 
     async def take_tab(self, site: str) -> Tab:
         """A tab of the website that no other investigation is using. Further tabs get a browser context of their
@@ -306,12 +501,13 @@ class Orchestrator:
         self.log(f"[{site}] opened tab {self.tab_count[site]}")
         return tab
 
-    def add(self, update, by_lead: bool = True) -> str:
+    def add(self, update, by_lead: bool = True, prefer_existing: bool = False) -> str:
         """Adds an update to the facts and prices the bid; a bad update is rejected whole and named."""
         if isinstance(update, dict):
             update = {key: value for key, value in update.items() if key != "authority"}  # the engine's default
         try:
-            summary = self.builder.add(update)
+            summary = self.builder.add(update, prefer_existing=prefer_existing)
+            self.facts_changed.set()
         except Exception as error:  # noqa: BLE001 - a ValueError names the bad field; the model corrects it
             self.add_failures += by_lead
             return f"The update was not added: {error}. Correct this and call add_facts again; earlier facts are kept."
@@ -360,6 +556,18 @@ class Orchestrator:
         note = ("no bid was not taken as final: a catalogue group was not searched completely or facts are missing; "
                 "position(s) " + ", ".join(unresolved) + " are left out instead")
         return dataclasses.replace(partial, issues=[*result.issues, note], omitted=[*partial.omitted, *unresolved])
+
+    async def wait(self) -> str:
+        """The lead's `wait`: until new facts arrive or WAIT_SECONDS pass, then the state of the bid."""
+        self.facts_changed.clear()
+        try:
+            await asyncio.wait_for(self.facts_changed.wait(),
+                                   timeout=max(1.0, min(WAIT_SECONDS, self.submit_from - time.time())))
+        except TimeoutError:
+            pass
+        self.facts_changed.set()  # the dispatcher must not miss what the lead's wait consumed
+        await self.records_done(min(RECORD_WAIT_SECONDS, self.submit_from - time.time()))
+        return self.state()
 
     def answer_to_submit(self, own: dict | None) -> dict | None:
         """The engine's last answer; the lead's own only when the engine has none that fits the schema."""
@@ -462,11 +670,16 @@ class Orchestrator:
         return FORCE_ADD
 
     async def run(self):
+        if DISPATCH:
+            self.dispatcher = asyncio.ensure_future(self.dispatch())
         try:
             await self.direct()
         finally:
+            if self.dispatcher:
+                self.dispatcher.cancel()
             for task in self.records:
                 task.cancel()
+            self.log("[timeline] summary:\n" + self.timeline_summary())
 
     async def direct(self):
         minutes = round((self.submit_from - time.time()) / 60)
@@ -526,6 +739,8 @@ class Orchestrator:
                         return self.add(args.get("facts", args))
                     if call.function.name == "price_bid":
                         return self.price()
+                    if call.function.name == "wait":
+                        return await self.wait()
                     if call.function.name == "submit_bid":
                         if self.submitted is None:
                             await self.records_done(min(RECORD_SECONDS,
@@ -543,7 +758,10 @@ class Orchestrator:
 
             self.rounds += any(c.function.name == "investigate" for c in calls)
             results = await asyncio.gather(*(execute(c) for c in calls))
-            for call, result in zip(calls, results):
+            if self.rounds >= 1 and not self.first_round_done:
+                self.first_round_done = True
+                self.facts_changed.set()
+            for call, result in zip(calls, results, strict=True):
                 self.log(f"[lead] <- {call.function.name}: {result[:3000]}")
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
             if any(c.function.name == "investigate" for c in calls) and not self.accepted:

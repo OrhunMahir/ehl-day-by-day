@@ -116,6 +116,33 @@ class Builder(unittest.TestCase):
         b.add({"tender_reference": "T-1", "scenario_date": "2030-03-15"})
         self.assertEqual(b.facts().positions[0].quantity, D(1))
 
+    def test_prefer_existing_only_fills_gaps(self):
+        b = FactsBuilder()
+        b.add({"materials": [{"material_number": "M-1", "bore_mm": 50, "stock": 7}],
+               "packaging_tariffs": [{"reference": "T-1", "key": "VP-1", "eur_per_carton": 5,
+                                      "source": {"date": "2030-03-01"}}],
+               "tender_reference": "T-1"})
+        b.add({"materials": [{"material_number": "M-1", "bore_mm": 99, "stroke_mm": 300},
+                             {"material_number": "M-2", "bore_mm": 40}],
+               "packaging_tariffs": [{"reference": "T-1", "key": "VP-1", "eur_per_carton": 9,
+                                      "source": {"date": "2030-03-01"}}],
+               "tender_reference": "T-OTHER", "scenario_date": "2030-03-15",
+               "replace_lists": ["materials"]}, prefer_existing=True)
+        m1, m2 = b.data["materials"]
+        self.assertEqual((m1["bore_mm"], m1["stroke_mm"], m1["stock"]), (50, 300, 7))   # filled, not overwritten
+        self.assertEqual(m2["material_number"], "M-2")                                  # new records are added
+        self.assertEqual(b.data["packaging_tariffs"][0]["eur_per_carton"], 5)          # a known record is kept
+        self.assertEqual((b.data["tender_reference"], b.data["scenario_date"]), ("T-1", "2030-03-15"))
+
+    def test_field_reference_is_short_and_names_every_list(self):
+        from facts import Facts, field_reference
+        text = field_reference()
+        self.assertLess(len(text), 4000)
+        for name in Facts.__dataclass_fields__:
+            if name != "authority":
+                self.assertIn(f"- {name}:", text)
+        self.assertIn("value*: number or text", text)
+
     def test_update_schema(self):
         schema = update_schema()
         self.assertNotIn("required", schema)

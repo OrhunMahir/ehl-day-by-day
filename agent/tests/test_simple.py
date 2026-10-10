@@ -77,6 +77,19 @@ class TheBoard(unittest.IsolatedAsyncioTestCase):
         self.assertIn("bore 50", news)
         self.assertNotIn("recorded by site-b", board.news("site-b", 0))  # its own records are not repeated
 
+    async def test_only_the_agent_that_searched_records_a_group_as_searched(self):
+        # a sandbox run: the specification's agent listed every group as searched, nobody had searched any,
+        # and the engine took that for a search without a match: "no bid"
+        board = Board(log=lambda *a: None)
+        board.record("brief", START)
+        reply = board.record("site-b", {**SPEC, "searched_groups": ["G1", "G2"]})
+        self.assertIn("searched_groups was not taken", reply)
+        self.assertNotIn("searched_groups", board.builder.data)
+        self.assertIn("revisions", board.builder.data)  # the rest of the update is kept
+        board.record("site-c", ERP)  # results and the group they were searched by
+        board.record("site-c", {"searched_groups": ["G2"]})  # a later search of the same agent, found nothing
+        self.assertEqual(board.builder.data["searched_groups"], ["G1", "G2"])
+
     async def test_a_bad_record_is_refused_and_changes_nothing(self):
         board = Board(log=lambda *a: None)
         with self.assertRaises(ValueError):

@@ -50,6 +50,7 @@ class FakeSite:
     def __init__(self):
         self.fail_next = 0
         self.hang_next = 0  # requests of /slow that get no answer (the server leaves them hanging)
+        self.slow_sign_in = 0.0  # seconds the sign-in takes to answer
         self.hits: dict[str, int] = {}
 
     async def handle(self, route):
@@ -57,6 +58,8 @@ class FakeSite:
         path = request.url[len(SITE):] or "/"
         self.hits[path] = self.hits.get(path, 0) + 1
         signed_in = "session=ok" in (await request.all_headers()).get("cookie", "")
+        if path.startswith("/login") and request.method == "POST" and self.slow_sign_in:
+            await asyncio.sleep(self.slow_sign_in)
         if path.startswith("/login") and request.method == "POST":
             # answered in place: Chromium does not follow redirects fulfilled for a form POST
             return await route.fulfill(status=200, content_type="text/html", headers={"set-cookie": "session=ok; Path=/"},
@@ -202,6 +205,28 @@ class BrowserPagesTest(unittest.TestCase):
         self.assertLess(took, 12)
         self.assertIn("3 messages", by_click)
         self.assertIn("requested again", by_click)
+
+    def test_a_slow_sign_in_is_never_cut_short(self):
+        # the page is read while a form submission still waits for its answer: it must not be thrown away
+        import browser
+
+        async def check(tab, site, context):
+            site.slow_sign_in = 3
+            await tab.page.fill("input[name=u]", "me")
+            await tab.page.fill("input[name=p]", "secret")
+            await tab.page.evaluate("document.querySelector('form').submit()")  # does not wait for the answer
+            await asyncio.sleep(1.5)
+            await tab.observe()  # the submission has been waiting longer than STUCK_SECONDS by now
+            await asyncio.sleep(3)
+            return await tab.observe()
+        old = browser.STUCK_SECONDS
+        browser.STUCK_SECONDS = 1
+        try:
+            view = self.run_async(check)
+        finally:
+            browser.STUCK_SECONDS = old
+        self.assertIn("Orders", view)
+        self.assertNotIn("requested again", view)
 
     def test_a_button_named_by_its_text_is_the_button_not_a_hint(self):
         async def check(tab, site, context):

@@ -120,13 +120,14 @@ async def main() -> int:
     print(f"Run {task.get('run_id') or '(local scouting run)'}; model {model.provider}/{model.model} without thinking; "
           f"one agent per website: {', '.join(a['siteId'] for a in task['access'])}", flush=True)
     async with async_playwright() as playwright:
-        tabs = {}
-        for index, access in enumerate(task["access"][:4]):
+        async def open_one(index: int, access: dict):
             available = max(len(browsers.cdp_urls()), 1)
             _, page = await browsers.connect(playwright, index if index < available else 0)
             if index >= available:
                 page = await page.context.new_page()
-            tabs[access["siteId"]] = await lead_module.open_site(access["siteId"], access["url"], page)
+            return access["siteId"], await lead_module.open_site(access["siteId"], access["url"], page)
+        # all websites at once: a slow one must not hold up the others (a sandbox run lost 80 s here)
+        tabs = dict(await asyncio.gather(*(open_one(i, a) for i, a in enumerate(task["access"][:4]))))
         lead = lead_module.Orchestrator(task, token, tabs, model, started, model)
         try:
             await asyncio.wait_for(_run(lead, model), timeout=lead.deadline - time.time() + 5)

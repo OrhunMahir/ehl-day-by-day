@@ -25,9 +25,10 @@ READ_PAGES_EACH = 8000  # characters kept per page in read_pages
 FRAME_READ_SECONDS = 10  # reading one frame may take at most this long
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
 # The sites sometimes leave a page request unanswered for minutes, while a new request for the same address is
-# answered at once: a page load may take this long before it is requested again
-LOAD_SECONDS = 15
-STUCK_SECONDS = 8  # a page request still unanswered after this long is made again when the page is read
+# answered at once. Some are also just slow (the ERP took over 15 s per page in a sandbox run), so a load gets its
+# time: one attempt may take LOAD_SECONDS, and a plain page load is requested again only after STUCK_SECONDS.
+LOAD_SECONDS = 30
+STUCK_SECONDS = 25
 
 
 class _HtmlText(HTMLParser):
@@ -231,16 +232,18 @@ class Tab:
             self.loading = None
 
     async def _unstick(self, force: bool = False) -> bool:
-        """A page request the site has left unanswered is made again: a new request is usually answered at once.
-        A request that was a form submission is not repeated; the page before it is loaded instead. With `force`
-        (the page could not be read at all) the current address is loaded again even without a request in flight.
-        Returns whether the page was requested again."""
+        """A plain page load the site has left unanswered for STUCK_SECONDS is made again: a new request is usually
+        answered at once. A form submission (a sign-in, a search) is never cut short: the site may just be slow to
+        answer it, and loading another page would throw the submission away. With `force` (the page could not be
+        read at all) the current address is loaded again when nothing is in flight. Returns whether it reloaded."""
         pending = self.loading
-        if pending and not force and time.time() - pending[2] < STUCK_SECONDS:
+        if pending and pending[1] != "GET":
+            return False
+        if pending and time.time() - pending[2] < STUCK_SECONDS:
             return False
         if not pending and not force:
             return False
-        target = pending[0] if pending and pending[1] == "GET" else self.page.url
+        target = pending[0] if pending else self.page.url
         if not target or target == "about:blank":
             return False
         waited = time.time() - pending[2] if pending else 0
@@ -250,8 +253,8 @@ class Tab:
         except Exception as error:  # noqa: BLE001 - the next read reports what is there
             self.events.append(f"Navigation error: {error}".splitlines()[0])
             return True
-        self.events.append(f"The page had not answered{f' for {waited:.0f} s' if waited else ''}; it was requested "
-                           "again" + ("" if target == (pending or [None])[0] else " (the page before it)"))
+        self.events.append(f"The page had not answered for {waited:.0f} s; it was requested again" if pending
+                           else "The page could not be read; it was loaded again")
         return True
 
     async def _retry_server_error(self, attempts: int = 2):

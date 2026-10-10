@@ -22,6 +22,7 @@ class Board:
         self.log = log
         self.version = 0
         self.history: list[tuple[int, str, str]] = []  # version, who recorded, what (without sources)
+        self.searchers: set[str] = set()  # agents that recorded materials, i.e. the results of a material search
         self._changed = asyncio.Condition()
 
     def record(self, who: str, update) -> str:
@@ -29,15 +30,24 @@ class Board:
         if not isinstance(update, dict):
             raise ValueError("the facts must be an object")
         update = {key: value for key, value in update.items() if key != "authority"}  # the engine's default
+        refused = ""
+        if update.get("searched_groups") and not (update.get("materials") or who in self.searchers):
+            # A group counts as searched only from the agent that searched it and recorded what it found; a group
+            # listed in a specification is not a search. Otherwise a group nobody searched would end in "no bid".
+            refused = (" searched_groups was not taken: only the assistant that searched the materials by a group "
+                       "and recorded its results records the group as searched.")
+            update = {key: value for key, value in update.items() if key != "searched_groups"}
         summary = self.builder.add(update)
+        if update.get("materials"):
+            self.searchers.add(who)
         self.version += 1
         self.history.append((self.version, who, _compact(update)))
-        self.log(f"[{who}] recorded: {summary[:240]}")
+        self.log(f"[{who}] recorded: {summary[:240]}{' (searched_groups refused)' if refused else ''}")
         try:
             asyncio.get_running_loop().create_task(self._notify())
         except RuntimeError:  # no loop running (a plain call): nobody can be waiting
             pass
-        return "Recorded. " + summary
+        return "Recorded. " + summary + refused
 
     async def _notify(self):
         async with self._changed:

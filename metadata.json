@@ -1,0 +1,38 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4K090EBWAEG8BFCBFVH2NJ8",
+  "strategy": "manual-commit",
+  "branch": "stream-j",
+  "checkpoints_count": 6,
+  "files_touched": [
+    "agent/browser.py",
+    "agent/browsing.py",
+    "agent/observe.js",
+    "agent/tests/test_browser_pages.py",
+    "agent/tests/test_browser_scope.py",
+    "agent/tests/test_browser_survey.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 398,
+    "cache_creation_tokens": 312053,
+    "cache_read_tokens": 39496086,
+    "output_tokens": 135178,
+    "api_call_count": 179,
+    "subagent_tokens": {
+      "input_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 0,
+      "api_call_count": 0
+    }
+  }
+}

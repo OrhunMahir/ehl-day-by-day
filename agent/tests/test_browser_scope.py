@@ -205,5 +205,37 @@ class HangingPageTest(unittest.TestCase):
         self.assertIn("NOT FOUND", report)
 
 
+class StallingModelTest(unittest.TestCase):
+    def test_a_stalled_model_call_is_retried(self):
+        import time
+        import browsing
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+
+        async def observe(offset=0):
+            return "a page"
+        tab.observe = observe
+
+        class StallsOnce:
+            def __init__(self):
+                self.calls = 0
+
+            async def chat(self, messages, tools=None, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    await asyncio.sleep(3600)  # the first request is stuck
+                return type("M", (), {"content": "", "tool_calls": [FakeCall(self.calls, "finish", '{"report": "FOUND: x"}')]})()
+        model = StallsOnce()
+        old = browsing.CALL_SECONDS
+        browsing.CALL_SECONDS = 0.2
+        try:
+            agent = BrowsingAgent(model, {"portal": tab}, {}, "task", "context", name="t",
+                                  deadline=time.time() + 600, log=lambda *_: None)
+            report = asyncio.run(agent.run())
+        finally:
+            browsing.CALL_SECONDS = old
+        self.assertEqual(agent.stalls, 1)
+        self.assertIn("FOUND: x", report)
+
 if __name__ == "__main__":
     unittest.main()

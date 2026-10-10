@@ -10,6 +10,15 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 OBSERVE_JS = (Path(__file__).parent / "observe.js").read_text()
+FETCH_JS = """async (url) => {
+  const response = await fetch(url, {credentials: "include"});
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const headers = {};
+  response.headers.forEach((value, key) => { headers[key] = value; });
+  return {status: response.status, headers, data: btoa(binary)};
+}"""
 FRAME_READ_SECONDS = 10  # reading one frame may take at most this long
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
 
@@ -146,6 +155,14 @@ class Tab:
         except Exception:  # noqa: BLE001
             pass
         await asyncio.sleep(0.4)
+        # embedded documents (viewers, mail bodies) often load late, e.g. once a collapsed section is opened
+        frames = self.page.frames[1:]
+        if frames:
+            try:
+                await asyncio.wait_for(asyncio.gather(*(f.wait_for_load_state("domcontentloaded") for f in frames),
+                                                      return_exceptions=True), timeout=3)
+            except asyncio.TimeoutError:
+                pass
 
     def _on_response(self, response):
         try:
@@ -272,12 +289,22 @@ class Tab:
         await self.page.go_back()
         return await self.observe()
 
+    async def _fetch_bytes(self, url: str) -> tuple[int, dict, bytes]:
+        """Fetches from inside the page, so the request has the page's cookies, proxy and network exactly as the
+        browser sees them. A cross-origin URL the page may not read falls back to Playwright's own client."""
+        import base64
+        try:
+            result = await self.page.evaluate(FETCH_JS, url)
+            return result["status"], {k.lower(): v for k, v in result["headers"].items()}, base64.b64decode(result["data"])
+        except Exception:  # noqa: BLE001
+            response = await self.page.context.request.get(url)
+            return response.status, response.headers, await response.body()
+
     async def fetch_file(self, url: str) -> str:
         """Downloads a URL with this tab's session (cookies) and reads it: for ZIPs and documents behind links."""
         url = url if "://" in url else self._absolute(url)
-        response = await self.page.context.request.get(url)
-        data = await response.body()
-        if "html" in response.headers.get("content-type", ""):
+        status, headers, data = await self._fetch_bytes(url)
+        if "html" in headers.get("content-type", ""):
             # a web page: render it in a scratch tab so hidden decoys are filtered like any page view
             scratch = await self.page.context.new_page()
             self.scratch_pages.add(scratch)
@@ -291,14 +318,14 @@ class Tab:
                 text = "\n".join(parts)
             finally:
                 await scratch.close()
-            return f"HTTP {response.status}, page {url} (read-only view; open it with goto to interact):\n" + text[:MAX_OBSERVATION]
+            return f"HTTP {status}, page {url} (read-only view; open it with goto to interact):\n" + text[:MAX_OBSERVATION]
         name = url.rstrip("/").split("/")[-1].split("?")[0] or "download"
-        disposition = response.headers.get("content-disposition", "")
+        disposition = headers.get("content-disposition", "")
         match = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)', disposition)
         if match:
             name = match.group(1)
         self.files[name] = file_to_text(name, data)
-        return f"HTTP {response.status}, file {name!r}:\n" + self.files[name][:MAX_OBSERVATION]
+        return f"HTTP {status}, file {name!r}:\n" + self.files[name][:MAX_OBSERVATION]
 
     def _absolute(self, path: str) -> str:
         from urllib.parse import urljoin
@@ -312,6 +339,39 @@ class Tab:
         if offset + MAX_OBSERVATION < len(text):
             body += f"\n... (continues; read_file with offset={offset + MAX_OBSERVATION})"
         return body
+
+    async def collect_pages(self, aid: str, max_pages: int = 10) -> str:
+        """Follows a paging control the model chose ("next page", "load more") until it disappears or `max_pages`
+        views are collected, and joins them. The control is found again on each new view by its visible text."""
+        first = await self.observe()
+        match = re.search(r"^\[" + re.escape(aid.strip().strip("[]")) + r"\] (link|button|clickable) \"([^\"]*)\"", self.last_text, re.M)
+        if not match or not match.group(2).strip():
+            return f"Element {aid} is not a link or button with text on this page.\n" + first
+        kind, label = match.group(1), match.group(2)
+        views, seen = [self.last_text], set(self.last_text.splitlines())
+        urls = [self.page.url]
+        current = aid
+        for _ in range(max(1, min(int(max_pages), 30)) - 1):
+            before = self.last_text
+            await self.click(current)
+            if self.last_text == before:
+                break
+            fresh = [line for line in self.last_text.splitlines() if line not in seen]
+            seen.update(fresh)
+            views.append("\n".join(fresh))
+            urls.append(self.page.url)
+            again = re.search(r"^\[([\w.]+)\] " + kind + r" \"" + re.escape(label) + r"\"", self.last_text, re.M)
+            if not again:
+                break
+            current = again.group(1)
+        joined = "\n".join(f"--- view {i + 1} ({u}) ---\n{v}" for i, (u, v) in enumerate(zip(urls, views)))
+        self.last_text = joined
+        note = (f"Collected {len(views)} views by following {kind} \"{label}\". Later views show only lines that are "
+                "new. Element numbers are valid only for the last view (use look to act on it).\n")
+        body = joined[:MAX_OBSERVATION]
+        if len(joined) > MAX_OBSERVATION:
+            body += f"\n... (continues: read_more with offset={MAX_OBSERVATION})"
+        return note + body
 
     def read_more(self, offset: int) -> str:
         text = self.last_text[offset:offset + MAX_OBSERVATION]

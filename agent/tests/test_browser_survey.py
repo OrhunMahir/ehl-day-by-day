@@ -91,6 +91,7 @@ async def survey() -> dict:
                 "notes_with_source": sum("source: (not given)" not in n for n in agent.notes),
                 "refused_foreign": agent.refusals,
                 "relogins": agent.relogins,
+                "stalls": agent.stalls,
             }
 
         results = dict(await asyncio.gather(*(one(a["siteId"]) for a in access)))

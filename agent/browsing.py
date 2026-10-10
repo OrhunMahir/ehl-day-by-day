@@ -20,6 +20,9 @@ TOOLS = [
     ("press", "Press a keyboard key on the page, e.g. Escape, Enter, F4, Tab.", {"key": "string"}),
     ("back", "Go back in the browser history.", {}),
     ("read_more", "Continue reading a long page view from a character offset.", {"offset": "integer"}),
+    ("collect_pages", "Read a paged list in one step: give the number of its 'next page' or 'load more' control; it "
+     "is followed until it disappears (or max_pages) and the pages are returned together.",
+     {"element": "string", "max_pages": "integer"}),
     ("download", "Download a link target with this site's login (ZIP, CSV, PDF, document pages) and read its text.", {"url": "string"}),
     ("read_file", "Read a file that was downloaded earlier, from an optional offset.", {"name": "string", "offset": "integer"}),
     ("login", "Fill in this website's username and password on the current login form and submit it.", {}),
@@ -32,9 +35,12 @@ TOOLS = [
      "per line, as `value (unit) — source: document/record, date, sender, revision/status`. NOT FOUND: everything "
      "the task asked for that you could not find or could not verify, and why.", {"report": "string"}),
 ]
-OPTIONAL = {"enter", "offset", "source"}
+OPTIONAL = {"enter", "offset", "source", "max_pages"}
 WRAP_UP_SECONDS = 90  # the wrap-up report may take at most this long
-WRAP_UP_TOKENS = 3000  # and at most this many tokens, so it cannot run on
+WRAP_UP_TOKENS = 2000  # and at most this many tokens, so it cannot run on
+WRAP_UP_RESERVE = 45  # seconds before the deadline at which browsing stops, so the wrap-up fits inside it
+CALL_SECONDS = 75  # one model call may take at most this long before it is retried
+CALL_ATTEMPTS = 3
 ACTION_SECONDS = 60  # one browser action may take at most this long
 NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
 
@@ -65,6 +71,8 @@ Working rules:
   unrelated offers), decoy buttons that do nothing, error pages that work on a retry, session timeouts that send you
   back to the login (use the login tool again), paging and "load more" controls, superseded documents shown first,
   look-alike records for other references. Verify that what you read belongs to the exact reference you need.
+- Paged lists and "load more": use collect_pages instead of clicking through page by page. A search that shows
+  no results may be too broad or too narrow: refine it before concluding that nothing exists.
 - Prefer direct links: if an element shows "-> /some/path", you may goto that path. For files (ZIP, CSV, PDF), use
   download. Use search forms with specific terms; over-broad searches may list nothing.
 - Save every relevant fact with note as soon as you read it (verbatim numbers, units, dates, senders, record ids,
@@ -72,6 +80,8 @@ Working rules:
 - Stay on your own website(s). Facts that live on another website are another assistant's job: list them under
   NOT FOUND instead of going there.
 - Do not guess values. If something is missing, say so in the report.
+- Records often keep their details in separate tabs, registers or sub-views (details, scales, history, items):
+  open them before you report a value as missing.
 - Records get superseded: approvals, revisions, rates and answers have newer versions, in other folders, on later
   pages or under other filters. Before you rely on one, look for newer ones and note which is the latest.
 - Be quick: time is limited. Several tool calls in one turn are fine when they don't depend on each other.
@@ -79,7 +89,7 @@ Working rules:
 """
 
 
-NAVIGATING = {"goto", "click", "type", "select", "press", "back", "look"}
+NAVIGATING = {"goto", "click", "type", "select", "press", "back", "look", "collect_pages"}
 
 
 async def _shows_sign_in(tab: Tab) -> bool:
@@ -114,6 +124,7 @@ class BrowsingAgent:
         self.visited: list[str] = []  # pages the agent saw, in order, for the wrap-up report
         self.signed_in: set[str] = set()  # sites where login succeeded, so a later sign-in form means an expired session
         self.relogins = 0
+        self.stalls = 0  # model calls that hit CALL_SECONDS
         self.multi = len(tabs) > 1
 
     def _tab(self, args: dict) -> Tab:
@@ -186,6 +197,8 @@ class BrowsingAgent:
             return await tab.press(args["key"])
         if name == "back":
             return await tab.back()
+        if name == "collect_pages":
+            return await tab.collect_pages(str(args["element"]), int(args.get("max_pages") or 10))
         if name == "read_more":
             return tab.read_more(int(args.get("offset") or 0))
         if name == "download":
@@ -228,7 +241,7 @@ class BrowsingAgent:
         since_note = 0
         for step in range(self.max_steps):
             remaining = self.deadline - time.time()
-            if remaining < 20:
+            if remaining < WRAP_UP_RESERVE:  # leave the wrap-up its time inside the deadline
                 break
             if remaining < 90 and not warned_time:
                 warned_time = True
@@ -242,11 +255,8 @@ class BrowsingAgent:
                 since_note = 0
                 messages.append({"role": "user", "content": f"You have taken {NOTE_EVERY} actions without a note. If "
                                  "the pages you read held facts the task needs, save them with note now, with source."})
-            try:  # a model that hangs (e.g. a full queue) must not hold the agent past its deadline
-                message = await asyncio.wait_for(self.model.chat(messages, tools, temperature=0.2),
-                                                 timeout=max(10.0, self.deadline - time.time()))
-            except asyncio.TimeoutError:
-                self.log(f"[{self.name}] model call did not return before the deadline")
+            message = await self._ask(messages, tools)
+            if message is None:
                 break
             calls = message.tool_calls or []
             entry = {"role": "assistant", "content": message.content or ""}
@@ -288,6 +298,21 @@ class BrowsingAgent:
         self.log(f"[{self.name}] stopped without finish; writing the report from its notes")
         return self._report(await self._wrap_up())
 
+    async def _ask(self, messages: list[dict], tools: list[dict]):
+        """One model step. A call can stall for minutes (a full queue, a stuck request); a fresh attempt usually
+        returns quickly, so each attempt is capped and retried while the deadline allows. None: no answer in time."""
+        for attempt in range(1, CALL_ATTEMPTS + 1):
+            budget = self.deadline - WRAP_UP_RESERVE - time.time()
+            if budget < 10:
+                return None
+            limit = min(CALL_SECONDS, budget)
+            try:
+                return await asyncio.wait_for(self.model.chat(messages, tools, temperature=0.2), timeout=limit)
+            except asyncio.TimeoutError:
+                self.stalls += 1
+                self.log(f"[{self.name}] model call stalled for {limit:.0f} s (attempt {attempt} of {CALL_ATTEMPTS})")
+        return None
+
     async def _wrap_up(self) -> str:
         """The agent ran out of steps or time: one call without tools turns its notes into the usual report, so the
         lead model learns what was found and, as important, what was not checked."""
@@ -298,8 +323,9 @@ class BrowsingAgent:
                   "two parts. FOUND: each fact the task asked for that your notes contain, as `value (unit) — "
                   "source`. NOT FOUND: everything the task asked for that is missing, and everything you did not "
                   "get to check (e.g. newer versions, other folders, further pages), so nobody relies on an "
-                  "incomplete picture. Do not add facts that are not in the notes.")
-        timeout = min(WRAP_UP_SECONDS, max(30.0, self.deadline - time.time() + 15))
+                  "incomplete picture. Do not add facts that are not in the notes. One short line per fact; no "
+                  "introduction.")
+        timeout = min(WRAP_UP_SECONDS, max(30.0, self.deadline - time.time()))
         try:
             message = await asyncio.wait_for(
                 self.model.chat([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=WRAP_UP_TOKENS,

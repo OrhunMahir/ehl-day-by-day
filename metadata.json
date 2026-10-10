@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4JXZHYDS85J9YTQFBC09Y3M",
+  "strategy": "manual-commit",
+  "branch": "stream-i",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "docs/log/ivan.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2,
+    "cache_creation_tokens": 1679,
+    "cache_read_tokens": 202019,
+    "output_tokens": 680,
+    "api_call_count": 1
+  }
+}

@@ -148,6 +148,7 @@
       return;
     }
     if (el.getAttribute("data-agent-done")) { el.removeAttribute("data-agent-done"); return; }
+    if (shownFirst.has(el)) return;
     const hasBlockChild = [...el.children].some((c) => BLOCK.has(c.tagName) || c.tagName === "TABLE" || c.tagName === "IFRAME" || c.tagName === "CANVAS");
     if (!hasBlockChild) {
       const s = clean(inline(el, []).join(" "));
@@ -158,6 +159,17 @@
   };
 
   document.querySelectorAll("[data-aid]").forEach((e) => e.removeAttribute("data-aid"));
+  // open dialogs and modals sit in front of the page: show them first, so the model deals with them first
+  const DIALOG = 'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+  const shownFirst = new Set();
+  for (const d of document.querySelectorAll(DIALOG)) {
+    if (d.parentElement && d.parentElement.closest(DIALOG)) continue;
+    if (!(d.checkVisibility ? d.checkVisibility() : d.getClientRects().length)) continue;
+    lines.push("=== OPEN DIALOG, in front of the page (deal with it first: close it or answer it) ===");
+    walk(d, 0);
+    lines.push("=== END OF DIALOG ===");
+    shownFirst.add(d);
+  }
   if (document.body) walk(document.body, 0);
   // collapse duplicate consecutive lines
   const out = [];

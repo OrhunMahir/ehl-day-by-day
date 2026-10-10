@@ -80,6 +80,17 @@ class NoteSourceTest(unittest.TestCase):
         self.assertIn("read on: portal", report)
 
 
+    def test_structured_source_fields_are_kept_in_order(self):
+        Tab.homes.clear()
+        tab = Tab("inbox", FakePage("https://inbox.example.test/m/9", title="Approval"))
+        agent = agent_for(tab)
+        asyncio.run(agent._run_tool("note", {
+            "facts": "Discount 3 %", "reference": "CASE-17-A", "sender": "boss@firm.test", "date": "2030-01-05",
+            "status": "valid", "document": "message 9"}))
+        self.assertIn("source: document: message 9; date: 2030-01-05; sender: boss@firm.test; status: valid; "
+                      "reference: CASE-17-A", agent.notes[0])
+        self.assertIn("CHECKED, NOT PRESENT", dict((t[0], t[1]) for t in __import__("browsing").TOOLS)["finish"])
+
 class FakeCall:
     def __init__(self, n, name, arguments):
         self.id, self.type = f"call{n}", "function"
@@ -204,6 +215,38 @@ class HangingPageTest(unittest.TestCase):
         self.assertTrue(any("did not finish" in m for m in model.seen))
         self.assertIn("NOT FOUND", report)
 
+
+class StallingModelTest(unittest.TestCase):
+    def test_a_stalled_model_call_is_retried(self):
+        import time
+        import browsing
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+
+        async def observe(offset=0):
+            return "a page"
+        tab.observe = observe
+
+        class StallsOnce:
+            def __init__(self):
+                self.calls = 0
+
+            async def chat(self, messages, tools=None, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    await asyncio.sleep(3600)  # the first request is stuck
+                return type("M", (), {"content": "", "tool_calls": [FakeCall(self.calls, "finish", '{"report": "FOUND: x"}')]})()
+        model = StallsOnce()
+        old = browsing.CALL_SECONDS
+        browsing.CALL_SECONDS = 0.2
+        try:
+            agent = BrowsingAgent(model, {"portal": tab}, {}, "task", "context", name="t",
+                                  deadline=time.time() + 600, log=lambda *_: None)
+            report = asyncio.run(agent.run())
+        finally:
+            browsing.CALL_SECONDS = old
+        self.assertEqual(agent.stalls, 1)
+        self.assertIn("FOUND: x", report)
 
 if __name__ == "__main__":
     unittest.main()

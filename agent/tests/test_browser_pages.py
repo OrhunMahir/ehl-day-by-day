@@ -16,6 +16,34 @@ LOGIN = """<form method="post" action="/login"><label>User <input name="u"></lab
 <label>Password <input name="p" type="password"></label><button>Sign in</button></form>"""
 
 
+def tiny_pdf(text: str) -> bytes:
+    """A one-page PDF whose page shows `text` (invented content)."""
+    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+               b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+               b"/Resources << /Font << /F1 5 0 R >> >> >>",
+               b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out, offsets = b"%PDF-1.4\n", []
+    for number, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % o for o in offsets)
+    return out + b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+
+
+def tiny_zip() -> bytes:
+    import io
+    import zipfile
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("positions.csv", "position;quantity\n1;12\n2;7\n")
+        archive.writestr("notes/readme.txt", "Quantities are in pieces.")
+    return buffer.getvalue()
+
+
 class FakeSite:
     """A tiny website: a sign-in form, pages behind a session cookie, a page that fails once with 503."""
 
@@ -44,7 +72,25 @@ class FakeSite:
             "/popup": '<h1>Catalogue</h1><p>Item list</p><div role="dialog" aria-modal="true"><p>Quick survey</p>'
                       '<button>Close</button></div>',
             "/flaky": "<h1>Report</h1><p>All good</p>",
+            "/viewer": '<h1>Viewer</h1><details><summary>Open document</summary>'
+                       '<iframe loading="lazy" src="/doc"></iframe></details>',
+            "/doc": "<h1>Document</h1><p>Clause 7 applies</p>",
+            "/more": '<h1>Items</h1><ul id="items"><li>Item 1</li></ul><button id="more">Load more</button><script>'
+                     'let n = 1; document.getElementById("more").onclick = () => { n++; const li = '
+                     'document.createElement("li"); li.textContent = "Item " + n; '
+                     'document.getElementById("items").append(li); if (n >= 3) document.getElementById("more")'
+                     '.remove(); };</script>',
         }
+        if path == "/files.zip":
+            return await route.fulfill(status=200, content_type="application/zip", body=tiny_zip(),
+                                       headers={"content-disposition": 'attachment; filename="files.zip"'})
+        if path == "/spec.pdf":
+            return await route.fulfill(status=200, content_type="application/pdf", body=tiny_pdf("Pressure 160 bar"))
+        if path.startswith("/list"):
+            n = int(path.split("page=")[1]) if "page=" in path else 1
+            nxt = f'<a href="/list?page={n + 1}">Next page</a>' if n < 3 else ""
+            body = f"<h1>Messages</h1><p>Footer text</p><table><tr><td>Message {n}a</td></tr><tr><td>Message {n}b</td></tr></table>{nxt}"
+            return await route.fulfill(status=200, content_type="text/html", body=body)
         body = pages.get(path.split("?")[0], "<h1>Not found</h1>")
         await route.fulfill(status=200, content_type="text/html", body=body)
 
@@ -115,6 +161,53 @@ class BrowserPagesTest(unittest.TestCase):
         self.assertIn("session had expired", view)
         self.assertIn("Total 17 units", view)
         self.assertTrue(url.endswith("/orders/2"), url)
+
+    def test_collect_pages_follows_next_links(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            view = await tab.goto(f"{SITE}/list?page=1")
+            import re
+            aid = re.search(r'\[(\d+)\] link "Next page"', view).group(1)
+            return await self.agent(tab)._run_tool("collect_pages", {"element": aid})
+        view = self.run_async(check)
+        self.assertIn("Collected 3 views", view)
+        for n in (1, 2, 3):
+            self.assertIn(f"Message {n}a", view)
+        self.assertEqual(view.count("Footer text"), 1)  # repeated page chrome is shown once
+
+    def test_collect_pages_presses_load_more(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            view = await tab.goto(f"{SITE}/more")
+            import re
+            aid = re.search(r'\[(\d+)\] button "Load more"', view).group(1)
+            return await self.agent(tab)._run_tool("collect_pages", {"element": aid})
+        view = self.run_async(check)
+        for n in (1, 2, 3):
+            self.assertIn(f"Item {n}", view)
+
+    def test_a_frame_that_loads_late_is_read_after_opening_its_section(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            view = await tab.goto(f"{SITE}/viewer")
+            import re
+            aid = re.search(r'\[(\d+)\] summary "Open document"', view).group(1)
+            return await self.agent(tab)._run_tool("click", {"element": aid})
+        view = self.run_async(check)
+        self.assertIn("Clause 7 applies", view)
+
+    def test_zip_and_pdf_downloads_are_read(self):
+        async def check(tab, site, context):
+            agent = self.agent(tab)
+            await agent._run_tool("login", {})
+            return (await agent._run_tool("download", {"url": "/files.zip"}),
+                    await agent._run_tool("download", {"url": "/spec.pdf"}))
+        zipped, pdf = self.run_async(check)
+        self.assertIn("positions.csv", zipped)
+        self.assertIn("1;12", zipped)
+        self.assertIn("notes/readme.txt", zipped)
+        self.assertIn("Quantities are in pieces.", zipped)
+        self.assertIn("Pressure 160 bar", pdf)
 
 
 if __name__ == "__main__":

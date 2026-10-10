@@ -1,0 +1,25 @@
+<task-notification>
+<task-id>b0s3u3otx</task-id>
+<tool-use-id>toolu_01NEBVmW7qkYyemfceYbyyVE</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/b0s3u3otx.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the two baseline runs to finish and print the state of all four runs" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>banr1w3to</task-id>
+<tool-use-id>toolu_016Di1HEjAZma5DgmRSrsBed</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/banr1w3to.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the baseline run and the two reasoning-effort runs, then print their results" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+tamam normal kullandoğımız ı xhigh olarak alırsak şimdide bir highlarla denemeyi yapalım
+
+---
+
+run_eb07518a30a4477d bu runda failladı neden

@@ -3,47 +3,43 @@
   "checkpoint_id": "01M4K2YFA5CPG4WVBA68X7QE93",
   "session_id": "63b2d78c-bd7f-45fe-af13-734f4d6272aa",
   "strategy": "manual-commit",
-  "created_at": "2026-10-10T14:19:56.848152Z",
+  "created_at": "2026-10-10T14:20:05.8443889Z",
   "branch": "stream-i",
   "checkpoints_count": 5,
   "files_touched": [
-    "agent/engine/needs.py"
+    "agent/engine/__init__.py",
+    "agent/engine/bid.py",
+    "agent/engine/needs.py",
+    "agent/facts.py",
+    "agent/tests/test_engine_needs.py",
+    "docs/log/ivan.md"
   ],
   "agent": "Claude Code",
   "model": "claude-opus-5-5",
   "turn_id": "bd4bcb00d677",
-  "checkpoint_transcript_start": 1163,
-  "transcript_lines_at_start": 1163,
-  "compact_transcript_start": 186,
+  "checkpoint_transcript_start": 1424,
+  "transcript_lines_at_start": 1424,
+  "compact_transcript_start": 228,
   "token_usage": {
-    "input_tokens": 72,
-    "cache_creation_tokens": 48231,
-    "cache_read_tokens": 14439324,
-    "output_tokens": 34437,
-    "api_call_count": 36
+    "input_tokens": 2,
+    "cache_creation_tokens": 1664,
+    "cache_read_tokens": 426712,
+    "output_tokens": 319,
+    "api_call_count": 1
   },
   "session_metrics": {
     "turn_count": 22
   },
   "initial_attribution": {
-    "calculated_at": "2026-10-10T14:19:56.3657174Z",
-    "agent_lines": 222,
+    "calculated_at": "2026-10-10T14:20:05.6382906Z",
+    "agent_lines": 0,
     "agent_removed": 0,
-    "human_added": 137,
+    "human_added": 0,
     "human_modified": 0,
     "human_removed": 0,
-    "total_committed": 359,
-    "total_lines_changed": 360,
-    "agent_percentage": 61.66666666666667,
+    "total_committed": 0,
+    "total_lines_changed": 0,
+    "agent_percentage": 0,
     "metric_version": 2
-  },
-  "prompt_attributions": [
-    {
-      "checkpoint_number": 1,
-      "user_lines_added": 0,
-      "user_lines_removed": 0,
-      "agent_lines_added": 0,
-      "agent_lines_removed": 0
-    }
-  ]
+  }
 }

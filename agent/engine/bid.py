@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 
-from facts import AssignmentKind, DiscountScope, Facts, Material, TenderPosition, norm_key
+from facts import AssignmentKind, DiscountScope, Facts, Material, Requirement, TenderPosition, norm_key
 
 from . import resolve
 from .money import allocate_cents, ceil_int, div, half_up, position_key
@@ -30,6 +30,11 @@ class Line:
     lead_weeks: int | None = None
     unit_price: Decimal | None = None
     negative_price: bool = False            # the computed unit price was negative: an input is implausible
+    tender: TenderPosition | None = None
+    requirement: Requirement | None = None  # as it governs this position (amendments and end reserves applied)
+    travel: Decimal | None = None           # the usable travel, when the end reserve that turns it into a stroke
+                                            # is not known yet
+    guessed: bool = False                   # `material` is the nearest candidate, not an exact match (yet)
 
 
 @dataclass
@@ -37,9 +42,11 @@ class BidResult:
     answer: dict
     issues: list[str] = field(default_factory=list)
     lines: list[Line] = field(default_factory=list)
-    incomplete: list[str] = field(default_factory=list)   # positions whose unit price could not be fully computed
-    omitted: list[str] = field(default_factory=list)      # tender positions not in the answer; mark them in the
-                                                          # form as "Position auslassen" (rule 9)
+    incomplete: list[str] = field(default_factory=list)   # positions whose material is not confirmed or whose unit
+                                                          # price or quantity could not be fully computed: they are
+                                                          # in the answer with what is known
+    omitted: list[str] = field(default_factory=list)      # tender positions not in the answer (an unusable position
+                                                          # number); mark them in the form as "Position auslassen"
     facts: Facts | None = None
 
     def needed(self) -> list[dict]:
@@ -64,8 +71,15 @@ def build_bid(facts: Facts) -> dict:
     return evaluate(facts).answer
 
 
-def evaluate(facts: Facts) -> BidResult:
-    """The answer object plus what could not be decided (`issues`) and the per-position working (`lines`)."""
+def evaluate(facts: Facts, allow_no_bid: bool = True) -> BidResult:
+    """The answer object plus what could not be decided (`issues`) and the per-position working (`lines`).
+
+    The answer is always complete: every position of the bill of quantities is in it with everything that is known,
+    because every answer field scores on its own. A position whose material has no exact match yet is bid with the
+    nearest candidate, or with none (`material_number` "": chosen in the form from the requirement); a price
+    component that is not known counts as 0 in the unit price. Such positions are listed in `incomplete`. The
+    decision is `no_bid` only when a searched requirement has no matching active material (rule 3) and
+    `allow_no_bid` is true."""
     issues: list[str] = []
     revision = resolve.governing_revision(facts, issues)
     positions = _usable_positions(facts, issues)
@@ -73,8 +87,12 @@ def evaluate(facts: Facts) -> BidResult:
     lines: list[Line] = []
     no_match: list[str] = []
     for pos in positions:
-        line = Line(pos.position)
+        line = Line(pos.position, tender=pos)
         req = resolve.requirement(facts, revision, pos.requirement, issues)
+        line.requirement = req
+        if req is not None and req.usable_travel and req.stroke_mm is None:
+            stated = next((r for r in revision.requirements if norm_key(r.requirement) == norm_key(req.requirement)), None)
+            line.travel = stated.stroke_mm if stated is not None else None
         line.pieces = resolve.final_pieces(facts, pos, req, issues)
         if line.pieces is not None and line.pieces < 0:
             issues.append(f"position {pos.position}: negative quantity {line.pieces}, treated as unknown")
@@ -93,11 +111,20 @@ def evaluate(facts: Facts) -> BidResult:
         lines.append(line)
 
     approval = resolve.discount_approval(facts, issues)
-    if no_match:
+    if no_match and allow_no_bid:
         issues.append(f"no active material matches position(s) {', '.join(no_match)}: no bid (rule 3)")
         percent = _valid_percent(approval.percent, issues) if approval and approval.min_order_value is None else ZERO
         answer = _answer(facts, "no_bid", percent, [], ZERO)
         return BidResult(answer, _dedupe(issues), lines, [], [], facts)
+
+    for ln in lines:  # no exact match yet: bid with the nearest candidate rather than without the position
+        if ln.material is None and ln.requirement is not None:
+            ln.material = resolve.best_candidate(facts, ln.requirement)
+            if ln.material is not None:
+                ln.guessed = True
+                differs = ", ".join(resolve.mismatches(ln.material, ln.requirement)) or "status"
+                issues.append(f"position {ln.position}: no confirmed match yet; bid with the nearest candidate "
+                              f"{ln.material.material_number} (differs in {differs})")
 
     priced = [ln for ln in lines if ln.material is not None and ln.pieces is not None]
     for ln in priced:
@@ -112,25 +139,17 @@ def evaluate(facts: Facts) -> BidResult:
 
     out, incomplete, omitted, total = [], [], list(_dropped_ids(facts, positions)), ZERO
     for ln in lines:
-        if ln.material is None or ln.pieces is None:
-            issues.append(f"position {ln.position}: left out (material or quantity unknown)")
-            omitted.append(ln.position)
-            continue
-        number = (ln.material.material_number or "").strip()
-        if not number or len(number) > 50:
-            issues.append(f"position {ln.position}: material number {number!r} is not usable, left out")
-            omitted.append(ln.position)
-            continue
-        ln.unit_price = _unit_price(ln, percent)
+        quantity = ln.pieces if ln.pieces is not None else _stated_pieces(facts, ln)
+        ln.unit_price = _unit_price(ln, percent) if ln.material is not None and ln.pieces is not None else None
         if ln.unit_price is not None and ln.unit_price < 0:
             issues.append(f"position {ln.position}: unit price {ln.unit_price} is negative; a component is wrong")
             ln.unit_price = None
             ln.negative_price = True
-        if ln.unit_price is None:
+        if ln.material is None or ln.guessed or ln.pieces is None or ln.unit_price is None:
             incomplete.append(ln.position)
-        unit_price = ln.unit_price if ln.unit_price is not None else ZERO
-        total += ln.pieces * unit_price
-        out.append(_position(ln, unit_price, issues))
+        unit_price = ln.unit_price if ln.unit_price is not None else _known_part(ln, percent)
+        total += quantity * unit_price
+        out.append(_position(ln, quantity, unit_price, issues))
     answer = _answer(facts, "bid", percent, out, half_up(total))
     return BidResult(answer, _dedupe(issues), lines, incomplete, omitted, facts)
 
@@ -291,6 +310,26 @@ def _lead_times(facts: Facts, lines: list[Line], issues: list[str]):
 # Position level
 
 
+def _stated_pieces(facts: Facts, ln: Line) -> int:
+    """The quantity to enter when the pieces are not known (e.g. sets whose size is not read yet): the tender's own
+    figure, which may still be right, rather than nothing."""
+    try:
+        q = resolve.stated_quantity(facts, ln.tender)
+        return max(int(half_up(q, 0)), 0)
+    except Exception:  # noqa: BLE001 - no usable figure at all
+        return 0
+
+
+def _known_part(ln: Line, percent: Decimal) -> Decimal:
+    """The unit price from the components that are known, the others counted as 0; never negative."""
+    if ln.material is None or not ln.pieces:
+        return ZERO
+    known = replace(ln, **{name: (getattr(ln, name) if getattr(ln, name) is not None else ZERO)
+                           for name in ("base", "mass_surcharge", "setup", "pool", "packaging", "bonus")})
+    price = _unit_price(known, percent)
+    return price if price is not None and price >= 0 else ZERO
+
+
 def _unit_price(ln: Line, percent: Decimal) -> Decimal | None:
     """Rule 27: discounted base + discounted mass surcharge + (setup + pool + packaging - bonus) / pieces, from
     unrounded components, rounded half-up once."""
@@ -305,17 +344,22 @@ def _unit_price(ln: Line, percent: Decimal) -> Decimal | None:
     return half_up(base + mass + per_piece)
 
 
-def _position(ln: Line, unit_price: Decimal, issues: list[str]) -> dict:
-    """One answer entry. An optional breakdown field is left out when it is unknown (blank = unanswered)."""
+def _position(ln: Line, quantity: int, unit_price: Decimal, issues: list[str]) -> dict:
+    """One answer entry. An optional breakdown field is left out when it is unknown (blank = unanswered). Without a
+    material, `material_number` is "" and the form's own selection decides it."""
     lead = ln.lead_weeks
     if lead is None or lead < 0:
         if lead is not None:
             issues.append(f"position {ln.position}: lead time {lead} weeks is negative")
         lead = 0
+    number = (ln.material.material_number or "").strip() if ln.material is not None else ""
+    if len(number) > 50:
+        issues.append(f"position {ln.position}: material number {number!r} is too long for the form; left empty")
+        number = ""
     entry = {
         "position": ln.position,
-        "material_number": ln.material.material_number,
-        "quantity": ln.pieces,
+        "material_number": number,
+        "quantity": quantity,
         "unit_price": _num(unit_price),
         "lead_time_weeks": lead,
     }

@@ -306,6 +306,21 @@ def searched(facts: Facts, req: Requirement) -> bool:
             or any(norm_key(m.catalogue_group) == group for m in facts.materials))
 
 
+def best_candidate(facts: Facts, req: Requirement) -> Material | None:
+    """The material nearest to the requirement when none matches exactly (yet): a bid with it scores more than one
+    without the position, since every answer field counts on its own. Only candidates of the requirement's
+    catalogue group, or recorded without a group; fewest differing attributes first, then an active or unknown
+    status before an inactive one. None when no candidate is recorded."""
+    group = norm_key(req.catalogue_group)
+    pool = [m for m in facts.materials
+            if not norm_key(m.catalogue_group) or (group and norm_key(m.catalogue_group) == group)]
+    if not pool:
+        return None
+    status = {True: 0, None: 1, False: 2}
+    return min(pool, key=lambda m: (len(mismatches(m, req)), status.get(m.active, 1),
+                                    not norm_key(m.catalogue_group), norm_key(m.material_number)))
+
+
 def select_material(facts: Facts, req: Requirement, position: str, issues: list[str]) -> Material | None:
     """Rule 3: the active material whose bore, stroke, pressure, mounting and certification match exactly."""
     hits = sorted((m for m in facts.materials if matches(m, req)), key=lambda m: norm_key(m.material_number))

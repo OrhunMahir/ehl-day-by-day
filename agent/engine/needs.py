@@ -91,7 +91,7 @@ def needs(facts: Facts, result) -> list[Need]:
         relevant = [r for r in revision.requirements if norm_key(r.requirement) in wanted] or revision.requirements
         for base in relevant:
             if norm_key(base.catalogue_group) and not resolve.searched(facts, base):
-                c.add("find", ERP, _search(base.catalogue_group), 10)
+                c.add("find", ERP, _search(base.catalogue_group, revision), 10)
 
     lines = {norm_key(ln.position): ln for ln in result.lines}
     for p in result.omitted:
@@ -155,16 +155,31 @@ def _position(facts: Facts, revision, pos, ln, c: _Collector):
         return
     if not norm_key(req.catalogue_group):
         c.add("find", SPEC, f"the Kataloggruppe of requirement {req.requirement} (the ERP search key)", 10, p)
-    if ln.material is None:
+    if ln.material is None or ln.guessed:
         if not resolve.searched(facts, req):
-            c.add("find", ERP, _search(req.catalogue_group or "(none stated)"), 10, p)
+            c.add("find", ERP, _search(req.catalogue_group or "(none stated)", revision), 10, p)
         return
     _material(facts, ln, c)
 
 
-def _search(group: str) -> str:
-    return (f"search Kataloggruppe {group}: record every result with the attributes the list shows; open the details "
-            "(status, stock, conditions, scales) only of results that match the requirement")
+def _search(group: str, revision) -> str:
+    """One ERP job that is complete in itself: the search, every result, and the details of the results that match,
+    so that no further job has to wait for it."""
+    wanted = [_wanted(r) for r in revision.requirements if norm_key(r.catalogue_group) == norm_key(group)]
+    return (f"search Kataloggruppe {group}: record every result with the attributes the list shows; in the same job "
+            "open the details (status, stock, lead times, price conditions with validity and all quantity scales, "
+            "carton size, masses, metal index, setup fee) of each result matching "
+            + (" or ".join(wanted) if wanted else "the requirement"))
+
+
+def _wanted(r) -> str:
+    stroke = (f"usable travel {r.stroke_mm} mm plus two end reserves" if r.usable_travel and r.stroke_mm is not None
+              else f"stroke {r.stroke_mm} mm" if r.stroke_mm is not None else None)
+    parts = [p for p in (f"bore {r.bore_mm} mm" if r.bore_mm is not None else None, stroke,
+                         f"pressure {r.pressure_bar} bar" if r.pressure_bar is not None else None,
+                         f"mounting {r.mounting}" if r.mounting else None,
+                         f"certification {r.certification}" if r.certification else None) if p]
+    return f"requirement {r.requirement} (" + ", ".join(parts) + ")"
 
 
 def _material(facts: Facts, ln, c: _Collector):

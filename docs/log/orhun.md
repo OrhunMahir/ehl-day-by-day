@@ -2,6 +2,26 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 14:55 · 20 minutes for every run, forced submission, resubmission until accepted
+
+- Changed: `agent/agent.py` gives every run 20 minutes again (the 10-minute time for test runs is gone).
+  Investigations end at 45 % of the time, and from 50 % the model call is forced to `submit_bid`; if the model
+  refuses a forced tool call it is asked plainly. After each submission attempt the agent asks the platform
+  whether the run is still open, and submits again while it is. `agent/llm.py` limits one model call to 4 minutes
+  (was 10). Documents: the team's test-run limit is four at a time, not two.
+- Why: the 10-minute test run ended without a bid. The first round of investigations took 4 to 7 minutes, each
+  lead decision 1 to 1.5 minutes, and the submission sub-agent was left with 17 seconds.
+- Checked: with a stand-in model, four situations behave as intended (the lead never submits by itself; the model
+  rejects a forced call; the first submission is not accepted; nothing is forced before the submit time). Not
+  checked: entering and signing the bid on the website has not succeeded in any run yet. Two sandbox test runs of
+  this version are running (`run_2c11071d8d6d896b`, `run_25f2354374a40657`); results are not in.
+- Learned: the platform ends a test run when the agent's process exits, and reports "exited without submitting an
+  answer". A run that is capped below the time the agent needs tells nothing about the submission step.
+- For the others: J — `browsing.py` tells a sub-agent to "finish" 90 seconds before its end; for the submission
+  sub-agent that is the wrong advice (it should sign and confirm instead). The task text now asks it not to stop,
+  but the proper fix is in your file. I — nothing changes.
+- Next: read the two runs: did the bid get signed, how long did the form take, and the score breakdown.
+
 ## 2026-10-10 14:30 · Time schedule, PDF dependency, stream names J / I / O, branches
 
 - Changed: `agent/agent.py` splits the run's time into three parts: investigations end at 65 % of the working

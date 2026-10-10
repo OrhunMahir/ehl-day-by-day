@@ -114,7 +114,7 @@ How the streams meet:
 - A change needed in another stream's file is requested from its owner, not made.
 - A new dependency is requested from stream O, so `pyproject.toml` and `uv.lock` have one editor.
 - Local runs with the scouting logins are free for everyone. Sandbox test runs go through stream O (the team limit
-  is two running, three waiting); J and I ask for one when they need a score.
+  is four running, three waiting); J and I ask for one when they need a score.
 - Small commits on your own branch; `main` only changes through a pull request (see "Branches").
 
 Shared rules for all coding agents:

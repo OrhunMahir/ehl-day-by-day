@@ -21,6 +21,9 @@ DEFAULT_MODELS = {
     "openrouter": "anthropic/claude-sonnet-5.5",
 }
 
+# Longest lead call seen in a run was about 90 s; a call that hangs must not eat the run.
+CALL_TIMEOUT_SECONDS = 240
+
 
 def _client_config(provider: str) -> tuple[str, str]:
     env = os.environ
@@ -42,7 +45,7 @@ class Model:
         self.provider = provider or os.environ.get("AGENT_PROVIDER", "qwen")
         self.model = model or os.environ.get("AGENT_MODEL") or DEFAULT_MODELS[self.provider]
         base_url, api_key = _client_config(self.provider)
-        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=600, max_retries=0)
+        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=CALL_TIMEOUT_SECONDS, max_retries=0)
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0

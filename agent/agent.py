@@ -6,6 +6,7 @@ has a sub-agent enter and sign the bid on the submission website.
 """
 import asyncio
 import json
+import os
 import sys
 import time
 
@@ -38,13 +39,10 @@ The clock: about {minutes} minutes to investigate. Then you must call `submit_bi
 and signing the bid takes the rest of the time."""
 
 SCORED_RUN_SECONDS = 20 * 60
-# A test run expires hours after it starts and a local run never: those work with a shorter time, so a development
-# run reports sooner. A scored run always works with all the time the platform gives it.
-TEST_RUN_SECONDS = 10 * 60
-# How the working time is spent, as shares of it.
-COLLECT_SHARE = 0.65  # investigations end here
-SUBMIT_SHARE = 0.70  # from here on the lead must submit
-FINISH_SHARE = 0.95  # the bid must be entered and signed by here; the rest is a safety margin
+# How the working time is spent, as shares of it. Entering and signing the bid gets everything after SUBMIT_SHARE.
+COLLECT_SHARE = 0.45  # investigations end here
+SUBMIT_SHARE = 0.50  # from here on the lead has to submit
+FORCE_SUBMIT = {"type": "function", "function": {"name": "submit_bid"}}
 
 
 class Orchestrator:
@@ -53,14 +51,14 @@ class Orchestrator:
         self.credentials = {a["siteId"]: a.get("credentials", {}) for a in task["access"]}
         self.started = started
         now = time.time()
-        left = contract.seconds_left(task)
-        if left > SCORED_RUN_SECONDS * 1.5:  # not a scored run
-            left = TEST_RUN_SECONDS - (now - started)
+        # Every run works with the length of a scored run: a test run expires much later, a local run never.
+        left = min(contract.seconds_left(task), SCORED_RUN_SECONDS - (now - started))
         self.collect_until = now + left * COLLECT_SHARE
         self.submit_from = now + left * SUBMIT_SHARE
-        self.deadline = now + left * FINISH_SHARE
+        self.deadline = now + left
         self.locks = {site: asyncio.Lock() for site in tabs}
-        self.submitted = None
+        self.submitted = None  # the last answer a submission was attempted with
+        self.accepted = False  # the platform took the bid; nothing more to do
 
     def log(self, text: str):
         print(f"[{time.time() - self.started:6.1f}s] {text}", flush=True)
@@ -111,11 +109,11 @@ class Orchestrator:
         submission = self.task["submission"]
         if submission.get("kind") == "api":
             if not self.token:
-                self.submitted = answer
+                self.submitted, self.accepted = answer, True
                 return "Local run: answer recorded, nothing is submitted."
             status, body = contract.submit_answer(self.task, self.token, answer)
             if status == 202:
-                self.submitted = answer
+                self.submitted, self.accepted = answer, True
             return f"HTTP {status}: {body[:1500]}"
         target = submission.get("siteId")
         sites = {target: self.tabs[target]}
@@ -124,12 +122,38 @@ class Orchestrator:
                 "Submission section step by step (register/express interest if needed, configure every position, "
                 "enter numbers in the site's number format, acknowledge documents, get the signing code where the "
                 "brief says, review the summary against the answer, confirm). Use each value exactly; do not "
-                "recompute. Report the receipt or any validation message verbatim.\n\nANSWER:\n"
+                "recompute. Report the receipt or any validation message verbatim. A bid that is entered but not "
+                "signed and confirmed counts for nothing: if you are told that time is almost up, do not stop; sign "
+                "and confirm what is entered, then report.\n\nANSWER:\n"
                 + json.dumps(answer, ensure_ascii=False, indent=1) + (f"\n\nHINTS:\n{hints}" if hints else ""))
         agent = BrowsingAgent(self.model, sites, self.credentials, task, self.context(), name="submit",
                               deadline=self.deadline, max_steps=90, log=self.log)
         self.submitted = answer
-        return await agent.run()
+        report = await agent.run()
+        self.accepted = await self.run_is_over()
+        if self.accepted:
+            return report + "\n\nThe platform has closed the run: the bid was accepted."
+        return report + ("\n\nThe run is still open, so no bid has been accepted yet. Call submit_bid again and say "
+                         "in the hints what is already entered and what went wrong.")
+
+    async def run_is_over(self) -> bool:
+        """Whether the platform has ended the run, which it does the moment it accepts a bid."""
+        if not self.token:
+            return True  # a local run has nothing to ask; one attempt is the end of it
+        url = os.environ["CHALLENGE_API_URL"].rstrip("/") + "/v1/runs/current"
+        try:
+            status, _ = await asyncio.to_thread(contract.http, url, self.token)
+        except OSError:
+            return False
+        return status in (401, 403, 404, 409, 410)
+
+    async def ask(self, messages: list[dict], tools: list[dict], must_submit: bool):
+        if must_submit:
+            try:
+                return await self.model.chat(messages, tools, temperature=0.2, tool_choice=FORCE_SUBMIT)
+            except Exception as error:  # noqa: BLE001 - a model that refuses a forced tool still gets asked plainly
+                self.log(f"[lead] forced submit_bid call failed ({str(error)[:200]}); asking without it")
+        return await self.model.chat(messages, tools, temperature=0.2)
 
     async def run(self):
         minutes = round((self.submit_from - time.time()) / 60)
@@ -139,11 +163,12 @@ class Orchestrator:
                 f"- {a['siteId']}: {a['url']}" for a in self.task["access"]) + "\n\nBegin."},
         ]
         tools = self.tools()
-        while time.time() < self.deadline:
-            if time.time() >= self.submit_from and not self.submitted:
+        while time.time() < self.deadline and not self.accepted:
+            must_submit = time.time() >= self.submit_from
+            if must_submit and not self.submitted:
                 messages.append({"role": "user", "content": "Investigation time is over: call submit_bid now with "
                                  "your best answer. Leave out positions you could not complete."})
-            message = await self.model.chat(messages, tools, temperature=0.2)
+            message = await self.ask(messages, tools, must_submit)
             calls = message.tool_calls or []
             if message.content:
                 self.log(f"[lead] {message.content[:1500]}")
@@ -153,9 +178,9 @@ class Orchestrator:
                                         "function": {"name": c.function.name, "arguments": c.function.arguments}} for c in calls]
             messages.append(entry)
             if not calls:
-                if self.submitted:
-                    return
-                messages.append({"role": "user", "content": "Continue: investigate, calculate, or submit_bid."})
+                messages.append({"role": "user", "content": (
+                    "No bid has been accepted yet: call submit_bid again." if self.submitted
+                    else "Continue: investigate, calculate, or submit_bid.")})
                 continue
 
             async def execute(call):
@@ -179,8 +204,6 @@ class Orchestrator:
             for call, result in zip(calls, results):
                 self.log(f"[lead] <- {call.function.name}: {result[:3000]}")
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
-            if self.submitted and any(c.function.name == "submit_bid" for c in calls):
-                return
 
 
 def validate(answer: dict, schema: dict) -> list[str]:

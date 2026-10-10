@@ -23,10 +23,10 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
      the tender website's form, fetch the signing code from the mailbox, sign and confirm.
 3. The lead model decides what to ask next from the reports, works out the bid, and submits.
 
-The run's time is split in `agent.py`: investigations end at 65 % of the working time, from 70 % the lead must
-submit, and the bid must be entered and signed by 95 %. In a scored run the working time is what the platform
-gives (20 minutes: 13 / 14 / 19). In a test run or a local run it is 10 minutes (6.5 / 7 / 9.5), so a development
-run reports sooner; the agent tells the two apart by how far away the platform's expiry is.
+The run's time is split in `agent.py`. Every run, scored or not, works with 20 minutes: investigations end at
+45 % (minute 9), from 50 % (minute 10) the lead is made to call `submit_bid`, and entering and signing the bid gets
+the rest. After each submission attempt the agent asks the platform whether the run is still open; the platform
+closes a run the moment it accepts a bid, so an open run means "not accepted yet" and the lead submits again.
 
 What is weak in this design, and why the streams exist:
 
@@ -129,11 +129,12 @@ them, and one signed bid is submitted before the clock ends, every time.
 **Work, in this order.**
 1. Baseline: one sandbox test run of the unchanged agent and its score breakdown. It shows where points are lost
    and sets the priorities of streams J and I.
-2. Time budget: done Sat 14:30 (see "How the agent works today"). Open: tune the three shares once a run has
-   shown how long entering and signing the bid really takes.
-3. Deadline guard: the lead is told to submit at 70 % of the time, but if it never calls `submit_bid` the run
-   still ends without a bid and scores 0. Make the submission happen without depending on the lead. After the
-   bid is accepted the process must exit within 10 seconds.
+2. Time budget: in place (see "How the agent works today"). The shares are a first guess from one run in which
+   the first round of investigations took 4 to 7 minutes and each lead decision 1 to 1.5 minutes; tune them once
+   a run has shown how long entering and signing the bid takes.
+3. Deadline guard: the lead is forced to call `submit_bid` at 50 % and again after every attempt the platform did
+   not accept. Still open: the submission sub-agent is told by `browsing.py` to "finish" 90 seconds before its
+   end, which fits an investigation but not a submission (stream J's file; the task text asks it not to stop).
 4. Reports to facts: have the lead model put what the sub-agents report into the records of `facts.py`, and call
    the engine instead of the calculator, as soon as stream I delivers the first version.
 5. Submission: the form, the signing code from the mailbox, signature, receipt check; validation against the
@@ -162,7 +163,7 @@ websites ──J──> report (text) ──O──> facts (facts.py, owned by I
 - You need a new dependency: ask stream O. `pyproject.toml` and `uv.lock` have one owner so the lock file never
   conflicts.
 - Local runs with the scouting logins (`eval "$(atira scout --env)"`, with `atira models proxy` running) are free
-  and unlimited for everyone. Sandbox test runs are limited to two at a time for the whole team and go through
+  and unlimited for everyone. Sandbox test runs are limited to four at a time for the whole team (three more can wait) and go through
   stream O; ask for one when you need a score.
 - Everyone works on their own branch (`stream-j`, `stream-i`, `stream-o`); `main` changes only through pull
   requests. The rules are in AGENTS.md, section "Branches".

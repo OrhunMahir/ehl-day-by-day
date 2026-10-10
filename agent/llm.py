@@ -41,9 +41,14 @@ def _client_config(provider: str) -> tuple[str, str]:
 
 
 class Model:
-    def __init__(self, provider: str | None = None, model: str | None = None, reasoning_effort: str | None = None):
+    def __init__(self, provider: str | None = None, model: str | None = None, reasoning_effort: str | None = None,
+                 thinking: bool | None = None, max_tokens: int | None = None):
         # how much the model thinks before it answers; None leaves the provider's default
         self.reasoning_effort = reasoning_effort
+        # False switches Qwen's thinking off entirely: a routine step (a click, copying facts) then answers in a few
+        # seconds instead of writing thousands of reasoning tokens first (about 40 tokens per second)
+        self.thinking = thinking
+        self.max_tokens = max_tokens  # upper bound per answer, reasoning included; None: the provider's
         self.provider = provider or os.environ.get("AGENT_PROVIDER", "qwen")
         self.model = model or os.environ.get("AGENT_MODEL") or DEFAULT_MODELS[self.provider]
         base_url, api_key = _client_config(self.provider)
@@ -59,7 +64,13 @@ class Model:
             try:
                 started = time.time()
                 args = dict(model=self.model, messages=messages, **kwargs)
-                if self.reasoning_effort:
+                if self.max_tokens:
+                    args.setdefault("max_tokens", self.max_tokens)
+                if self.thinking is False and self.provider == "qwen":
+                    extra = dict(args.get("extra_body") or {})
+                    extra["chat_template_kwargs"] = {"enable_thinking": False, **(extra.get("chat_template_kwargs") or {})}
+                    args["extra_body"] = extra
+                elif self.reasoning_effort:
                     args.setdefault("reasoning_effort", self.reasoning_effort)
                 if tools:
                     args["tools"] = tools

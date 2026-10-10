@@ -674,10 +674,12 @@ FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you 
   A technical amendment names the revision and requirement it applies to; record it with that revision even if it
   is not the current one. For usable travel (nutzbarer Weg) enter the stated travel as stroke_mm, set
   usable_travel=true and the end-reserve key; the reserve comes from the matching Technikfreigabe record.
-- Materials: every candidate from the ERP search, also inactive ones and near misses, with status, attributes,
-  stock, lead times, carton size, masses in kg (625 g = 0.625), metal index code, setup fee and every price
-  condition with its validity, currency, FX key, price unit and all quantity scales. List every Kataloggruppe you
-  searched in searched_groups, also when the search found nothing.
+- Materials: every result of the ERP search by Kataloggruppe, with the attributes the result list already shows
+  (material number, bore, stroke, pressure, mounting, certification, group); that is enough for candidates that
+  do not match. Open the details only of candidates whose attributes match the requirement, and record for them
+  the status, stock, lead times, carton size, masses in kg (625 g = 0.625), metal index code, setup fee and every
+  price condition with its validity, currency, FX key, price unit and all quantity scales. List every
+  Kataloggruppe you searched in searched_groups, also when the search found nothing.
 - Keys that tie a position to a rule record (Konditionsgruppe, packaging tariff, delivery commitment, setup pool,
   project bonus) go into assignments, wherever you read them.
 - Mail rule records: one record per key per mail. Konditionsgruppe wording -> scope base / base_and_surcharge /

@@ -78,9 +78,16 @@ SUBMIT_SHARE = 0.45  # from here on the lead has to price and submit
 INVESTIGATION_SECONDS = 240
 # How many investigations may work one website at the same time, each in a tab with a session of its own.
 TABS_PER_SITE = 4
-# How much each role's model thinks before it answers; None leaves the provider's default.
-LEAD_REASONING: str | None = "xhigh"
-WORKER_REASONING: str | None = "xhigh"  # browsing sub-agents and the submission agent
+# How much each role's model thinks before it answers; None leaves the provider's default. Qwen writes about 40
+# tokens per second: at "xhigh" one lead answer took 12,000 tokens and 339 s, and browsing steps that thought took
+# about 50 s instead of 3 s. The lead keeps some thinking within a token and time limit; the sub-agents (browsing,
+# submission) and the recording of facts are routine steps without thinking.
+LEAD_REASONING: str | None = "low"
+LEAD_MAX_TOKENS = 4000
+LEAD_CALL_SECONDS = 120  # a lead call that has not answered by then is dropped and asked again
+WORKER_REASONING: str | None = None
+WORKER_THINKING = False
+RECORD_MAX_TOKENS = 8000  # the facts of one report as JSON
 # A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
 INVESTIGATION_GRACE_SECONDS = 30
 RECORD = """You record facts for a bid engine. Below are the brief of a tender and one report of an assistant who
@@ -109,9 +116,10 @@ RUN_CLOSED_CHECKS = 3  # the platform closes a run a moment after it accepts the
 
 class Orchestrator:
     def __init__(self, task: dict, token: str | None, tabs: dict[str, Tab], model: Model, started: float,
-                 worker_model: Model | None = None):
+                 worker_model: Model | None = None, record_model: Model | None = None):
         self.task, self.token, self.tabs, self.model = task, token, tabs, model
         self.worker_model = worker_model or model  # the model of the sub-agents that work the websites
+        self.record_model = record_model or model  # the model that copies a report's facts into the facts
         self.credentials = {a["siteId"]: a.get("credentials", {}) for a in task["access"]}
         self.started = started
         now = time.time()
@@ -216,7 +224,7 @@ class Orchestrator:
             if left < 5:
                 break
             try:
-                message = await asyncio.wait_for(self.ask(messages, [tool], FORCE_ADD),
+                message = await asyncio.wait_for(self.ask(messages, [tool], FORCE_ADD, self.record_model),
                                                  timeout=min(RECORD_CALL_SECONDS, left))
             except TimeoutError:
                 self.log(f"[{source}] a recording call took too long; asking again")
@@ -397,13 +405,14 @@ class Orchestrator:
                 return True
         return False
 
-    async def ask(self, messages: list[dict], tools: list[dict], force: dict | None):
+    async def ask(self, messages: list[dict], tools: list[dict], force: dict | None, model: Model | None = None):
+        model = model or self.model
         if force:
             try:
-                return await self.model.chat(messages, tools, temperature=0.2, tool_choice=force)
+                return await model.chat(messages, tools, temperature=0.2, tool_choice=force)
             except Exception as error:  # noqa: BLE001 - a model that refuses a forced tool still gets asked plainly
                 self.log(f"[lead] forced {force['function']['name']} call failed ({str(error)[:200]}); asking without it")
-        return await self.model.chat(messages, tools, temperature=0.2)
+        return await model.chat(messages, tools, temperature=0.2)
 
     async def time_is_up(self, messages: list[dict]) -> dict | None:
         """What happens once the time to investigate is over: the answer priced from the facts is submitted without
@@ -452,10 +461,13 @@ class Orchestrator:
             force = await self.time_is_up(messages) if time.time() >= self.submit_from else None
             if self.accepted:
                 return
+            limit = min(LEAD_CALL_SECONDS, self.deadline - time.time())
             try:
-                message = await asyncio.wait_for(self.ask(messages, tools, force),
-                                                 timeout=self.deadline - time.time())
+                message = await asyncio.wait_for(self.ask(messages, tools, force), timeout=limit)
             except TimeoutError:
+                if self.deadline - time.time() > 5:
+                    self.log(f"[lead] a lead call took more than {limit:.0f} s; asking again")
+                    continue
                 self.log("[lead] out of time")
                 return
             except Exception as error:  # noqa: BLE001
@@ -562,11 +574,12 @@ def validate(answer: dict, schema: dict) -> list[str]:
 async def main() -> int:
     started = time.time()
     task, token = contract.load_run()
-    model = Model(reasoning_effort=LEAD_REASONING)
-    worker_model = Model(reasoning_effort=WORKER_REASONING)
+    model = Model(reasoning_effort=LEAD_REASONING, max_tokens=LEAD_MAX_TOKENS)
+    worker_model = Model(reasoning_effort=WORKER_REASONING, thinking=WORKER_THINKING)
+    record_model = Model(thinking=False, max_tokens=RECORD_MAX_TOKENS)
     print(f"Run {task.get('run_id') or '(local scouting run)'}; model {model.provider}/{model.model}; "
           f"reasoning lead={model.reasoning_effort or 'provider default'}, "
-          f"workers={worker_model.reasoning_effort or 'provider default'}; "
+          f"workers={'no thinking' if worker_model.thinking is False else worker_model.reasoning_effort or 'default'}; "
           f"sites: {', '.join(a['siteId'] for a in task['access'])}", flush=True)
     async with async_playwright() as playwright:
         tabs = {}
@@ -577,7 +590,7 @@ async def main() -> int:
                 page = await page.context.new_page()
             await page.goto(access["url"], wait_until="domcontentloaded")
             tabs[access["siteId"]] = Tab(access["siteId"], page)
-        lead = Orchestrator(task, token, tabs, model, started, worker_model)
+        lead = Orchestrator(task, token, tabs, model, started, worker_model, record_model)
         try:  # nothing may outlive the run's time, whatever is still waiting on a page or a model
             await asyncio.wait_for(lead.run(), timeout=lead.deadline - time.time() + 5)
         except TimeoutError:

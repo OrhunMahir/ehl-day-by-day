@@ -148,8 +148,9 @@ def _position(facts: Facts, revision, pos, ln, c: _Collector):
         c.add("find", SPEC, f"the Kataloggruppe of requirement {req.requirement} (the ERP search key)", 10, p)
     if ln.material is None:
         if not resolve.searched(facts, req):
-            c.add("find", ERP, f"search Kataloggruppe {req.catalogue_group or '(none stated)'} and record every "
-                               "candidate (also inactive ones and near misses)", 10, p)
+            c.add("find", ERP, f"search Kataloggruppe {req.catalogue_group or '(none stated)'}: record every result with "
+                               "the attributes the list shows; open the details (status, stock, conditions, scales) "
+                               "only of results that match the requirement", 10, p)
         return
     _material(facts, ln, c)
 

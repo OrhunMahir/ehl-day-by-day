@@ -1,0 +1,63 @@
+birde daha sonrası için aklıdna tut gpt sol 6.1 i deneyeiliriz qwen yerine çünkü bize 70 dolarlık kredi verdiler zaten. Proje az çok tayına oturunca bunu deneyelim
+
+---
+
+koşullar bitince en iyi sonucu aldığımızı submitleyelim
+
+---
+
+<pasted_content id="17db">
+Qwen’i Atira üzerinden Medium’da çalıştırmak da ücretsiz olur. OpenAI’deki 70 dolarlık kredinden düşmez. Run’da görünen maliyet yalnızca yarışma sıralaması için hesaplanan sanal maliyettir. [Atira açıklaması](https://ehl-challenge.atira.ai/start#models).
+“Modunu bilmiyoruz” derken daha net konuşmalıydım:
+
+* Kodda ne yaptığımızı biliyoruz: Normal çağrılarda `reasoning_effort` göndermiyoruz.
+* Modelin resmî varsayılanını biliyoruz: Düşünme açık, effort `xhigh`. [Qwen belgesi](https://huggingface.co/Qwen/Qwen3.8-Flash-Next).
+* Doğrulayamadığımız tek nokta: Atira sunucusunun bu varsayılanı değiştirip değiştirmediği. Sunucu ayarları bize gösterilmiyor. Bu nedenle mevcut kullanımımız için en güçlü çıkarım `xhigh`, fakat kesin doğrulama değil.
+
+Medium kullanmak için istekte `reasoning_effort="medium"` ayarını açıkça gönderip Atira’nın bunu desteklediğini doğrulamak gerekir. Bunun için başka bir sağlayıcıya geçmeye veya ücretli anahtar kullanmaya gerek yok.
+Ben önce Qwen Medium’u denerdim: ücretsiz kalır; süre ve puan farkını ölçerek Sol’a geçmenin gerekli olup olmadığını görürüz. Henüz hiçbir ayarı değiştirmedim.
+</pasted_content id="17db">
+
+ birde bunu yapmak kodu bozar mı bu promptta hiçbir kodu değiştirme sadece bunu göndermek bizim koduumuza zara verir mi
+
+---
+
+<task-notification>
+<task-id>brsiraiob</task-id>
+<tool-use-id>toolu_01Vmy53fUAmgN9e1fh9GNZDX</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/brsiraiob.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the two corrected test runs and print their results" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bbmgrh7wm</task-id>
+<tool-use-id>toolu_01CA8oR8RdcmpfANcunk6xKo</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/bbmgrh7wm.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the two earlier test runs to finish and print all three runs' states" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+tamam birde julien yeni bir merge attı onunlada bir run atmak mantıklı mı yoksa çok bir değişiklik yapmaz mı
+
+---
+
+<task-notification>
+<task-id>b1eim6g0l</task-id>
+<tool-use-id>toolu_012r3xFPbUHZ9McBqwUwL2rM</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/b1eim6g0l.output</output-file>
+<status>completed</status>
+<summary>Background command "Check the three test runs" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+takılmış olan her türlü faillayacak mı?
+
+---
+
+tamam şimdi senin önerin ne 2 tane boş slotumuz var bunlar yerine qwenin farklı effortlarını deneyelim sence hangileri olmalı?

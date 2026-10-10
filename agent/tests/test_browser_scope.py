@@ -145,7 +145,7 @@ class WrapUpTest(unittest.TestCase):
         model = FakeModel()
         self.run_agent(model, steps=8)
         last_browse = model.seen[-2]  # user messages the model saw on its last browsing call
-        self.assertTrue(any("without a note" in m for m in last_browse))
+        self.assertTrue(any("without saving" in m for m in last_browse))
         self.assertTrue(any("steps left" in m for m in last_browse))
 
 

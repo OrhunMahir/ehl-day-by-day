@@ -156,9 +156,22 @@ def _no_thinking(model) -> dict:
     return {}
 
 
+RECORDING = """
+In this job you save facts with `record`, as typed records, not with notes: wherever these rules say note, use
+record. A record is the only thing that counts and it is kept at once; record what you read before you leave the
+page. Fill each record from the page exactly, with its source (site, document, date, sender, revision); a record
+that does not fit is refused with the reason, then correct it and record it again. When your job is done, call
+finish with a one-line summary."""
+
+
 class BrowsingAgent:
     def __init__(self, model, tabs: dict[str, Tab], credentials: dict[str, dict], task: str, context: str,
-                 name: str, deadline: float, max_steps: int = 60, log=print):
+                 name: str, deadline: float, max_steps: int = 60, log=print, record=None,
+                 record_schema: dict | None = None):
+        """`record`, when given, is a function that saves typed facts (`record_schema` describes them) and returns
+        what it made of them: the agent then records facts with it instead of taking notes, and needs no wrap-up
+        report at the end, because whatever it recorded is already saved."""
+        self.record, self.record_schema = record, record_schema
         self.model, self.tabs, self.credentials = model, tabs, credentials
         self.task, self.context, self.name = task, context, name
         self.deadline, self.max_steps, self.log = deadline, max_steps, log
@@ -199,6 +212,14 @@ class BrowsingAgent:
         return await tab.observe()
 
     async def _run_tool(self, name: str, args: dict) -> str:
+        if name == "record":
+            if not self.record:
+                raise ValueError("Unknown tool record")
+            facts = args.get("facts", args) if isinstance(args, dict) else args
+            try:
+                return self.record(facts)
+            except Exception as error:  # noqa: BLE001 - the model reads why and records it again
+                return f"Not recorded: {error}. Correct it and record it again."
         tab = self._tab(args) if name not in ("note", "finish") else None
         if tab is not None:
             self.last_tab = tab
@@ -290,7 +311,7 @@ class BrowsingAgent:
         sites = "\n".join(f"- {site_id}: {tab.page.url if tab.page.url != 'about:blank' else ''} (login with the login tool)"
                           for site_id, tab in self.tabs.items())
         messages = [
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": SYSTEM + (RECORDING if self.record else "")},
             {"role": "user", "content": f"{self.context}\n\n# Your websites\n{sites}\n\n# Your task\n{self.task}"},
         ]
         # open each site so the model starts from a real page view
@@ -301,24 +322,33 @@ class BrowsingAgent:
                 view = f"[{tab.site_id}] (the page did not respond in time; use look or goto)"
             messages[1]["content"] += "\n\n# Current page\n" + view
         tools = tool_schemas(self.multi)
+        if self.record:
+            tools = [t for t in tools if t["function"]["name"] != "note"] + [{"type": "function", "function": {
+                "name": "record", "description": "Save facts you read as typed records, at once; returns what the "
+                "facts hold now, or why the update was refused.",
+                "parameters": {"type": "object", "properties": {"facts": self.record_schema or {"type": "object"}},
+                               "required": ["facts"]}}}]
+        save = "record" if self.record else "note"
+        reserve = 5 if self.record else WRAP_UP_RESERVE  # nothing to write at the end: what is recorded is saved
         warned_time = warned_steps = False
         since_note = 0
         for step in range(self.max_steps):
             remaining = self.deadline - time.time()
-            if remaining < WRAP_UP_RESERVE:  # leave the wrap-up its time inside the deadline
+            if remaining < reserve:  # leave the wrap-up its time inside the deadline
                 break
             if remaining < 90 and not warned_time:
                 warned_time = True
-                messages.append({"role": "user", "content": "Time is almost up: save unsaved facts with note, then "
-                                                            "call finish with what you have."})
+                messages.append({"role": "user", "content": f"Time is almost up: save unsaved facts with {save}, "
+                                                            "then call finish with what you have."})
             if self.max_steps - step <= 3 and not warned_steps:
                 warned_steps = True
                 messages.append({"role": "user", "content": f"Only {self.max_steps - step} steps left: save unsaved "
-                                                            "facts with note, then call finish."})
+                                                            f"facts with {save}, then call finish."})
             if since_note >= NOTE_EVERY:
                 since_note = 0
-                messages.append({"role": "user", "content": f"You have taken {NOTE_EVERY} actions without a note. If "
-                                 "the pages you read held facts the task needs, save them with note now, with source."})
+                messages.append({"role": "user", "content": f"You have taken {NOTE_EVERY} actions without saving. If "
+                                 f"the pages you read held facts the task needs, save them with {save} now, with "
+                                 "source."})
             message = await self._ask(messages, tools)
             if message is None:
                 break
@@ -353,7 +383,7 @@ class BrowsingAgent:
                 except Exception as error:  # noqa: BLE001
                     result = f"Error: {str(error).splitlines()[0][:400]}"
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
-                if call.function.name == "note":
+                if call.function.name in ("note", "record"):
                     since_note = 0
                     self.unnoted = []
                 else:
@@ -364,6 +394,9 @@ class BrowsingAgent:
                     if url not in self.visited:
                         self.visited.append(url)
             self._forget_old_views(messages)
+        if self.record:
+            self.log(f"[{self.name}] stopped without finish; its records are saved")
+            return self._report("(stopped: out of steps or time; everything recorded is saved)")
         self.log(f"[{self.name}] stopped without finish; writing the report from its notes")
         return self._report(await self._wrap_up())
 

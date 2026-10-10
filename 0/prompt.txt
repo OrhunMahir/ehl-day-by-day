@@ -1,0 +1,17 @@
+so we cant do a test run or what?
+
+---
+
+okay, we pushed. What should my colleague tell to his agent to hook up our code with his? Maybe we all should merge and then adjust or what_
+
+---
+
+yes open PR
+
+---
+
+okay, merged and sent the prompt. My colleague just pasted it into his agent. WIll let you know after it finisches
+
+---
+
+yes

@@ -1,8 +1,10 @@
 """The lead's own rules, with invented facts: the run's schedule, how facts are added, and when a "no bid" is final."""
+import asyncio
 import json
 import sys
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -111,6 +113,88 @@ class WhenANoBidIsFinal(unittest.TestCase):
         result = priced(lead().add(facts_with(["G1", "G2"], [MATCH_1, NEAR_MISS_2, MATCH_2])))
         self.assertEqual(result["answer"]["decision"], "bid")
         self.assertEqual(result["omitted"], [])
+
+
+class FakePage:
+    """Stands in for a browser page; `opened` counts the further contexts asked of its browser."""
+
+    def __init__(self, browser=None):
+        self.context = self
+        self.browser = browser or self
+        self.opened = 0
+        self.fails = False
+
+    async def new_context(self):
+        if self.fails:
+            raise RuntimeError("no further context")
+        self.opened += 1
+        return FakePage(self)
+
+    async def new_page(self):
+        return self
+
+    async def goto(self, url, **kwargs):
+        self.url = url
+
+
+class FakeTab:
+    def __init__(self, site_id, page, log=print):
+        self.site_id, self.page = site_id, page
+
+
+class SlowSubAgent:
+    """An investigation that takes a moment and remembers which tab it worked in and when."""
+
+    spans: list = []
+
+    def __init__(self, model, tabs, credentials, task, context, name, deadline, log):
+        self.tab = next(iter(tabs.values()))
+
+    async def run(self):
+        started = time.time()
+        await asyncio.sleep(0.2)
+        SlowSubAgent.spans.append((self.tab, started, time.time()))
+        return "report"
+
+
+class SeveralInvestigationsOfOneWebsite(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        SlowSubAgent.spans = []
+        self.page = FakePage()
+        task = {**TASK, "access": [{"siteId": "erp", "url": "https://erp.example.test"}]}
+        self.lead = agent.Orchestrator(task, None, {"erp": FakeTab("erp", self.page)}, None, time.time())
+        self.lead.log = lambda text: None
+
+    async def ask(self, count):
+        with patch.object(agent, "BrowsingAgent", SlowSubAgent), patch.object(agent, "Tab", FakeTab):
+            started = time.time()
+            await asyncio.gather(*(self.lead.investigate("erp", f"job {n}") for n in range(count)))
+            return time.time() - started
+
+    async def test_they_run_side_by_side_each_in_a_tab_of_its_own(self):
+        took = await self.ask(3)
+        self.assertLess(took, 0.45)
+        self.assertEqual(len({id(tab) for tab, _, _ in SlowSubAgent.spans}), 3)
+        self.assertEqual(self.page.opened, 2)
+
+    async def test_free_tabs_are_used_again_before_new_ones_are_opened(self):
+        await self.ask(3)
+        await self.ask(3)
+        self.assertEqual(self.page.opened, 2)
+        self.assertEqual(len(self.lead.free_tabs["erp"]), 3)
+
+    async def test_no_more_than_the_limit_work_one_website_at_once(self):
+        await self.ask(agent.TABS_PER_SITE + 2)
+        self.assertEqual(self.page.opened, agent.TABS_PER_SITE - 1)
+        moments = sorted(moment for _, start, end in SlowSubAgent.spans for moment in (start + 0.01, end - 0.01))
+        busiest = max(sum(start <= moment <= end for _, start, end in SlowSubAgent.spans) for moment in moments)
+        self.assertEqual(busiest, agent.TABS_PER_SITE)
+
+    async def test_without_a_further_tab_they_take_turns_on_the_one_there_is(self):
+        self.page.fails = True
+        took = await self.ask(3)
+        self.assertGreater(took, 0.55)
+        self.assertEqual(len({id(tab) for tab, _, _ in SlowSubAgent.spans}), 1)
 
 
 if __name__ == "__main__":

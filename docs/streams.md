@@ -16,7 +16,8 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
    schema, the expiry time) and opens one browser tab per website (`browsers.py`, `browser.py`).
 2. A **lead model** (`Orchestrator` in `agent.py`) reads the brief. It cannot browse. It has five tools:
    - `investigate(site, task)` sends a **browsing sub-agent** (`BrowsingAgent` in `browsing.py`) to one website with
-     a task in plain language. The sub-agent drives the browser through a text view of the page (`observe.js`,
+     a task in plain language. Up to four investigations can work the same website at once: beyond the first,
+     each gets a tab in a browser context of its own (inside the same browser) and signs in there. The sub-agent drives the browser through a text view of the page (`observe.js`,
      `Tab` in `browser.py`), takes notes, and returns one text report. Several sites run in parallel.
    - `add_facts(facts)` adds records to a `facts.FactsBuilder` (lists grow, a record with the same identity
      replaces the earlier one), runs the bid engine (`engine/`) and returns the priced answer, what is missing

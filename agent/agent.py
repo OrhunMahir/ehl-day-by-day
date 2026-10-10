@@ -28,7 +28,9 @@ you direct browsing assistants, one per website, and they report back. You make 
 
 Approach:
 1. Read the brief and its rules closely; they define the one correct answer. Plan which facts you need.
-2. Send assistants to the websites with `investigate` — several in one turn run in parallel. Give each a precise
+2. Send assistants to the websites with `investigate` — several in one turn run in parallel, also up to
+   {tabs} on the same website, each in a browser tab of its own. Split a large job on one website into several
+   investigations (e.g. one catalogue group each) instead of one long one. Give each a precise
    task: what to find, which exact reference, which details (dates, units, status, validity, senders), and to report
    verbatim. Their first pass should survey their site for everything the rules might need; information may sit on
    any site, so ask each assistant to report anything relevant it sees.
@@ -75,6 +77,8 @@ COLLECT_SHARE = 0.45  # investigations end here
 SUBMIT_SHARE = 0.45  # from here on the lead has to price and submit
 # One investigation may take this long, so that a round of follow-ups fits before the investigations end.
 INVESTIGATION_SECONDS = 240
+# How many investigations may work one website at the same time, each in a tab with a session of its own.
+TABS_PER_SITE = 4
 # How much each role's model thinks before it answers; None leaves the provider's default.
 LEAD_REASONING: str | None = "xhigh"
 WORKER_REASONING: str | None = "xhigh"  # browsing sub-agents and the submission agent
@@ -98,7 +102,10 @@ class Orchestrator:
         self.collect_until = now + left * COLLECT_SHARE
         self.submit_from = now + left * SUBMIT_SHARE
         self.deadline = now + left
-        self.locks = {site: asyncio.Lock() for site in tabs}
+        self.urls = {a["siteId"]: a["url"] for a in task["access"]}
+        self.free_tabs = {site: [tab] for site, tab in tabs.items()}  # tabs no investigation is using right now
+        self.tab_count = {site: 1 for site in tabs}
+        self.tab_slots = {site: asyncio.Semaphore(TABS_PER_SITE) for site in tabs}
         self.builder = facts.FactsBuilder()  # the facts as the lead has added them so far
         self.priced: engine.BidResult | None = None  # what the bid engine made of the latest facts
         self.add_failures = 0
@@ -118,7 +125,8 @@ class Orchestrator:
         return [
             {"type": "function", "function": {
                 "name": "investigate",
-                "description": "Send a browsing assistant to one website with a precise task; returns its report.",
+                "description": "Send a browsing assistant to one website with a precise task; returns its report. "
+                               "Several investigations of the same website in one turn run side by side.",
                 "parameters": {"type": "object", "properties": {
                     "site": {"type": "string", "enum": sites},
                     "task": {"type": "string"}}, "required": ["site", "task"]}}},
@@ -153,17 +161,40 @@ class Orchestrator:
     async def investigate(self, site: str, task: str) -> str:
         if site not in self.tabs:
             return f"Unknown site {site}; choose one of {', '.join(self.tabs)}"
-        async with self.locks[site]:
+        async with self.tab_slots[site]:
             if time.time() >= self.collect_until:
                 return "No time left to investigate: call submit_bid now with what you have."
             until = min(self.collect_until, time.time() + INVESTIGATION_SECONDS)
-            agent = BrowsingAgent(self.worker_model, {site: self.tabs[site]}, self.credentials, f"{task}\n\n{PROVENANCE}",
+            tab = await self.take_tab(site)
+            agent = BrowsingAgent(self.worker_model, {site: tab}, self.credentials, f"{task}\n\n{PROVENANCE}",
                                   self.context(), name=site, deadline=until, log=self.log)
             try:
                 return await asyncio.wait_for(agent.run(), timeout=until - time.time() + INVESTIGATION_GRACE_SECONDS)
             except TimeoutError:
                 self.log(f"[{site}] cut off: a step did not return in time")
                 return agent._report("(cut off: out of time; only the notes below were saved)")
+            finally:
+                self.free_tabs[site].append(tab)
+
+    async def take_tab(self, site: str) -> Tab:
+        """A tab of the website that no other investigation is using. Further tabs get a browser context of their
+        own in the same browser, so their sessions and pop-ups do not touch each other; the sub-agent signs in."""
+        if self.free_tabs[site]:
+            return self.free_tabs[site].pop()
+        first = self.tabs[site]
+        try:
+            context = await first.page.context.browser.new_context()
+            page = await context.new_page()
+            await page.goto(self.urls[site], wait_until="domcontentloaded", timeout=30000)
+            tab = Tab(site, page)
+        except Exception as error:  # noqa: BLE001 - without a further tab the investigation waits for a free one
+            self.log(f"[{site}] no further tab ({str(error).splitlines()[0][:120]}); waiting for a free one")
+            while not self.free_tabs[site]:
+                await asyncio.sleep(0.5)
+            return self.free_tabs[site].pop()
+        self.tab_count[site] += 1
+        self.log(f"[{site}] opened tab {self.tab_count[site]}")
+        return tab
 
     def add(self, update) -> str:
         """Adds an update to the facts and prices the bid; a bad update is rejected whole and named."""
@@ -316,7 +347,7 @@ class Orchestrator:
         minutes = round((self.submit_from - time.time()) / 60)
         messages = [
             {"role": "system", "content": ORCHESTRATOR.format(
-                minutes=minutes, round_minutes=round(INVESTIGATION_SECONDS / 60)) + "\n\n" + facts.FILLING_GUIDE},
+                minutes=minutes, round_minutes=round(INVESTIGATION_SECONDS / 60), tabs=TABS_PER_SITE) + "\n\n" + facts.FILLING_GUIDE},
             {"role": "user", "content": self.context() + "\n\n# Websites\n" + "\n".join(
                 f"- {a['siteId']}: {a['url']}" for a in self.task["access"]) + "\n\nBegin."},
         ]

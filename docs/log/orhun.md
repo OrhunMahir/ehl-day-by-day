@@ -2,6 +2,26 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 16:51 · Several investigations per website, each in its own tab
+
+- Changed: `agent/agent.py`: a website no longer has one lock. Up to four investigations work it at the same time
+  (`TABS_PER_SITE`); the first uses the tab that is there, each further one gets a tab in a new browser context of
+  the same browser, opened on the site's address, and the sub-agent signs in. Free tabs are used again. If a
+  further tab cannot be opened, the investigation waits for a free one. The lead's prompt says to split a large
+  job on one website (e.g. one catalogue group per investigation). New tests in `agent/tests/test_lead.py`.
+- Why: in two runs no material reached the lead: one ERP tab did not get through five catalogue groups in a
+  4-minute round, and a second ERP investigation had to wait for the first.
+- Checked: unit tests with stand-ins: three investigations of one site run side by side in three tabs; free tabs
+  are reused; no more than four at once; without a further tab they take turns. In a local Chromium: two further
+  tabs open in contexts of their own, the first tab stays on its page and reports no new tab, a choice in one tab
+  does not show in another. All unit tests pass. Sandbox run of this state started; result not in. Not checked:
+  whether the ERP accepts several sessions of the same login at once.
+- Learned: `run_0ffb32eef33e6619` failed because the lead's one long call to write the facts hit the 240-second
+  limit and was asked again from the start: 8 minutes for the facts, under 3 for the submission.
+- For the others: J — further tabs are separate `Tab` objects in separate browser contexts, so one tab's pop-up
+  handling does not see another's pages; `Tab.homes` is shared per site as before. I — nothing.
+- Next: the form (a whole position per call), then the lead's writing time.
+
 ## 2026-10-10 16:43 · Stream I's review of stream O: facts builder, no-bid check, checklist, tests
 
 - Changed: merged `main` (PR #5 of stream J, PR #6 of stream I). `agent/agent.py`: the lead's facts are kept in a

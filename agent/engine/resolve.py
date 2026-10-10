@@ -48,37 +48,25 @@ def _sender(record) -> str:
 # Rule 21: authority and time
 
 
-def rejection(record, facts: Facts) -> str | None:
-    """Why rule 21 (or rule 5 for discount approvals) rules a record out, or None when it counts."""
-    if norm_key(record.reference) != norm_key(facts.tender_reference):
-        return "other tender reference"
-    if not not_after(_date(record), facts.scenario_date):
-        return "dated after the scenario date"
-    sender = _sender(record)
-    if not sender:
-        return None
-    if type(record).__name__ == "DiscountApproval":
-        want = mail_address(facts.director_address)
-        return "not from the sales director" if want and sender != want else None
-    local = facts.authority.get(type(record).__name__)
-    if not local:
-        return None
-    got_local, _, got_domain = sender.partition("@")
-    if got_local != local.split("@")[0].lower():
-        return "sender not authorized"
-    if facts.bidder_domain and got_domain != facts.bidder_domain.lower().lstrip("@"):
-        return "sender outside the bidder's domain"
-    return None
-
-
 def authorized(record, facts: Facts, issues: list[str]) -> bool:
     """The record is for the exact tender, not later than the scenario date, and from its authorized sender."""
-    if rejection(record, facts) is not None:
-        return False
     kind = type(record).__name__
+    if norm_key(record.reference) != norm_key(facts.tender_reference):
+        return False
+    if not not_after(_date(record), facts.scenario_date):
+        return False
     if _date(record) is None:
         issues.append(f"{kind} {getattr(record, 'key', '')}: no date, cannot check it against the scenario date")
-    if facts.authority.get(kind) and not _sender(record):
+    sender = _sender(record)
+    local = facts.authority.get(kind)
+    if local and sender:
+        want_local = local.split("@")[0].lower()
+        got_local, _, got_domain = sender.partition("@")
+        if got_local != want_local:
+            return False
+        if facts.bidder_domain and got_domain != facts.bidder_domain.lower().lstrip("@"):
+            return False
+    elif local:
         issues.append(f"{kind} {getattr(record, 'key', '')}: sender unknown, authority not checked")
     return True
 
@@ -101,8 +89,6 @@ def latest_by_key(records, facts: Facts, issues: list[str], key=lambda r: norm_k
 def discount_approval(facts: Facts, issues: list[str]):
     """Rule 5: the most recent approval from the sales director for this exact tender, or None."""
     want = mail_address(facts.director_address)
-    if not want and facts.discount_approvals:
-        issues.append("director_address unknown: discount approvals are not checked against their sender")
     best = None
     for i, a in enumerate(facts.discount_approvals):
         if norm_key(a.reference) != norm_key(facts.tender_reference):
@@ -137,14 +123,12 @@ def withdrawn_numbers(facts: Facts) -> set[str]:
 def _live(entries, facts: Facts):
     gone = withdrawn_numbers(facts)
     return [e for e in entries
-            if not (norm_key(e.qa_number) and norm_key(e.qa_number) in gone)
-            and not_after(_date(e), facts.scenario_date)]
+            if not (norm_key(e.qa_number) and norm_key(e.qa_number) in gone) and not_after(_date(e), facts.scenario_date)]
 
 
 def assignment(facts: Facts, position: str, kind: AssignmentKind) -> Assignment | None:
     """The latest remaining Q&A assignment of this kind to the position."""
-    found = [a for a in _live(facts.assignments, facts)
-             if a.kind == kind and norm_key(a.position) == norm_key(position)]
+    found = [a for a in _live(facts.assignments, facts) if a.kind == kind and norm_key(a.position) == norm_key(position)]
     return max(found, key=_qa_rank) if found else None
 
 
@@ -154,48 +138,10 @@ def stated_quantity(facts: Facts, pos: TenderPosition) -> Decimal:
     return max(changes, key=_qa_rank).quantity if changes else pos.quantity
 
 
-def quantity_story(facts: Facts, pos: TenderPosition) -> str:
-    """How the stated quantity came about, for the explanation."""
+def has_withdrawn_change(facts: Facts, pos: TenderPosition) -> bool:
     gone = withdrawn_numbers(facts)
-    mine = sorted((c for c in facts.quantity_changes if norm_key(c.position) == norm_key(pos.position)), key=_qa_rank)
-    unit = "sets" if pos.unit == Unit.SET else "pieces"
-    parts = [f"tender {pos.quantity} {unit}"]
-    for c in mine:
-        label = c.qa_number or "change"
-        day = _date(c).strftime("%Y-%m-%d") if _date(c) else "no date"
-        state = (" (withdrawn)" if norm_key(c.qa_number) and norm_key(c.qa_number) in gone
-                 else " (after the scenario date)" if not not_after(_date(c), facts.scenario_date) else "")
-        parts.append(f"{label} {day}: {c.quantity}{state}")
-    return "; ".join(parts) + f" -> {stated_quantity(facts, pos)} {unit}"
-
-
-def closest(facts: Facts, req: Requirement, limit: int = 3) -> str:
-    """The candidates of the requirement's group nearest to a match, with what differs, for the lead to re-check."""
-    group = norm_key(req.catalogue_group)
-    pool = [m for m in facts.materials if not group or norm_key(m.catalogue_group) == group]
-    wanted = {"bore": req.bore_mm, "stroke": req.stroke_mm, "pressure": req.pressure_bar, "mounting": req.mounting,
-              "certification": req.certification or "none"}
-    got = {"bore": "bore_mm", "stroke": "stroke_mm", "pressure": "pressure_bar", "mounting": "mounting",
-           "certification": "certification"}
-    ranked = sorted(pool, key=lambda m: (len(mismatches(m, req)) + (m.active is False), m.material_number))
-    parts = []
-    for m in ranked[:limit]:
-        diff = [f"{name} {getattr(m, got[name]) or 'none'} (required {wanted[name]})" for name in mismatches(m, req)]
-        if m.active is False:
-            diff.append("inactive")
-        parts.append(f"{m.material_number}: " + ", ".join(diff))
-    return "; ".join(parts) if parts else "no candidates recorded"
-
-
-def mismatches(m: Material, req: Requirement) -> list[str]:
-    """The attributes in which a material differs from the requirement (rule 3)."""
-    out = [name for name, a, b in (("bore", m.bore_mm, req.bore_mm), ("stroke", m.stroke_mm, req.stroke_mm),
-                                   ("pressure", m.pressure_bar, req.pressure_bar)) if not _same(a, b)]
-    if m.mounting is None or norm_text(m.mounting) != norm_text(req.mounting):
-        out.append("mounting")
-    if _cert(m.certification) != _cert(req.certification):
-        out.append("certification")
-    return out
+    return any(norm_key(c.qa_number) and norm_key(c.qa_number) in gone for c in facts.quantity_changes
+               if norm_key(c.position) == norm_key(pos.position))
 
 
 def final_pieces(facts: Facts, pos: TenderPosition, req: Requirement | None, issues: list[str]) -> int | None:
@@ -246,13 +192,7 @@ def requirement(facts: Facts, revision: SpecRevision | None, ref: str, issues: l
             latest[a.attribute] = a.value
     changes = {}
     for attr, value in latest.items():
-        if attr in (Attr.MOUNTING, Attr.CERTIFICATION):
-            changes[attr.value] = value
-            continue
-        try:
-            changes[attr.value] = dec(value)
-        except (ValueError, TypeError):
-            issues.append(f"requirement {ref}: amendment of {attr.value} has no number ({value!r}), ignored")
+        changes[attr.value] = value if attr in (Attr.MOUNTING, Attr.CERTIFICATION) else dec(value)
     req = replace(base, **changes)
     if req.usable_travel:
         reserves = latest_by_key(facts.end_reserves, facts, issues,
@@ -275,9 +215,8 @@ _NO_CERT = {"", "-", "–", "—", "keine", "keine gefordert", "nicht gefordert"
 
 
 def _cert(text: str | None) -> str:
-    """Certification for comparison: "none required" in its usual wordings is "", spaces do not count."""
     t = norm_text(text).rstrip(".")
-    return "" if t in _NO_CERT else t.replace(" ", "")
+    return "" if t in _NO_CERT else t
 
 
 def _same(a, b) -> bool:
@@ -297,18 +236,17 @@ def requirement_complete(req: Requirement) -> bool:
 
 def searched(facts: Facts, req: Requirement) -> bool:
     """The ERP was searched for this requirement: its Kataloggruppe is recorded as searched or a candidate of that
-    group is known. A requirement without a Kataloggruppe was not read completely (rule 10 names one for each), so
-    no search of it counts as conclusive."""
+    group is known. Without a Kataloggruppe, any known material counts as a search."""
     group = norm_key(req.catalogue_group)
     if not group:
-        return False
+        return bool(facts.materials)
     return (group in {norm_key(g) for g in facts.searched_groups}
             or any(norm_key(m.catalogue_group) == group for m in facts.materials))
 
 
 def select_material(facts: Facts, req: Requirement, position: str, issues: list[str]) -> Material | None:
     """Rule 3: the active material whose bore, stroke, pressure, mounting and certification match exactly."""
-    hits = sorted((m for m in facts.materials if matches(m, req)), key=lambda m: norm_key(m.material_number))
+    hits = [m for m in facts.materials if matches(m, req)]
     active = [m for m in hits if m.active is True]
     if not active:
         unknown = [m for m in hits if m.active is None]

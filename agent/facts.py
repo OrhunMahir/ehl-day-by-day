@@ -12,8 +12,6 @@ Conventions:
 """
 from __future__ import annotations
 
-import copy
-import functools
 import re
 import types
 import typing
@@ -40,26 +38,19 @@ class Source:
 # ---------------------------------------------------------------------------------------------------------------------
 # Parsing helpers (for whoever fills the facts)
 
-_INVISIBLE = re.compile("[\u200b-\u200f\u2060\ufeff\u00ad]")  # zero-width, direction marks, soft hyphen
-
-
-@functools.lru_cache(maxsize=65536)
-def _clean(text: str) -> str:
-    return re.sub(r"\s+", " ", _INVISIBLE.sub("", text)).strip()
+_INVISIBLE = re.compile("[​-‏⁠﻿­]")
 
 
 def clean(text: str) -> str:
     """Remove zero-width characters and collapse whitespace."""
-    return _clean(str(text))
+    return re.sub(r"\s+", " ", _INVISIBLE.sub("", str(text))).strip()
 
 
-@functools.lru_cache(maxsize=65536)
 def norm_key(text: str | None) -> str:
     """Canonical form of a code or key: no invisible characters or spaces, upper case."""
     return re.sub(r"\s+", "", clean(text or "")).upper()
 
 
-@functools.lru_cache(maxsize=65536)
 def norm_text(text: str | None) -> str:
     """Canonical form of a free-text attribute such as a mounting type: case-folded, single spaces."""
     return clean(text or "").casefold()
@@ -499,25 +490,6 @@ def from_dict(cls, data: dict):
     return cls(**kwargs)
 
 
-def to_dict(obj):
-    """Plain JSON of a facts dataclass (the reverse of `from_dict`): numbers as text, dates in ISO form."""
-    if is_dataclass(obj):
-        return {f.name: to_dict(getattr(obj, f.name)) for f in fields(obj)}
-    if isinstance(obj, list):
-        return [to_dict(v) for v in obj]
-    if isinstance(obj, dict):
-        return {k: to_dict(v) for k, v in obj.items()}
-    if isinstance(obj, Enum):
-        return obj.value
-    if isinstance(obj, Decimal):
-        text = format(obj.normalize(), "f")
-        # "1.234" would read as ambiguous; "1.2340" is the same value and is not
-        return text + "0" if re.fullmatch(r"-?[1-9]\d{0,2}\.\d{3}", text) else text
-    if isinstance(obj, (datetime, date)):
-        return obj.isoformat()
-    return obj
-
-
 def _members(tp) -> tuple[list, bool]:
     if typing.get_origin(tp) in (typing.Union, types.UnionType):
         args = typing.get_args(tp)
@@ -652,210 +624,3 @@ def _schema(tp) -> dict:
     if optional:
         out = {"anyOf": [out, {"type": "null"}]}
     return out
-
-
-# ---------------------------------------------------------------------------------------------------------------------
-# What a model filling the facts must know. For the lead's prompt; it states the rules' traps, no values.
-
-FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you only record what the sites show):
-
-- tender_reference and scenario_date from the brief or the tender; bidder_domain from our own mailbox address;
-  director_address = the sales director's address as the brief names it (without it, approvals from anyone count).
-- Record what you read, not what you concluded. Keep superseded, withdrawn, look-alike and later records too, each
-  with its own source: the engine picks the one that counts. Do not do any arithmetic yourself.
-- Dates with their time and time zone: ISO 8601 with the offset the site states (2030-01-24T17:00:00+01:00) or in
-  UTC; a time without a zone is read as UTC.
-- source: for every mail value the sender's full address, the mail's date and time, and the exact tender reference
-  it names (a reference with an extra suffix is another tender). For Q&A answers their number and date; for
-  documents their revision.
-- Quantities stay in the unit the tender or Q&A states (sets stay sets); the engine converts with the requirement's
-  pieces_per_set. A Q&A answer that withdraws an earlier one goes into withdrawals with that answer's number.
-- Requirements come from every revision you saw; mark the one the site marks as current/valid with current=true.
-  A technical amendment names the revision and requirement it applies to; record it with that revision even if it
-  is not the current one. For usable travel (nutzbarer Weg) enter the stated travel as stroke_mm, set
-  usable_travel=true and the end-reserve key; the reserve comes from the matching Technikfreigabe record.
-- Materials: every candidate from the ERP search, also inactive ones and near misses, with status, attributes,
-  stock, lead times, carton size, masses in kg (625 g = 0.625), metal index code, setup fee and every price
-  condition with its validity, currency, FX key, price unit and all quantity scales. List every Kataloggruppe you
-  searched in searched_groups, also when the search found nothing.
-- Keys that tie a position to a rule record (Konditionsgruppe, packaging tariff, delivery commitment, setup pool,
-  project bonus) go into assignments, wherever you read them.
-- Mail rule records: one record per key per mail. Konditionsgruppe wording -> scope base / base_and_surcharge /
-  none. Metal indices with every validity window as stated. Bonus bands as lower/upper/percent. A setup pool's
-  allocation = the listed method that matches the mail's wording.
-- Discount: every approval-like mail for the tender with its sender, date, percent and any minimum order value; a
-  mail that refuses or withdraws the discount is an approval with percent 0.
-- Numbers as JSON numbers where you can; text numbers only with an unambiguous format. Unknown = leave it out
-  (null); never guess. 0 only when the site states zero.
-"""
-
-
-# ---------------------------------------------------------------------------------------------------------------------
-# Building the facts piece by piece, as the reports come in
-
-# Which fields identify an item of each list, so a re-sent item corrects the earlier one instead of adding a copy.
-_IDENTITY: dict[str, tuple[str, ...]] = {
-    "positions": ("position",),
-    "quantity_changes": ("position", "qa_number", "source.date"),
-    "withdrawals": ("qa_number", "withdraws"),
-    "amendments": ("revision", "requirement", "attribute", "qa_number", "source.date"),
-    "assignments": ("position", "kind", "qa_number", "source.date"),
-    "revisions": ("revision",),
-    "materials": ("material_number",),
-    "discount_approvals": ("reference", "source.date", "source.sender"),
-    "condition_groups": ("reference", "key", "source.date", "source.sender"),
-    "metal_indices": ("reference", "key", "source.date", "source.sender"),
-    "packaging_tariffs": ("reference", "key", "source.date", "source.sender"),
-    "delivery_commitments": ("reference", "key", "source.date", "source.sender"),
-    "fx_rates": ("reference", "key", "source.date", "source.sender"),
-    "setup_pools": ("reference", "key", "source.date", "source.sender"),
-    "project_bonuses": ("reference", "key", "source.date", "source.sender"),
-    "end_reserves": ("reference", "key", "revision", "source.date", "source.sender"),
-}
-# Items whose fields arrive in parts (a material's attributes, stock and conditions are on different pages).
-_FIELD_MERGE = {"positions", "revisions", "materials"}
-
-
-def _ident(item: dict, paths: tuple[str, ...]) -> tuple:
-    out = []
-    for path in paths:
-        value = item
-        for part in path.split("."):
-            value = value.get(part) if isinstance(value, dict) else None
-        if value is None or value == "":
-            out.append(None)
-        elif path.endswith("date"):
-            try:
-                out.append(when(value).isoformat())
-            except ValueError:
-                out.append(norm_key(str(value)))
-        else:
-            out.append(norm_key(str(value)))
-    return tuple(out)
-
-
-def _merge_fields(old: dict, new: dict) -> dict:
-    """Fields of `new` override `old`; a null never erases a known value; requirements merge by their id."""
-    merged = dict(old)
-    for name, value in new.items():
-        if value is None:
-            continue
-        if name == "requirements" and isinstance(value, list) and isinstance(old.get(name), list):
-            merged[name] = _merge_list(old[name], value, ("requirement",), field_merge=True)[0]
-        else:
-            merged[name] = value
-    return merged
-
-
-def _merge_list(old: list, new: list, paths: tuple[str, ...], field_merge: bool) -> tuple[list, list[int]]:
-    """The merged list (items are never changed in place) and the indexes of the items that are new or changed."""
-    items = list(old)
-    index = {}
-    for i, existing in enumerate(items):
-        index.setdefault(_ident(existing, paths), i)
-    changed = []
-    for item in new:
-        if not isinstance(item, dict):
-            raise ValueError(f"expected objects in the list, got {item!r}")
-        key = _ident(item, paths)
-        at = index.get(key)
-        if at is None:
-            index[key] = len(items)
-            changed.append(len(items))
-            items.append(copy.deepcopy(item))
-        else:
-            items[at] = _merge_fields(items[at], copy.deepcopy(item)) if field_merge else copy.deepcopy(item)
-            changed.append(at)
-    return items, changed
-
-
-def _item_class(name: str):
-    return typing.get_args(typing.get_type_hints(Facts)[name])[0]
-
-
-class FactsBuilder:
-    """Collects the facts as plain JSON over several tool calls.
-
-    `add(update)` merges one update and checks what it changes at once: an update with a bad field is rejected
-    whole (ValueError naming the field) and the facts collected so far stay as they were. Lists grow; an item with
-    the same identity as an earlier one replaces it (positions, revisions and materials are merged field by field,
-    so a material's stock and conditions can arrive after its attributes). `replace_lists` in an update replaces
-    whole lists, to take back records added by mistake. `facts()` returns the typed `Facts` for the engine.
-    """
-
-    def __init__(self, data: dict | None = None):
-        self.data: dict = {}
-        if data:
-            self.add(data)
-
-    def add(self, update: dict) -> str:
-        if not isinstance(update, dict):
-            raise ValueError("the update must be an object")
-        update = dict(update)
-        replace = set(update.pop("replace_lists", None) or [])
-        unknown = replace - set(_IDENTITY) - {"searched_groups"}
-        if unknown:
-            raise ValueError(f"replace_lists: unknown list(s) {', '.join(sorted(unknown))}")
-        hints = typing.get_type_hints(Facts)
-        names = {f.name for f in fields(Facts)}
-        bad = set(update) - names
-        if bad:
-            raise ValueError(f"Facts: unknown field(s) {', '.join(sorted(bad))}")
-        merged = dict(self.data)            # shallow: changed lists are new list objects, items are never mutated
-        for name, value in update.items():
-            if name in _IDENTITY:
-                if value is None:
-                    continue
-                if not isinstance(value, list):
-                    raise ValueError(f"Facts.{name}: expected a list")
-                base = [] if name in replace else merged.get(name, [])
-                items, changed = _merge_list(base, value, _IDENTITY[name], name in _FIELD_MERGE)
-                cls = _item_class(name)
-                for i in changed:
-                    try:
-                        from_dict(cls, items[i])
-                    except ValueError as exc:
-                        raise ValueError(f"Facts.{name}: {exc}") from exc
-                merged[name] = items
-            elif name == "searched_groups":
-                groups = [] if name in replace else list(merged.get(name, []))
-                seen = {norm_key(x) for x in groups}
-                for g in value or []:
-                    if norm_key(g) not in seen:
-                        seen.add(norm_key(g))
-                        groups.append(clean(str(g)))
-                merged[name] = groups
-            elif value is not None:
-                new = {**merged.get(name, {}), **value} if name == "authority" and isinstance(value, dict) else value
-                try:
-                    _convert(hints[name], new)
-                except (ValueError, TypeError) as exc:
-                    raise ValueError(f"Facts.{name}: {exc}") from exc
-                merged[name] = copy.deepcopy(new)
-        for name in replace - set(update):
-            merged[name] = []
-        self.data = merged
-        return self.summary()
-
-    def facts(self) -> Facts:
-        missing = [n for n in ("tender_reference", "scenario_date") if not self.data.get(n)]
-        if missing:
-            raise ValueError(f"still missing: {', '.join(missing)}")
-        return from_dict(Facts, self.data)
-
-    def summary(self) -> str:
-        parts = [f"{n}={self.data[n]}" for n in ("tender_reference", "scenario_date") if self.data.get(n)]
-        parts += [f"{n}: {len(v)}" for n, v in self.data.items() if isinstance(v, list) and v]
-        return "facts so far: " + ", ".join(parts) if parts else "no facts yet"
-
-
-def update_schema() -> dict:
-    """JSON Schema of one `FactsBuilder.add` update: any part of the facts, plus `replace_lists`."""
-    schema = json_schema(Facts)
-    schema.pop("required", None)
-    schema["properties"]["replace_lists"] = {
-        "type": "array", "items": {"type": "string", "enum": sorted(_IDENTITY) + ["searched_groups"]},
-        "description": "lists to replace entirely by the ones in this update (to take back wrong records)"}
-    schema["description"] = ("Add facts as they are found; send only what is new or corrected. An item with the "
-                             "same identity (e.g. the same material_number) updates the earlier one.")
-    return schema

@@ -29,7 +29,6 @@ class Line:
     scope: DiscountScope = DiscountScope.BASE
     lead_weeks: int | None = None
     unit_price: Decimal | None = None
-    negative_price: bool = False            # the computed unit price was negative: an input is implausible
 
 
 @dataclass
@@ -40,23 +39,6 @@ class BidResult:
     incomplete: list[str] = field(default_factory=list)   # positions whose unit price could not be fully computed
     omitted: list[str] = field(default_factory=list)      # tender positions not in the answer; mark them in the
                                                           # form as "Position auslassen" (rule 9)
-    facts: Facts | None = None
-
-    def needed(self) -> list[dict]:
-        """What the lead still has to find ("find") or check ("verify"), in the order to look for it; empty "find"
-        entries mean the facts are complete."""
-        from .needs import needs
-        return [n.as_dict() for n in needs(self.facts, self)]
-
-    @property
-    def complete(self) -> bool:
-        """No fact is missing: nothing to find, no position omitted or incompletely priced."""
-        return not self.omitted and not self.incomplete and not any(n["kind"] == "find" for n in self.needed())
-
-    def explain(self) -> str:
-        """Plain text for the run log: what each value was computed from and which records counted."""
-        from .explain import explain
-        return explain(self.facts, self)
 
 
 def build_bid(facts: Facts) -> dict:
@@ -68,7 +50,7 @@ def evaluate(facts: Facts) -> BidResult:
     """The answer object plus what could not be decided (`issues`) and the per-position working (`lines`)."""
     issues: list[str] = []
     revision = resolve.governing_revision(facts, issues)
-    positions = _usable_positions(facts, issues)
+    positions = sorted(facts.positions, key=lambda p: position_key(p.position))
 
     lines: list[Line] = []
     no_match: list[str] = []
@@ -76,15 +58,10 @@ def evaluate(facts: Facts) -> BidResult:
         line = Line(pos.position)
         req = resolve.requirement(facts, revision, pos.requirement, issues)
         line.pieces = resolve.final_pieces(facts, pos, req, issues)
-        if line.pieces is not None and line.pieces < 0:
-            issues.append(f"position {pos.position}: negative quantity {line.pieces}, treated as unknown")
-            line.pieces = None
         if req is not None and resolve.requirement_complete(req):
             line.material = resolve.select_material(facts, req, pos.position, issues)
             if line.material is None and resolve.searched(facts, req):
                 no_match.append(pos.position)
-                issues.append(f"position {pos.position}: no active material matches requirement {req.requirement}; "
-                              f"closest: {resolve.closest(facts, req)}. Re-check these values before a no_bid.")
             elif line.material is None:
                 issues.append(f"position {pos.position}: Kataloggruppe {req.catalogue_group or '(none)'} not "
                               "searched in the ERP yet, material unknown")
@@ -95,14 +72,14 @@ def evaluate(facts: Facts) -> BidResult:
     approval = resolve.discount_approval(facts, issues)
     if no_match:
         issues.append(f"no active material matches position(s) {', '.join(no_match)}: no bid (rule 3)")
-        percent = _valid_percent(approval.percent, issues) if approval and approval.min_order_value is None else ZERO
+        percent = approval.percent if approval and approval.min_order_value is None else ZERO
         answer = _answer(facts, "no_bid", percent, [], ZERO)
-        return BidResult(answer, _dedupe(issues), lines, [], [], facts)
+        return BidResult(answer, _dedupe(issues), lines, [])
 
     priced = [ln for ln in lines if ln.material is not None and ln.pieces is not None]
     for ln in priced:
         ln.base = base_unit_price(ln.material, ln.pieces, facts, issues)
-    percent = _discount(approval, priced, len(lines), issues)
+    percent = _discount(facts, approval, priced, issues)
     _surcharges(facts, priced, issues)
     _setup_pools(facts, priced, issues)
     _packaging(facts, priced, issues)
@@ -110,48 +87,35 @@ def evaluate(facts: Facts) -> BidResult:
     _scopes(facts, priced, issues)
     _lead_times(facts, priced, issues)
 
-    out, incomplete, omitted, total = [], [], list(_dropped_ids(facts, positions)), ZERO
+    out, incomplete, omitted, total = [], [], [], ZERO
     for ln in lines:
         if ln.material is None or ln.pieces is None:
             issues.append(f"position {ln.position}: left out (material or quantity unknown)")
             omitted.append(ln.position)
             continue
-        number = (ln.material.material_number or "").strip()
-        if not number or len(number) > 50:
-            issues.append(f"position {ln.position}: material number {number!r} is not usable, left out")
-            omitted.append(ln.position)
-            continue
         ln.unit_price = _unit_price(ln, percent)
-        if ln.unit_price is not None and ln.unit_price < 0:
-            issues.append(f"position {ln.position}: unit price {ln.unit_price} is negative; a component is wrong")
-            ln.unit_price = None
-            ln.negative_price = True
         if ln.unit_price is None:
             incomplete.append(ln.position)
         unit_price = ln.unit_price if ln.unit_price is not None else ZERO
         total += ln.pieces * unit_price
         out.append(_position(ln, unit_price, issues))
     answer = _answer(facts, "bid", percent, out, half_up(total))
-    return BidResult(answer, _dedupe(issues), lines, incomplete, omitted, facts)
+    return BidResult(answer, _dedupe(issues), lines, incomplete, omitted)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Order level
 
 
-def _discount(approval, lines: list[Line], positions: int, issues: list[str]) -> Decimal:
+def _discount(facts: Facts, approval, lines: list[Line], issues: list[str]) -> Decimal:
     """Rules 5 and 16: the latest approval's percent, or 0 if its minimum undiscounted order value is not reached.
-    The order value is final pieces times base price, before discount, without surcharges or setup, in cents.
-    `positions` counts all positions: one not priced yet makes the value too low, which is reported."""
+    The order value is final pieces times base price, before discount, without surcharges or setup, in cents."""
     if approval is None:
-        return ZERO
-    if _valid_percent(approval.percent, issues) != approval.percent:
         return ZERO
     if approval.min_order_value is None:
         return approval.percent
-    if any(ln.base is None for ln in lines) or len(lines) < positions:
-        issues.append("discount threshold computed without positions whose base price or material is unknown: "
-                      "the order value may be too low")
+    if any(ln.base is None for ln in lines):
+        issues.append("discount threshold computed without positions whose base price is unknown")
     value = half_up(sum((ln.pieces * ln.base for ln in lines if ln.base is not None), ZERO))
     return approval.percent if value >= approval.min_order_value else ZERO
 
@@ -197,7 +161,7 @@ def _setup_pools(facts: Facts, lines: list[Line], issues: list[str]):
         weights = {ln.position: ln.pieces * ln.material.allocation_mass_kg for ln in members}
         for ln in members:
             ln.pool = ZERO
-        if any(w < 0 for w in weights.values()) or sum(weights.values(), ZERO) <= 0:
+        if sum(weights.values(), ZERO) == 0:
             issues.append(f"setup pool {key}: all weights are zero, fee not allocated")
             continue
         shares = allocate_cents(pool.fee_eur, weights, pool.allocation.value)
@@ -232,11 +196,6 @@ def _bonus(facts: Facts, lines: list[Line], issues: list[str]):
                 ln.bonus = None
             continue
         values = {ln.position: ln.pieces * ln.base for ln in members}
-        if any(v < 0 for v in values.values()) or sum(values.values(), ZERO) <= 0:
-            issues.append(f"project bonus {key}: goods values not usable for the allocation")
-            for ln in members:
-                ln.bonus = None
-            continue
         credit = bonus_credit(sum(values.values(), ZERO), bonus.bands)
         for ln in members:
             ln.bonus = ZERO
@@ -307,66 +266,23 @@ def _unit_price(ln: Line, percent: Decimal) -> Decimal | None:
 
 def _position(ln: Line, unit_price: Decimal, issues: list[str]) -> dict:
     """One answer entry. An optional breakdown field is left out when it is unknown (blank = unanswered)."""
-    lead = ln.lead_weeks
-    if lead is None or lead < 0:
-        if lead is not None:
-            issues.append(f"position {ln.position}: lead time {lead} weeks is negative")
-        lead = 0
     entry = {
         "position": ln.position,
         "material_number": ln.material.material_number,
         "quantity": ln.pieces,
         "unit_price": _num(unit_price),
-        "lead_time_weeks": lead,
+        "lead_time_weeks": ln.lead_weeks if ln.lead_weeks is not None else 0,
     }
     n = ln.pieces
-    optional = {}
     if ln.base is not None:
-        optional["base_unit_price"] = half_up(ln.base)
+        entry["base_unit_price"] = _num(half_up(ln.base))
     if n and None not in (ln.mass_surcharge, ln.setup, ln.pool):
-        optional["surcharge_per_unit"] = half_up(ln.mass_surcharge + div(ln.setup + ln.pool, n))
+        entry["surcharge_per_unit"] = _num(half_up(ln.mass_surcharge + div(ln.setup + ln.pool, n)))
     if n and ln.packaging is not None:
-        optional["packaging_per_unit"] = half_up(div(ln.packaging, n))
+        entry["packaging_per_unit"] = _num(half_up(div(ln.packaging, n)))
     if ln.bonus is not None:
-        optional["rebate_total"] = half_up(ln.bonus)
-    for name, value in optional.items():
-        if value < 0:
-            issues.append(f"position {ln.position}: {name} {value} is negative, left blank")
-        else:
-            entry[name] = _num(value)
+        entry["rebate_total"] = _num(half_up(ln.bonus))
     return entry
-
-
-def _usable_positions(facts: Facts, issues: list[str]) -> list[TenderPosition]:
-    """Positions the form can take: a non-empty id of at most 20 characters, a material number of at most 50 (checked
-    later), each id once. A repeated id keeps its last entry."""
-    by_id: dict[str, TenderPosition] = {}
-    for pos in facts.positions:
-        pid = (pos.position or "").strip()
-        if not pid or len(pid) > 20:
-            issues.append(f"position {pid!r}: not a usable position number (1 to 20 characters), left out")
-            continue
-        if norm_key(pid) in by_id:
-            issues.append(f"position {pid}: listed twice, the last entry counts")
-        by_id[norm_key(pid)] = pos
-    return sorted(by_id.values(), key=lambda p: position_key(p.position))
-
-
-def _dropped_ids(facts: Facts, kept: list[TenderPosition]) -> list[str]:
-    kept_ids = {norm_key(p.position) for p in kept}
-    out = []
-    for pos in facts.positions:
-        pid = (pos.position or "").strip()
-        if pid and norm_key(pid) not in kept_ids and pid not in out:
-            out.append(pid)
-    return out
-
-
-def _valid_percent(percent: Decimal, issues: list[str]) -> Decimal:
-    if percent is None or not 0 <= percent <= 100:
-        issues.append(f"discount approval: percent {percent} is not between 0 and 100, using 0 %")
-        return ZERO
-    return percent
 
 
 def _answer(facts: Facts, decision: str, percent: Decimal, positions: list[dict], total: Decimal) -> dict:

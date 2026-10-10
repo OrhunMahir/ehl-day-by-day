@@ -2,6 +2,22 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 20:40 · New branch `baseline-18`: the code of the 18.3 submission, on top of current main
+
+Branch `baseline-18` (agreed with Ivan; touches every stream's files under `agent/`, for the team to review).
+
+- Changed: `agent/` set back to `270b072`, the commit whose files match the 18.3 scored submission exactly (checked
+  file by file against the downloaded package). Files added to `agent/` since then are removed on this branch; docs
+  and push logs stay as on `main`. New: `docs/what-we-tried.md`, a summary of every change since the submission and
+  why none of them scored better.
+- Why: every sandbox test run since the submission scored 10 or less (the last one, of `plan-facts-at-source`, 5).
+- Checked: 101 of 104 unit tests pass with `PYTHONUTF8=1`. The 3 errors are in `tests/test_kit.py` and already failed
+  at `270b072` (they call a `solve` function that was removed). Not test-run yet.
+- Learned: the 18.3 differs from the 10s by the discount field and part of one position; see the doc.
+- For the others: J and O: please read `docs/what-we-tried.md`. The branch is the proposed base from now on; nothing
+  is merged into `main`.
+- Next: a sandbox test run of this branch unchanged (Julien), then why the discount was lost after `270b072`.
+
 ## 2026-10-10 16:29 · Code review of the whole package: fixes in stream I, findings for J and O
 
 - Changed (stream I only): a requirement without a Kataloggruppe no longer counts as searched, so it cannot cause

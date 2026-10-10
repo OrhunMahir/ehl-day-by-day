@@ -8,7 +8,7 @@
   const BLOCK = new Set(["DIV", "P", "SECTION", "ARTICLE", "MAIN", "HEADER", "FOOTER", "NAV", "ASIDE", "UL", "OL",
     "LI", "H1", "H2", "H3", "H4", "H5", "H6", "FORM", "FIELDSET", "LEGEND", "TR", "DL", "DT", "DD", "PRE", "BLOCKQUOTE",
     "DETAILS", "SUMMARY", "BR", "HR", "TABLE", "CAPTION", "FIGURE", "FIGCAPTION", "LABEL", "DIALOG"]);
-  const clean = (s) => (s || "").replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "").replace(/\s+/g, " ").trim();
+  const clean = (s) => (s || "").replace(/[​-‏⁠﻿­]/g, "").replace(/\s+/g, " ").trim();
   // text the eye would get from hovering: a hidden tooltip, or a title/aria-label on a plain element
   const hint = (el) => {
     const parts = [];
@@ -51,8 +51,7 @@
     if (["BUTTON", "SELECT", "TEXTAREA", "SUMMARY"].includes(t)) return true;
     if (t === "INPUT") return el.type !== "hidden";
     const role = el.getAttribute("role");
-    if (["button", "link", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "checkbox", "radio", "option",
-         "switch", "combobox", "treeitem", "searchbox", "textbox", "spinbutton", "slider"].includes(role)) return true;
+    if (["button", "link", "tab", "menuitem", "checkbox", "radio", "option", "switch"].includes(role)) return true;
     if (el.hasAttribute("onclick") || el.hasAttribute("data-action")) return true;
     return false;
   };
@@ -84,7 +83,7 @@
       if (type === "submit" || type === "button") return `[${id}] button "${el.value}" ${extra.join(" ")}`;
       if (type === "file") return `[${id}] file-input name=${el.name}`;
       const ph = el.placeholder ? ` placeholder="${el.placeholder}"` : "";
-      return `[${id}] input(${type}) name=${el.name}${lbl ? ` label="${lbl}"` : ""}${ph} value=${type === "password" ? (el.value ? "<filled>" : "<empty>") : `"${el.value}"`}${el.readOnly ? " readonly" : ""} ${extra.join(" ")}`;
+      return `[${id}] input(${type}) name=${el.name}${lbl ? ` label="${lbl}"` : ""}${ph} value="${el.value}"${el.readOnly ? " readonly" : ""} ${extra.join(" ")}`;
     }
     if (t === "TEXTAREA") return `[${id}] textarea name=${el.name} value="${clean(el.value).slice(0, 300)}"`;
     if (t === "SELECT") {
@@ -96,10 +95,8 @@
   };
 
   // inline text of a node, with interactive descendants inlined as [id] markers
-  // children of a node, including the content of an open shadow root (web components)
-  const kids = (node) => (node.shadowRoot ? [...node.shadowRoot.childNodes, ...node.childNodes] : [...node.childNodes]);
   const inline = (node, out) => {
-    for (const c of kids(node)) {
+    for (const c of node.childNodes) {
       if (c.nodeType === 3) { out.push(c.textContent); continue; }
       if (c.nodeType !== 1 || SKIP.has(c.tagName)) continue;
       if (hidden(c)) {
@@ -128,19 +125,6 @@
     if (t === "IFRAME") { lines.push(`[iframe name="${el.name || ""}" src="${(el.getAttribute("src") || "").slice(0, 120)}" — its content follows as a separate frame]`); return; }
     if (t === "CANVAS") { const s = el.getAttribute("aria-label") || el.getAttribute("title") || ""; lines.push(`[canvas${s ? ": " + clean(s) : ""}]`); return; }
     if (t === "IMG") { const a = el.getAttribute("alt") || el.getAttribute("title"); if (a) lines.push(`[image: ${clean(a)}]`); return; }
-    const tableRole = el.getAttribute("role");
-    if (t !== "TABLE" && (tableRole === "table" || tableRole === "grid" || tableRole === "treegrid")) {
-      // a table built from elements with ARIA roles: render its rows like a table's
-      lines.push("<table>");
-      for (const row of el.querySelectorAll('[role="row"]')) {
-        if (row.closest('[role="table"], [role="grid"], [role="treegrid"]') !== el || hidden(row)) continue;
-        const cells = [...row.querySelectorAll('[role="cell"], [role="gridcell"], [role="columnheader"], [role="rowheader"]')]
-          .filter((c) => c.closest('[role="row"]') === row);
-        lines.push("| " + cells.map((c) => clean(inline(c, []).join(" "))).join(" | ") + " |");
-      }
-      lines.push("</table>");
-      return;
-    }
     if (t === "TABLE") {
       const cap = el.querySelector(":scope > caption");
       if (cap) lines.push(`## ${clean(cap.innerText)}`);
@@ -164,29 +148,16 @@
       return;
     }
     if (el.getAttribute("data-agent-done")) { el.removeAttribute("data-agent-done"); return; }
-    if (shownFirst.has(el)) return;
-    if (el.shadowRoot) { for (const c of kids(el)) walk(c, depth + 1); return; }
     const hasBlockChild = [...el.children].some((c) => BLOCK.has(c.tagName) || c.tagName === "TABLE" || c.tagName === "IFRAME" || c.tagName === "CANVAS");
     if (!hasBlockChild) {
       const s = clean(inline(el, []).join(" "));
       if (s) lines.push(/^H[1-6]$/.test(t) ? `${"#".repeat(+t[1])} ${s}` : s);
       return;
     }
-    for (const c of kids(el)) walk(c, depth + 1);
+    for (const c of el.childNodes) walk(c, depth + 1);
   };
 
   document.querySelectorAll("[data-aid]").forEach((e) => e.removeAttribute("data-aid"));
-  // open dialogs and modals sit in front of the page: show them first, so the model deals with them first
-  const DIALOG = 'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
-  const shownFirst = new Set();
-  for (const d of document.querySelectorAll(DIALOG)) {
-    if (d.parentElement && d.parentElement.closest(DIALOG)) continue;
-    if (!(d.checkVisibility ? d.checkVisibility() : d.getClientRects().length)) continue;
-    lines.push("=== OPEN DIALOG, in front of the page (deal with it first: close it or answer it) ===");
-    walk(d, 0);
-    lines.push("=== END OF DIALOG ===");
-    shownFirst.add(d);
-  }
   if (document.body) walk(document.body, 0);
   // collapse duplicate consecutive lines
   const out = [];

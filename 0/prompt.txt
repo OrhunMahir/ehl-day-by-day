@@ -1,0 +1,5 @@
+Hayır merge etmeyelim bundan sonra run işlemlerini sadece 1 arkadaş yapıcak karışıklık olmasın diye ve aynı şeyleri tekrar tekrar denemeyelim diye
+
+---
+
+koşuları julien yapacak, dosyaları ona göre düzelt

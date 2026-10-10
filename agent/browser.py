@@ -9,7 +9,7 @@ import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 
-OBSERVE_JS = (Path(__file__).parent / "observe.js").read_text()
+OBSERVE_JS = (Path(__file__).parent / "observe.js").read_text(encoding="utf-8")
 FETCH_JS = """async (url) => {
   const response = await fetch(url, {credentials: "include"});
   const bytes = new Uint8Array(await response.arrayBuffer());
@@ -40,7 +40,7 @@ class _HtmlText(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag in ("script", "style"):
-            self.skip -= 1
+            self.skip = max(0, self.skip - 1)  # a stray closing tag must not hide the rest
 
     def handle_data(self, data):
         if not self.skip:
@@ -344,12 +344,16 @@ class Tab:
             response = await self.page.context.request.get(url)
             return response.status, response.headers, await response.body()
 
-    async def _render_readonly(self, url: str) -> str:
+    async def _render_readonly(self, url: str, html: bytes | None = None) -> str:
         """A page rendered in a background tab with this tab's session, as text: hidden decoys are filtered like in
         any page view. Element numbers are left out (the tab closes); links keep their target."""
         scratch = await self.page.context.new_page()
         self.scratch_pages.add(scratch)
         try:
+            if html is not None:  # already fetched: serve it from memory, so the address is not requested twice
+                async def serve(route):
+                    await route.fulfill(status=200, content_type="text/html; charset=utf-8", body=html)
+                await scratch.route(lambda address: address == url, serve, times=1)
             await scratch.goto(url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(0.5)
             parts = []
@@ -389,7 +393,7 @@ class Tab:
         url = url if "://" in url else self._absolute(url)
         status, headers, data = await self._fetch_bytes(url)
         if "html" in headers.get("content-type", ""):
-            text = await self._render_readonly(url)
+            text = await self._render_readonly(url, html=data)
             return f"HTTP {status}, page {url} (read-only view; open it with goto to interact):\n" + text[:MAX_OBSERVATION]
         name = url.rstrip("/").split("/")[-1].split("?")[0] or "download"
         disposition = headers.get("content-disposition", "")

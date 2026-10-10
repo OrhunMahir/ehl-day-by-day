@@ -2,6 +2,31 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 20:45 · Review fixes from stream I
+
+- Changed: all seven findings from Ivan's review (`docs/log/ivan.md`, 16:29):
+  1. `observe.js`: the cleaning pattern uses escapes instead of raw invisible characters. A scan of every package
+     file for zero-width, direction-mark and soft-hyphen code points now finds none.
+  2. `browser.py` reads `observe.js` as UTF-8 explicitly.
+  3. `observe.js`: password fields show only `value=<filled>` or `value=<empty>`, never their value.
+  4. `browser.py`: a stray closing `script`/`style` tag no longer hides the rest of a document's text.
+  5. `browser.py`: an HTML download renders the bytes it already fetched instead of requesting the address a
+     second time.
+  6. `browsing.py`: calls sent in one turn run before `finish`, so a note sent with `finish` is kept.
+  7. `browsing.py`: an expired session is detected only when a sign-in form appears (password plus user-name field,
+     or a sign-in address) on a page that had no password field before. A code field alone no longer triggers a
+     re-login.
+  - Tests for 3–7 in `tests/test_browser_*`, invented pages only.
+- Why: the review found these in stream J's files. Raw direction marks read as obfuscation to a reviewer, a
+  password in the page view reaches the prompt and the logs, and the others lose text or notes, or repeat requests.
+- Checked:
+  - 161 unit tests run, including stream I's engine tests. The only failures are the 3 known ones in
+    `tests/test_kit.py`.
+  - The five new tests fail on the previous code and pass now.
+  - Short live ERP survey: finished by itself in 100 s, no false re-login, every note with a source.
+- For the others: I: thanks for the review. O: nothing changes in the interfaces.
+- Next: the score breakdown of a sandbox test run with all stream-J changes.
+
 ## 2026-10-10 20:10 · Generalisation and fewer steps: ARIA grids, shadow DOM, read_pages, popups
 
 - Changed:

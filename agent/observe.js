@@ -8,7 +8,7 @@
   const BLOCK = new Set(["DIV", "P", "SECTION", "ARTICLE", "MAIN", "HEADER", "FOOTER", "NAV", "ASIDE", "UL", "OL",
     "LI", "H1", "H2", "H3", "H4", "H5", "H6", "FORM", "FIELDSET", "LEGEND", "TR", "DL", "DT", "DD", "PRE", "BLOCKQUOTE",
     "DETAILS", "SUMMARY", "BR", "HR", "TABLE", "CAPTION", "FIGURE", "FIGCAPTION", "LABEL", "DIALOG"]);
-  const clean = (s) => (s || "").replace(/[​-‏⁠﻿­]/g, "").replace(/\s+/g, " ").trim();
+  const clean = (s) => (s || "").replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "").replace(/\s+/g, " ").trim();
   // text the eye would get from hovering: a hidden tooltip, or a title/aria-label on a plain element
   const hint = (el) => {
     const parts = [];
@@ -84,7 +84,7 @@
       if (type === "submit" || type === "button") return `[${id}] button "${el.value}" ${extra.join(" ")}`;
       if (type === "file") return `[${id}] file-input name=${el.name}`;
       const ph = el.placeholder ? ` placeholder="${el.placeholder}"` : "";
-      return `[${id}] input(${type}) name=${el.name}${lbl ? ` label="${lbl}"` : ""}${ph} value="${el.value}"${el.readOnly ? " readonly" : ""} ${extra.join(" ")}`;
+      return `[${id}] input(${type}) name=${el.name}${lbl ? ` label="${lbl}"` : ""}${ph} value=${type === "password" ? (el.value ? "<filled>" : "<empty>") : `"${el.value}"`}${el.readOnly ? " readonly" : ""} ${extra.join(" ")}`;
     }
     if (t === "TEXTAREA") return `[${id}] textarea name=${el.name} value="${clean(el.value).slice(0, 300)}"`;
     if (t === "SELECT") {

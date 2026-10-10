@@ -166,6 +166,10 @@ class Orchestrator:
             return f"The facts could not be priced: {error}. Correct this and call price_bid again."
         self.facts_data, self.priced = merged, result
         self.log("[lead] facts " + json.dumps(merged, ensure_ascii=False))
+        try:
+            self.log("[lead] engine working:\n" + result.explain())
+        except Exception as error:  # noqa: BLE001 - the explanation is for the log only
+            self.log(f"[lead] engine working not available: {error}")
         return json.dumps({"answer": result.answer, "issues": result.issues, "incomplete": result.incomplete,
                            "omitted": result.omitted}, ensure_ascii=False)
 
@@ -184,7 +188,9 @@ class Orchestrator:
                       if facts.norm_key(requirement.requirement) == facts.norm_key(position.requirement)}
             return bool(groups) and groups <= searched
 
-        if len(result.issues) <= 1 and all(conclusive(p) for p in collected.positions if p.position in unresolved):
+        # the engine's own remarks about the unmatched positions do not count as open questions
+        open_questions = [issue for issue in result.issues if "no active material matches" not in issue]
+        if not open_questions and all(conclusive(p) for p in collected.positions if p.position in unresolved):
             return result
         kept = [position for position in collected.positions if position.position not in unresolved]
         partial = engine.evaluate(dataclasses.replace(collected, positions=kept))
@@ -284,8 +290,8 @@ class Orchestrator:
     async def run(self):
         minutes = round((self.submit_from - time.time()) / 60)
         messages = [
-            {"role": "system", "content": ORCHESTRATOR.format(minutes=minutes,
-                                                               round_minutes=round(INVESTIGATION_SECONDS / 60))},
+            {"role": "system", "content": ORCHESTRATOR.format(
+                minutes=minutes, round_minutes=round(INVESTIGATION_SECONDS / 60)) + "\n\n" + facts.FILLING_GUIDE},
             {"role": "user", "content": self.context() + "\n\n# Websites\n" + "\n".join(
                 f"- {a['siteId']}: {a['url']}" for a in self.task["access"]) + "\n\nBegin."},
         ]

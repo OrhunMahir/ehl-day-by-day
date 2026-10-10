@@ -2,6 +2,25 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 16:00 · Merged main (streams J and I), no-bid check adapted to the new engine
+
+- Changed: merged `main` into `stream-o` (stream J: session re-login, bounded actions, wrap-up reports; stream I:
+  `FactsBuilder`, `explain()`, filling guide, closest candidates on a no-bid). `agent/agent.py`: the check that
+  decides whether a "no bid" is final ignores the engine's own remarks about unmatched positions (the new engine
+  adds a "closest:" remark, which made every no-bid look unfinished); the lead's prompt ends with
+  `facts.FILLING_GUIDE`; `result.explain()` is written to the run log after every `price_bid`.
+- Why: teammates' work is on `main`, and a test run should measure all three streams together.
+- Checked: the merge had no conflicts; 134 of 137 unit tests pass, the 3 failures are still the starter kit's
+  tests. The three invented no-bid cases behave as before the merge. Sandbox run `run_de6c7f380e198960` of this
+  state was started; result not in. Not done: stream I's suggestion of two tools (`add_facts` with
+  `facts.update_schema()` and a parameterless `price_bid`); the lead still sends changed top-level fields to
+  `price_bid`.
+- Learned: a change in the wording or number of the engine's issues changes what the lead's guard does; the guard
+  should read a field of the result, not its texts.
+- For the others: I — could `BidResult` say which positions had no match and whether the no-bid is conclusive
+  (group searched on purpose, nothing else open)? Then `agent.py` no longer needs to read issue texts. J — nothing.
+- Next: read this run and the two before it; then switch to `add_facts`.
+
 ## 2026-10-10 15:50 · Bid engine wired into the lead; first accepted bid (quality 5) and what it showed
 
 - Changed: merged `main` (stream I's engine) into `stream-o`. `agent/agent.py`: new lead tool `price_bid`, which

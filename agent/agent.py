@@ -70,6 +70,9 @@ COLLECT_SHARE = 0.45  # investigations end here
 SUBMIT_SHARE = 0.45  # from here on the lead has to price and submit
 # One investigation may take this long, so that a round of follow-ups fits before the investigations end.
 INVESTIGATION_SECONDS = 240
+# How much each role's model thinks before it answers; None leaves the provider's default.
+LEAD_REASONING: str | None = None
+WORKER_REASONING: str | None = None  # browsing sub-agents and the submission agent
 # A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
 INVESTIGATION_GRACE_SECONDS = 30
 FORCE_SUBMIT = {"type": "function", "function": {"name": "submit_bid"}}
@@ -78,8 +81,10 @@ PRICE_ATTEMPTS = 2  # forced price_bid calls that may fail before the lead has t
 
 
 class Orchestrator:
-    def __init__(self, task: dict, token: str | None, tabs: dict[str, Tab], model: Model, started: float):
+    def __init__(self, task: dict, token: str | None, tabs: dict[str, Tab], model: Model, started: float,
+                 worker_model: Model | None = None):
         self.task, self.token, self.tabs, self.model = task, token, tabs, model
+        self.worker_model = worker_model or model  # the model of the sub-agents that work the websites
         self.credentials = {a["siteId"]: a.get("credentials", {}) for a in task["access"]}
         self.started = started
         now = time.time()
@@ -144,7 +149,7 @@ class Orchestrator:
             if time.time() >= self.collect_until:
                 return "No time left to investigate: call submit_bid now with what you have."
             until = min(self.collect_until, time.time() + INVESTIGATION_SECONDS)
-            agent = BrowsingAgent(self.model, {site: self.tabs[site]}, self.credentials, f"{task}\n\n{PROVENANCE}",
+            agent = BrowsingAgent(self.worker_model, {site: self.tabs[site]}, self.credentials, f"{task}\n\n{PROVENANCE}",
                                   self.context(), name=site, deadline=until, log=self.log)
             try:
                 return await asyncio.wait_for(agent.run(), timeout=until - time.time() + INVESTIGATION_GRACE_SECONDS)
@@ -229,7 +234,7 @@ class Orchestrator:
                 "and confirm what is entered, then report.\n\nANSWER:\n"
                 + json.dumps(answer, ensure_ascii=False, indent=1) + self.left_out(answer)
                 + (f"\n\nHINTS:\n{hints}" if hints else ""))
-        agent = SubmissionAgent(self.model, sites, self.credentials, task, self.context(),
+        agent = SubmissionAgent(self.worker_model, sites, self.credentials, task, self.context(),
                                 deadline=self.deadline, log=self.log)
         self.submitted = answer
         report = await agent.run()
@@ -395,7 +400,8 @@ def validate(answer: dict, schema: dict) -> list[str]:
 async def main() -> int:
     started = time.time()
     task, token = contract.load_run()
-    model = Model()
+    model = Model(reasoning_effort=LEAD_REASONING)
+    worker_model = Model(reasoning_effort=WORKER_REASONING)
     print(f"Run {task.get('run_id') or '(local scouting run)'}; model {model.provider}/{model.model}; "
           f"sites: {', '.join(a['siteId'] for a in task['access'])}", flush=True)
     async with async_playwright() as playwright:
@@ -407,9 +413,12 @@ async def main() -> int:
                 page = await page.context.new_page()
             await page.goto(access["url"], wait_until="domcontentloaded")
             tabs[access["siteId"]] = Tab(access["siteId"], page)
-        lead = Orchestrator(task, token, tabs, model, started)
-        await lead.run()
-    print(f"Done in {time.time() - started:.0f}s; {model.usage()}; submitted: "
+        lead = Orchestrator(task, token, tabs, model, started, worker_model)
+        try:  # nothing may outlive the run's time, whatever is still waiting on a page or a model
+            await asyncio.wait_for(lead.run(), timeout=lead.deadline - time.time() + 5)
+        except TimeoutError:
+            lead.log("[lead] stopped at the end of the run's time")
+    print(f"Done in {time.time() - started:.0f}s; lead {model.usage()}; workers {worker_model.usage()}; submitted: "
           f"{json.dumps(lead.submitted, ensure_ascii=False) if lead.submitted else 'nothing'}", flush=True)
     return 0
 

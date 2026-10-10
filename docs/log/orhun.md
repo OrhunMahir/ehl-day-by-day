@@ -2,6 +2,30 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 16:25 · First signed bid with a position (18.3), hard stop, reasoning setting, proxy-only model client
+
+- Changed: merged `main` again (stream J: paged lists, four-part reports, structured sources). `agent/agent.py`:
+  everything is stopped 5 seconds after the run's time is over, whatever is still waiting; the lead and the
+  sub-agents get separate model objects with an optional `reasoning_effort` (default: not sent, as before).
+  `agent/llm.py`: the direct provider addresses used as fallbacks are gone; a provider without its proxy variable
+  now refuses to start. `docs/streams.md`: note on trying an OpenAI model later.
+- Why: one test run hung for ten minutes in the automatic submission, which had no time limit. The lead takes 3.5
+  to 5.5 minutes to write the facts, so thinking less is worth measuring. Model calls must only go through the
+  platform's proxy.
+- Checked: `run_1157678a4248dfe3` (state before this entry): eligible, quality 18.3 in 16 minutes, a bid with one
+  position and four left out: decision 5, reference 5, discount 5, total 0, consistency 0, position 1 quantity
+  1.95 and project bonus 1.3, its material, unit price and lead time 0. `run_d944694135ffa2d7` hung after
+  "time to submit" and was cancelled. A stand-in run that hangs is stopped 5 seconds after its time. One call each
+  showed the hosted model accepts `reasoning_effort` "medium" and "low". 140 of 143 unit tests pass (the 3
+  failures are the starter kit's). Running, results not in: `run_de6c7f380e198960` and `run_eb07518a30a4477d`
+  (default thinking), `run_d48922acb05fd66c` (lead "low"), `run_a56a648467053fe6` (lead and sub-agents "low").
+- Learned: with a position in the bid the form reaches the signature. What limits the score now is the data:
+  four of five materials were not found and the one found was wrong.
+- For the others: J and I — the next points are in material matching: the catalogue groups of the specification
+  searched in the ERP with every candidate read, and exact attribute values in the facts. Nothing changes in the
+  interfaces.
+- Next: compare the four runs and submit the best version for a scored run (Orhun asked for it at 16:20).
+
 ## 2026-10-10 16:00 · Merged main (streams J and I), no-bid check adapted to the new engine
 
 - Changed: merged `main` into `stream-o` (stream J: session re-login, bounded actions, wrap-up reports; stream I:

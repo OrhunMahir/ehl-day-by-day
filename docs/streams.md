@@ -153,6 +153,14 @@ them, and one signed bid is submitted before the clock ends, every time.
 8. `tests/test_kit.py`: three tests still target the starter kit's `solve()` and fail; rewrite them for the
    current `agent.py`.
 9. Test runs for all streams, every `atira submit`, Entire and the repository.
+10. Later, once a bid with positions is signed reliably: try an OpenAI model in place of Qwen (Orhun's idea,
+    Sat 16:05; the team has OpenAI credits from the event, about 70 USD). What is known: `llm.py` already switches
+    with `AGENT_PROVIDER=openai` and `AGENT_MODEL`; the key goes in a team secret named `OPENAI_API_KEY`, never in
+    the package or a chat; calls still go through the platform's proxy and count at the model's published price in
+    the cost ranking. Open: the exact model id (Orhun named it "GPT Sol 6.1"; confirm the id and that the proxy
+    accepts it), and how to select the provider in the sandbox, since a team secret must be at least 16 characters
+    long and "openai" is not, so the choice has to be made in code. Compare on the same package: quality first,
+    then time per lead decision, then cost.
 
 **Not this stream.** How a page is read (`browser.py`, `observe.js`, `browsing.py`) and how a price is calculated
 (`engine/`).

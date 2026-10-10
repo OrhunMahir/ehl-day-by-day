@@ -1,0 +1,5 @@
+also the real test run finished and got worse results. Please systematize what we tried and what didnt work, and then we will create a new branch, revert to the codebase that achieved 18.3 on the test run, and then work on top of it. apparently, the direction at this branch was the wrong one
+
+---
+
+I agree with you, go for it.

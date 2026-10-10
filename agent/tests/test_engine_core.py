@@ -97,6 +97,20 @@ class RevisionAndMaterial(unittest.TestCase):
         f.materials[0] = replace(f.materials[0], certification="EN 9999")
         self.assertEqual(build_bid(f)["decision"], "no_bid")
 
+    def test_unsearched_group_is_not_a_no_bid(self):
+        f = core_facts()
+        f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
+        result = evaluate(f)
+        self.assertEqual(result.answer["decision"], "bid")
+        self.assertEqual([p["position"] for p in result.answer["positions"]], ["1"])
+        self.assertTrue(any("not searched" in i for i in result.issues))
+
+    def test_searched_group_without_results_is_a_no_bid(self):  # rule 3
+        f = core_facts()
+        f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
+        f.searched_groups = ["g-b"]
+        self.assertEqual(build_bid(f)["decision"], "no_bid")
+
     def test_incomplete_requirement_is_not_a_no_bid(self):
         f = core_facts()
         f.revisions[1].requirements[0] = replace(f.revisions[1].requirements[0], bore_mm=None)

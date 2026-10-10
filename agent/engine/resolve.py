@@ -232,6 +232,16 @@ def requirement_complete(req: Requirement) -> bool:
     return None not in (req.bore_mm, req.stroke_mm, req.pressure_bar, req.mounting)
 
 
+def searched(facts: Facts, req: Requirement) -> bool:
+    """The ERP was searched for this requirement: its Kataloggruppe is recorded as searched or a candidate of that
+    group is known. Without a Kataloggruppe, any known material counts as a search."""
+    group = norm_key(req.catalogue_group)
+    if not group:
+        return bool(facts.materials)
+    return (group in {norm_key(g) for g in facts.searched_groups}
+            or any(norm_key(m.catalogue_group) == group for m in facts.materials))
+
+
 def select_material(facts: Facts, req: Requirement, position: str, issues: list[str]) -> Material | None:
     """Rule 3: the active material whose bore, stroke, pressure, mounting and certification match exactly."""
     hits = [m for m in facts.materials if matches(m, req)]

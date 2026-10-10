@@ -73,5 +73,89 @@ class Money(unittest.TestCase):
         self.assertEqual(sum(shares.values()), D("517.29"))
 
 
+class Json(unittest.TestCase):
+    """facts.from_dict and facts.json_schema: what a model fills through one tool call."""
+
+    DATA = {
+        "tender_reference": "T-TEST-1",
+        "scenario_date": "2030-03-15T10:00:00Z",
+        "bidder_domain": "bidder.test",
+        "director_address": "chef@bidder.test",
+        "positions": [{"position": "1", "quantity": "10", "unit": "Stück", "requirement": "A"},
+                      {"position": "2", "quantity": 3, "unit": "Satz", "requirement": "B"}],
+        "quantity_changes": [{"qa_number": "Q1", "position": "1", "quantity": "12",
+                              "source": {"site": "tender", "date": "01.02.2030"}}],
+        "amendments": [{"qa_number": "Q2", "revision": "R-2", "requirement": "A", "attribute": "stroke_mm",
+                        "value": "300"}],
+        "assignments": [{"qa_number": "Q3", "position": "1", "kind": "packaging", "key": "VP-1"}],
+        "revisions": [{"revision": "R-2", "current": True, "date": "2030-01-20", "requirements": [
+            {"requirement": "A", "bore_mm": "50", "stroke_mm": "300", "pressure_bar": "160", "mounting": "Flansch",
+             "certification": "keine gefordert", "catalogue_group": "G-A"}]}],
+        "materials": [{"material_number": "M-A1", "active": "aktiv", "catalogue_group": "G-A", "bore_mm": 50, "stroke_mm": "300,0",
+                       "pressure_bar": "160", "mounting": "Flansch", "stock": "1.250", "pieces_per_carton": "1,250", "stock_lead_weeks": "1",
+                       "conditions": [{"valid_from": "01.01.2030, 00:00:00 UTC", "valid_to": "31.12.2030",
+                                       "price_unit": "1", "scales": [{"min_quantity": "1", "price": "1.234,50"}]}]}],
+        "discount_approvals": [{"reference": "T-TEST-1", "percent": "4", "min_order_value": "3.000,00",
+                                "source": {"date": "2030-03-01T09:00:00Z", "sender": "Chef <chef@bidder.test>"}}],
+        "metal_indices": [{"reference": "T-TEST-1", "key": "IX-1", "windows": [
+            {"rate_eur_per_kg": "3,15", "valid_from": "2030-03-01", "valid_to": None}]}],
+    }
+
+    def test_from_dict_converts_types(self):
+        from datetime import datetime, timezone
+        from facts import AssignmentKind, Attr, Facts, from_dict
+        f = from_dict(Facts, self.DATA)
+        self.assertEqual(f.scenario_date, datetime(2030, 3, 15, 10, tzinfo=timezone.utc))
+        self.assertEqual((f.positions[0].quantity, f.positions[1].unit), (D(10), Unit.SET))
+        self.assertEqual(f.quantity_changes[0].source.date, date(2030, 2, 1))
+        self.assertEqual((f.amendments[0].attribute, f.amendments[0].value), (Attr.STROKE, "300"))
+        self.assertEqual(f.assignments[0].kind, AssignmentKind.PACKAGING)
+        m = f.materials[0]
+        self.assertEqual((m.active, m.stroke_mm, m.stock, m.stock_lead_weeks), (True, D("300.0"), D("1.250"), 1))
+        self.assertEqual(m.pieces_per_carton, D("1.250"))   # a lone separator is a decimal mark; pass a locale
+        self.assertEqual(m.conditions[0].scales[0].price, D("1234.50"))
+        self.assertEqual(f.discount_approvals[0].min_order_value, D(3000))
+        self.assertIsNone(f.metal_indices[0].windows[0].valid_to)
+
+    def test_from_dict_result_prices(self):
+        from engine import build_bid
+        from facts import Facts, from_dict
+        answer = build_bid(from_dict(Facts, {**self.DATA, "positions": self.DATA["positions"][:1]}))
+        self.assertEqual(answer["positions"][0]["base_unit_price"], 1234.5)
+        self.assertEqual(answer["positions"][0]["quantity"], 12)
+
+    def test_unknown_field_rejected(self):
+        from facts import Facts, from_dict
+        with self.assertRaises(ValueError) as ctx:
+            from_dict(Facts, {**self.DATA, "tender_ref": "x"})
+        self.assertIn("tender_ref", str(ctx.exception))
+
+    def test_bad_value_names_the_field(self):
+        from facts import Facts, from_dict
+        bad = {**self.DATA, "positions": [{"position": "1", "quantity": "zehn", "requirement": "A"}]}
+        with self.assertRaises(ValueError) as ctx:
+            from_dict(Facts, bad)
+        self.assertIn("quantity", str(ctx.exception))
+
+    def test_schema_covers_every_field(self):
+        import json
+        from facts import Facts, json_schema
+        schema = json_schema()
+        self.assertEqual(schema["required"], ["tender_reference", "scenario_date"])
+        self.assertEqual(set(schema["properties"]), {f for f in Facts.__dataclass_fields__})
+        material = schema["properties"]["materials"]["items"]
+        self.assertFalse(material["additionalProperties"])
+        self.assertIn("conditions", material["properties"])
+        json.dumps(schema)
+
+    def test_mass(self):
+        from facts import mass_kg
+        self.assertEqual(mass_kg("625 g/Stück"), D("0.625"))
+        self.assertEqual(mass_kg("0,7 kg"), D("0.7"))
+        self.assertEqual(mass_kg("3100", "g"), D("3.1"))
+        with self.assertRaises(ValueError):
+            mass_kg("625")
+
+
 if __name__ == "__main__":
     unittest.main()

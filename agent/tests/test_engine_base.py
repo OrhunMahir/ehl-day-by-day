@@ -72,12 +72,12 @@ def core_facts() -> Facts:
             SpecRevision("R-2", current=True, date=date(2030, 1, 20), requirements=[req_a, req_b]),
         ],
         materials=[
-            material("M-A1", 50, 300, 160, "Flansch", "", stock=D(50), stock_lead_weeks=1, production_lead_weeks=6,
+            material("M-A1", 50, 300, 160, "Flansch", "", catalogue_group="G-A", stock=D(50), stock_lead_weeks=1, production_lead_weeks=6,
                      conditions=[condition((1, "70.00"), start=date(2029, 1, 1), end=date(2029, 12, 31)),
                                  condition((1, "100.00"), (10, "90.00"), (50, "80.00"))]),
-            material("M-A2", 50, 300, 160, "Flansch", "", active=False),
-            material("M-A3", 50, 300, 170, "Flansch", ""),
-            material("M-B1", 63, 400, 200, "schwenkauge", "EN 9999", stock=D(5), stock_lead_weeks=2,
+            material("M-A2", 50, 300, 160, "Flansch", "", catalogue_group="G-A", active=False),
+            material("M-A3", 50, 300, 170, "Flansch", "", catalogue_group="G-A"),
+            material("M-B1", 63, 400, 200, "schwenkauge", "EN 9999", catalogue_group="G-B", stock=D(5), stock_lead_weeks=2,
                      production_lead_weeks=8, conditions=[condition((1, "25000"), (10, "24050"), unit=100)]),
         ],
         discount_approvals=[

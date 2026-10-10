@@ -13,7 +13,9 @@ Conventions:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+import types
+import typing
+from dataclasses import MISSING, dataclass, field, fields, is_dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -94,6 +96,17 @@ def dec(value, locale: str | None = None) -> Decimal:
         return Decimal(num)
     except InvalidOperation as exc:
         raise ValueError(f"cannot read {value!r} as a number") from exc
+
+
+_MASS_FACTORS = {"kg": Decimal(1), "g": Decimal("0.001"), "t": Decimal(1000), "mg": Decimal("0.000001")}
+
+
+def mass_kg(text, unit_name: str | None = None) -> Decimal:
+    """A mass in kg from text such as '625 g/Stück' or '0,625 kg'; `unit_name` overrides the unit in the text."""
+    found = re.search(r"\b(mg|kg|g|t)\b", clean(unit_name or str(text)).lower())
+    if not found:
+        raise ValueError(f"no mass unit in {text!r}")
+    return dec(text) * _MASS_FACTORS[found.group(1)]
 
 
 def when(value) -> datetime | date:
@@ -426,6 +439,9 @@ class Facts:
 
     revisions: list[SpecRevision] = field(default_factory=list)
     materials: list[Material] = field(default_factory=list)
+    # Kataloggruppen searched in the ERP, also when the search found nothing. Only a searched requirement without a
+    # matching material makes the bid a no_bid; otherwise the material counts as not yet found.
+    searched_groups: list[str] = field(default_factory=list)
 
     discount_approvals: list[DiscountApproval] = field(default_factory=list)
     condition_groups: list[ConditionGroupRule] = field(default_factory=list)
@@ -436,3 +452,125 @@ class Facts:
     setup_pools: list[SetupPool] = field(default_factory=list)
     project_bonuses: list[ProjectBonus] = field(default_factory=list)
     end_reserves: list[EndReserve] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Plain JSON in and out, so a model can fill the facts through one tool call
+
+def from_dict(cls, data: dict):
+    """Build a facts dataclass (normally `Facts`) from plain JSON: numbers may be strings in German or English
+    format, dates may be ISO or German, enums are given by value. Unknown fields raise, so a typo is not lost."""
+    if not isinstance(data, dict):
+        raise ValueError(f"{cls.__name__}: expected an object, got {type(data).__name__}")
+    hints = typing.get_type_hints(cls)
+    names = {f.name for f in fields(cls)}
+    unknown = set(data) - names
+    if unknown:
+        raise ValueError(f"{cls.__name__}: unknown field(s) {', '.join(sorted(unknown))}")
+    kwargs = {}
+    for name, value in data.items():
+        try:
+            kwargs[name] = _convert(hints[name], value)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"{cls.__name__}.{name}: {exc}") from exc
+    return cls(**kwargs)
+
+
+def _members(tp) -> tuple[list, bool]:
+    if typing.get_origin(tp) in (typing.Union, types.UnionType):
+        args = typing.get_args(tp)
+        return [a for a in args if a is not type(None)], type(None) in args
+    return [tp], False
+
+
+def _convert(tp, value):
+    options, optional = _members(tp)
+    if value is None or (optional and value == ""):
+        if optional:
+            return None
+        raise ValueError("value required")
+    if datetime in options or date in options:
+        return when(value)
+    if str in options and Decimal in options:          # an amended attribute: number or text
+        return value if isinstance(value, str) else dec(value)
+    tp = options[0]
+    origin = typing.get_origin(tp)
+    if origin is list:
+        if not isinstance(value, list):
+            raise ValueError("expected a list")
+        return [_convert(typing.get_args(tp)[0], v) for v in value]
+    if origin is dict:
+        return {str(k): _convert(typing.get_args(tp)[1], v) for k, v in value.items()}
+    if tp is Decimal:
+        return dec(value)
+    if tp is bool:
+        if isinstance(value, bool):
+            return value
+        return norm_text(str(value)) in {"true", "yes", "ja", "1", "aktiv", "active"}
+    if tp is int:
+        number = dec(value)
+        if number != number.to_integral_value():
+            raise ValueError(f"{value!r} is not a whole number")
+        return int(number)
+    if tp is str:
+        return clean(str(value))
+    if tp is Unit:
+        found = unit(value) if not isinstance(value, Unit) else value
+        if found is None:
+            raise ValueError(f"unknown unit {value!r}")
+        return found
+    if isinstance(tp, type) and issubclass(tp, Enum):
+        try:
+            return tp(value)
+        except ValueError:
+            return tp[str(value).upper()]
+    if is_dataclass(tp):
+        return from_dict(tp, value)
+    raise TypeError(f"unsupported type {tp}")
+
+
+def json_schema(cls=None) -> dict:
+    """JSON Schema of a facts dataclass (default `Facts`) for a model's tool definition."""
+    cls = cls or Facts
+    hints = typing.get_type_hints(cls)
+    props, required = {}, []
+    for f in fields(cls):
+        props[f.name] = _schema(hints[f.name])
+        if f.default is MISSING and f.default_factory is MISSING:
+            required.append(f.name)
+    schema = {"type": "object", "properties": props, "additionalProperties": False}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def _schema(tp) -> dict:
+    options, optional = _members(tp)
+    if datetime in options or date in options:
+        out = {"type": "string", "description": "date or timestamp, ISO 8601 (UTC) or DD.MM.YYYY"}
+    elif str in options and Decimal in options:
+        out = {"type": ["string", "number"]}
+    else:
+        tp = options[0]
+        origin = typing.get_origin(tp)
+        if origin is list:
+            out = {"type": "array", "items": _schema(typing.get_args(tp)[0])}
+        elif origin is dict:
+            out = {"type": "object", "additionalProperties": _schema(typing.get_args(tp)[1])}
+        elif tp is Decimal:
+            out = {"type": ["number", "string"]}
+        elif tp is bool:
+            out = {"type": "boolean"}
+        elif tp is int:
+            out = {"type": "integer"}
+        elif tp is str:
+            out = {"type": "string"}
+        elif isinstance(tp, type) and issubclass(tp, Enum):
+            out = {"type": "string", "enum": [m.value for m in tp]}
+        elif is_dataclass(tp):
+            out = json_schema(tp)
+        else:
+            raise TypeError(f"unsupported type {tp}")
+    if optional:
+        out = {"anyOf": [out, {"type": "null"}]}
+    return out

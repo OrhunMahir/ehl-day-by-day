@@ -62,6 +62,7 @@ ACTION_SECONDS = 60  # one browser action may take at most this long
 PREVIOUS_VIEW_CHARS = 4000  # the page view before the newest one is cut to this length
 SHORTENED = "\n... (older page view shortened to save space; your notes keep what mattered)"
 NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
+WAIT_SECONDS = 45  # one `wait` for the shared board to change; under ACTION_SECONDS
 
 
 def tool_schemas(multi_site: bool) -> list[dict]:
@@ -156,6 +157,13 @@ def _no_thinking(model) -> dict:
     return {}
 
 
+BOARD = """
+You are one of several assistants, one per website, connected only by a shared board. Record on the board every
+fact the bid rules need that your website shows, whatever kind it is. Before each of your steps you see what changed
+on the board: what the other assistants recorded and what the bid still needs. Take on every open item your
+website can answer, the ones naming positions first, e.g. a search by a key another website gave. Never try to open
+another website. When nothing on your website is left for now, call wait: it returns as soon as the board changes."""
+
 RECORDING = """
 In this job you save facts with `record`, as typed records, not with notes: wherever these rules say note, use
 record. A record is the only thing that counts and it is kept at once; record what you read before you leave the
@@ -167,10 +175,14 @@ finish with a one-line summary."""
 class BrowsingAgent:
     def __init__(self, model, tabs: dict[str, Tab], credentials: dict[str, dict], task: str, context: str,
                  name: str, deadline: float, max_steps: int = 60, log=print, record=None,
-                 record_schema: dict | None = None):
+                 record_schema: dict | None = None, board=None):
         """`record`, when given, is a function that saves typed facts (`record_schema` describes them) and returns
         what it made of them: the agent then records facts with it instead of taking notes, and needs no wrap-up
-        report at the end, because whatever it recorded is already saved."""
+        report at the end, because whatever it recorded is already saved. `board`, when given, is the shared board
+        (board.Board): the agent records there, sees before each step what changed on it, and can wait for it."""
+        self.board, self.seen = board, 0
+        if board is not None and record is None:
+            record = lambda facts: board.record(name, facts)  # noqa: E731
         self.record, self.record_schema = record, record_schema
         self.model, self.tabs, self.credentials = model, tabs, credentials
         self.task, self.context, self.name = task, context, name
@@ -212,6 +224,15 @@ class BrowsingAgent:
         return await tab.observe()
 
     async def _run_tool(self, name: str, args: dict) -> str:
+        if name == "wait":
+            if self.board is None:
+                raise ValueError("Unknown tool wait")
+            before = self.seen
+            changed = await self.board.wait(before, min(WAIT_SECONDS, max(1.0, self.deadline - time.time() - 10)))
+            if not changed:
+                return "No change on the board yet. Explore your website for what the open items will need, or wait again."
+            self.seen = self.board.version
+            return "The board changed:\n" + self.board.news(self.name, before)
         if name == "record":
             if not self.record:
                 raise ValueError("Unknown tool record")
@@ -311,9 +332,12 @@ class BrowsingAgent:
         sites = "\n".join(f"- {site_id}: {tab.page.url if tab.page.url != 'about:blank' else ''} (login with the login tool)"
                           for site_id, tab in self.tabs.items())
         messages = [
-            {"role": "system", "content": SYSTEM + (RECORDING if self.record else "")},
+            {"role": "system", "content": SYSTEM + (RECORDING if self.record else "") + (BOARD if self.board else "")},
             {"role": "user", "content": f"{self.context}\n\n# Your websites\n{sites}\n\n# Your task\n{self.task}"},
         ]
+        if self.board is not None:
+            self.seen = self.board.version
+            messages[1]["content"] += "\n\n# The board now\n" + self.board.news(self.name, 0)
         # open each site so the model starts from a real page view
         for tab in self.tabs.values():
             try:
@@ -328,8 +352,14 @@ class BrowsingAgent:
                 "facts hold now, or why the update was refused.",
                 "parameters": {"type": "object", "properties": {"facts": self.record_schema or {"type": "object"}},
                                "required": ["facts"]}}}]
+        if self.board is not None:  # the agent stays for the whole run: no finish, a wait instead
+            tools = [t for t in tools if t["function"]["name"] != "finish"] + [{"type": "function", "function": {
+                "name": "wait", "description": "Wait until the shared board changes (at most a minute) and see what "
+                "changed; for when nothing on your website is left for now.",
+                "parameters": {"type": "object", "properties": {}, "required": []}}}]
         save = "record" if self.record else "note"
         reserve = 5 if self.record else WRAP_UP_RESERVE  # nothing to write at the end: what is recorded is saved
+        self.reserve = reserve
         warned_time = warned_steps = False
         since_note = 0
         for step in range(self.max_steps):
@@ -344,6 +374,9 @@ class BrowsingAgent:
                 warned_steps = True
                 messages.append({"role": "user", "content": f"Only {self.max_steps - step} steps left: save unsaved "
                                                             f"facts with {save}, then call finish."})
+            if self.board is not None and self.board.version > self.seen:
+                messages.append({"role": "user", "content": "Board update:\n" + self.board.news(self.name, self.seen)})
+                self.seen = self.board.version
             if since_note >= NOTE_EVERY:
                 since_note = 0
                 messages.append({"role": "user", "content": f"You have taken {NOTE_EVERY} actions without saving. If "
@@ -383,7 +416,7 @@ class BrowsingAgent:
                 except Exception as error:  # noqa: BLE001
                     result = f"Error: {str(error).splitlines()[0][:400]}"
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
-                if call.function.name in ("note", "record"):
+                if call.function.name in ("note", "record", "wait"):
                     since_note = 0
                     self.unnoted = []
                 else:
@@ -405,7 +438,7 @@ class BrowsingAgent:
         returns quickly, so each attempt is capped and retried while the deadline allows. None: no answer in time."""
         cap = QUICK_CALL_SECONDS if getattr(self.model, "thinking", None) is False else CALL_SECONDS
         for attempt in range(1, CALL_ATTEMPTS + 1):
-            budget = self.deadline - WRAP_UP_RESERVE - time.time()
+            budget = self.deadline - getattr(self, "reserve", WRAP_UP_RESERVE) - time.time()
             if budget < 10:
                 return None
             limit = min(cap, budget)

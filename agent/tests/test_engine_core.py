@@ -114,6 +114,28 @@ class RevisionAndMaterial(unittest.TestCase):
         f.searched_groups = ["g-b"]
         self.assertEqual(build_bid(f)["decision"], "no_bid")
 
+    def test_requirement_without_group_is_not_a_no_bid(self):          # rule 10: every requirement names one
+        f = core_facts()
+        f.revisions[1].requirements[1] = replace(f.revisions[1].requirements[1], catalogue_group="",
+                                                 pressure_bar=D(999))
+        result = evaluate(f)
+        self.assertEqual(result.answer["decision"], "bid")
+        self.assertIn("2", result.omitted)
+        self.assertTrue(any(n["what"].startswith("the Kataloggruppe of requirement B") for n in result.needed()))
+
+    def test_certification_spacing_does_not_matter(self):
+        f = core_facts()
+        f.materials[3] = replace(f.materials[3], certification="en9999")
+        self.assertEqual(pos(build_bid(f), "2")["material_number"], "M-B1")
+
+    def test_two_matching_materials_choice_does_not_depend_on_order(self):
+        f = core_facts()
+        twin = replace(f.materials[0], material_number="M-A0")
+        f.materials.append(twin)
+        first = pos(build_bid(f), "1")["material_number"]
+        f.materials.reverse()
+        self.assertEqual(pos(build_bid(f), "1")["material_number"], first)
+
     def test_incomplete_requirement_is_not_a_no_bid(self):
         f = core_facts()
         f.revisions[1].requirements[0] = replace(f.revisions[1].requirements[0], bore_mm=None)
@@ -172,6 +194,14 @@ class Discount(unittest.TestCase):
         f = core_facts()
         f.discount_approvals = [a for a in f.discount_approvals if a.min_order_value is None and a.percent == 9]
         self.assertEqual(build_bid(f)["discount_percent"], 0)
+
+    def test_threshold_with_a_position_not_priced_yet_is_flagged(self):   # rule 16
+        f = core_facts()
+        f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]   # position 2 not searched yet
+        result = evaluate(f)
+        self.assertEqual(result.answer["discount_percent"], 0)                # 12 x 90 = 1080 < 3000, for now
+        self.assertTrue(any("may be too low" in i for i in result.issues))
+        self.assertTrue(any(n["kind"] == "verify" and "minimum order value" in n["what"] for n in result.needed()))
 
     def test_threshold_excludes_surcharge_and_setup(self):             # rule 16
         f = core_facts()

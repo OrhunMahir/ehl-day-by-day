@@ -29,6 +29,7 @@ class Line:
     scope: DiscountScope = DiscountScope.BASE
     lead_weeks: int | None = None
     unit_price: Decimal | None = None
+    negative_price: bool = False            # the computed unit price was negative: an input is implausible
 
 
 @dataclass
@@ -40,6 +41,17 @@ class BidResult:
     omitted: list[str] = field(default_factory=list)      # tender positions not in the answer; mark them in the
                                                           # form as "Position auslassen" (rule 9)
     facts: Facts | None = None
+
+    def needed(self) -> list[dict]:
+        """What the lead still has to find ("find") or check ("verify"), in the order to look for it; empty "find"
+        entries mean the facts are complete."""
+        from .needs import needs
+        return [n.as_dict() for n in needs(self.facts, self)]
+
+    @property
+    def complete(self) -> bool:
+        """No fact is missing: nothing to find, no position omitted or incompletely priced."""
+        return not self.omitted and not self.incomplete and not any(n["kind"] == "find" for n in self.needed())
 
     def explain(self) -> str:
         """Plain text for the run log: what each value was computed from and which records counted."""
@@ -90,7 +102,7 @@ def evaluate(facts: Facts) -> BidResult:
     priced = [ln for ln in lines if ln.material is not None and ln.pieces is not None]
     for ln in priced:
         ln.base = base_unit_price(ln.material, ln.pieces, facts, issues)
-    percent = _discount(facts, approval, priced, issues)
+    percent = _discount(approval, priced, len(lines), issues)
     _surcharges(facts, priced, issues)
     _setup_pools(facts, priced, issues)
     _packaging(facts, priced, issues)
@@ -113,6 +125,7 @@ def evaluate(facts: Facts) -> BidResult:
         if ln.unit_price is not None and ln.unit_price < 0:
             issues.append(f"position {ln.position}: unit price {ln.unit_price} is negative; a component is wrong")
             ln.unit_price = None
+            ln.negative_price = True
         if ln.unit_price is None:
             incomplete.append(ln.position)
         unit_price = ln.unit_price if ln.unit_price is not None else ZERO
@@ -126,17 +139,19 @@ def evaluate(facts: Facts) -> BidResult:
 # Order level
 
 
-def _discount(facts: Facts, approval, lines: list[Line], issues: list[str]) -> Decimal:
+def _discount(approval, lines: list[Line], positions: int, issues: list[str]) -> Decimal:
     """Rules 5 and 16: the latest approval's percent, or 0 if its minimum undiscounted order value is not reached.
-    The order value is final pieces times base price, before discount, without surcharges or setup, in cents."""
+    The order value is final pieces times base price, before discount, without surcharges or setup, in cents.
+    `positions` counts all positions: one not priced yet makes the value too low, which is reported."""
     if approval is None:
         return ZERO
     if _valid_percent(approval.percent, issues) != approval.percent:
         return ZERO
     if approval.min_order_value is None:
         return approval.percent
-    if any(ln.base is None for ln in lines):
-        issues.append("discount threshold computed without positions whose base price is unknown")
+    if any(ln.base is None for ln in lines) or len(lines) < positions:
+        issues.append("discount threshold computed without positions whose base price or material is unknown: "
+                      "the order value may be too low")
     value = half_up(sum((ln.pieces * ln.base for ln in lines if ln.base is not None), ZERO))
     return approval.percent if value >= approval.min_order_value else ZERO
 

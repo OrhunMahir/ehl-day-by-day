@@ -1,0 +1,41 @@
+yes, and then write a prompt for aech Julien  and Orhun  to fix the things that belong to them. If there are things that dont belong to both of their streams, you can fix them
+
+---
+
+okay, now everything should be pushed. go check the main branch now to see what has been done
+
+---
+
+look at the last run, it was based on the current code on main. What is the main bottleneck?
+
+---
+
+and why do zou think it takes so long in the ERP? in thhe first place. Is there soemthing we can do to improve this time in generall? You can search the net for people having similar problem and how they solved it, or some ai tools that help with such problems
+
+---
+
+start a test run please
+
+---
+
+okay, yes, open a new branch and on it, implement the changes that you recommended
+
+---
+
+<task-notification>
+<task-id>bvw3cgo6f</task-id>
+<tool-use-id>toolu_01EHNbuSAm5XsrjB6BRWfcUQ</tool-use-id>
+<output-file>C:\Users\IVANUZ~1\AppData\Local\Temp\claude\c--Users-Ivan-Uzunov-projects-ehl-day-by-day\63b2d78c-bd7f-45fe-af13-734f4d6272aa\tasks\bvw3cgo6f.output</output-file>
+<status>completed</status>
+<summary>Background command "Poll the test run until it finishes" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bg69jdivs</task-id>
+<tool-use-id>toolu_012i3xGm4zMDQMD9jn9ZdE8v</tool-use-id>
+<output-file>C:\Users\IVANUZ~1\AppData\Local\Temp\claude\c--Users-Ivan-Uzunov-projects-ehl-day-by-day\63b2d78c-bd7f-45fe-af13-734f4d6272aa\tasks\bg69jdivs.output</output-file>
+<status>failed</status>
+<summary>Background command "Start the local model proxy in the background" failed with exit code 143</summary>
+</task-notification>

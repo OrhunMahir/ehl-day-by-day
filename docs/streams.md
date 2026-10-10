@@ -14,20 +14,25 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
 
 1. `agent.py` reads the run (`run.py`: the brief with the bid rules, each website's address and login, the answer
    schema, the expiry time) and opens one browser tab per website (`browsers.py`, `browser.py`).
-2. A **lead model** (`Orchestrator` in `agent.py`) reads the brief. It cannot browse. It has three tools:
+2. A **lead model** (`Orchestrator` in `agent.py`) reads the brief. It cannot browse. It has four tools:
    - `investigate(site, task)` sends a **browsing sub-agent** (`BrowsingAgent` in `browsing.py`) to one website with
      a task in plain language. The sub-agent drives the browser through a text view of the page (`observe.js`,
      `Tab` in `browser.py`), takes notes, and returns one text report. Several sites run in parallel.
-   - `calculate(expression)` does exact decimal arithmetic (`calc.py`).
+   - `price_bid(facts)` puts the collected facts (`facts.py`) through the bid engine (`engine/`) and returns the
+     priced answer and what is still missing. Later calls pass only the fields that changed.
+   - `calculate(expression)` does exact decimal arithmetic (`calc.py`); a fallback since the engine exists.
    - `submit_bid(answer, hints)` checks the answer against the schema, then sends the submission agent
      (`submission.py`) to enter the bid in the tender website's form, fetch the signing code from the mailbox, sign
      and confirm. It reads the page like a browsing sub-agent, but sets all fields of a form step in one call.
 3. The lead model decides what to ask next from the reports, works out the bid, and submits.
 
-The run's time is split in `agent.py`. Every run, scored or not, works with 20 minutes: investigations end at
-40 % (minute 8), from 45 % (minute 9) the lead is made to call `submit_bid`, and entering and signing the bid gets
-the rest. After each submission attempt the agent asks the platform whether the run is still open; the platform
-closes a run the moment it accepts a bid, so an open run means "not accepted yet" and the lead submits again.
+The run's time is split in `agent.py`. Every run, scored or not, works with 20 minutes. One investigation is
+ended after 4 minutes, so that a survey round and one follow-up round fit before investigations end at 45 %
+(minute 9). Then the lead is made to call `price_bid`, and the engine's answer is submitted without asking the lead
+again; entering and signing the bid gets the rest. A "no bid" from the engine is only submitted when nothing else
+is open and the group of every unmatched position was searched on purpose; otherwise those positions are left out
+and the rest is bid. After each submission attempt the agent asks the platform whether the run is still open; the
+platform closes a run the moment it accepts a bid, so an open run means "not accepted yet" and it submits again.
 
 What is weak in this design, and why the streams exist:
 

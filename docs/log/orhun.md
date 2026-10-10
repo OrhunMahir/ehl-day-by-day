@@ -2,6 +2,38 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 15:50 · Bid engine wired into the lead; first accepted bid (quality 5) and what it showed
+
+- Changed: merged `main` (stream I's engine) into `stream-o`. `agent/agent.py`: new lead tool `price_bid`, which
+  builds the facts with `facts.from_dict`, runs `engine.evaluate` and returns answer, issues, incomplete and
+  omitted positions; `submit_bid` submits the engine's last answer; when the time to investigate is over the lead
+  is made to price and the answer is then submitted without asking it again; every investigation task ends with a
+  request for the source of each value. After the first run with this: one investigation is ended after 4
+  minutes so a follow-up round fits; later `price_bid` calls pass only changed fields; the field `authority` is
+  no longer offered to the model; a "no bid" is only submitted when nothing else is open and every unmatched
+  position's group is in `searched_groups`, otherwise those positions are left out and the rest is bid; the full
+  facts are written to the run log.
+- Why: stream I asked for the wiring. The first run with it (`run_5c4a1b2fa02c4d4c`) was the first bid the
+  platform accepted, but it was a "no bid" in a case where a bid was right.
+- Checked: unit tests of the engine pass (101 of 104; the 3 failures are the starter kit's tests for a `solve()`
+  that no longer exists). With a stand-in model: early pricing, forced pricing, unreadable facts and a submission
+  that is not accepted all end in an accepted answer. On invented facts: a near-miss candidate of an unsearched
+  group no longer leads to "no bid", a later call with only two changed lists updates the price, a fully searched
+  group without a match still gives "no bid". Sandbox: `run_5c4a1b2fa02c4d4c` finished in 12.9 minutes, eligible,
+  quality 5: tender reference 5 of 5, decision 0, discount 0, total 0, consistency 0, all five positions 0. Two
+  runs of the corrected version are running (`run_1157678a4248dfe3`, `run_d944694135ffa2d7`); results not in.
+  Not checked: a bid with positions has never reached the signature; the accepted run used the short no-bid form.
+- Learned: the first survey round took 7.3 minutes, so the follow-up round (the ERP search by catalogue group)
+  was refused by the clock. The lead needed 3.6 minutes to write the facts JSON once. It filled `authority` with
+  the name of the contracting authority, which replaces the engine's default sender roles.
+- For the others: I — `resolve.searched()` treats a group as searched as soon as one material of it is known,
+  so a partial candidate list turns into "no bid" for the whole tender; I guard against it in `agent.py`
+  (`without_hasty_no_bid`), but the rule would sit better in the engine. The name `authority` invites the model to
+  fill in the contracting authority; I hide it from the tool schema. J — a first-round survey of one site takes
+  5 to 7 minutes and 40 to 60 steps; investigations are now ended after 4 minutes, so shorter surveys with a
+  report at the end matter more than before.
+- Next: read the two running test runs, especially whether a bid with positions gets signed.
+
 ## 2026-10-10 15:20 · Submission agent that fills a form step per call
 
 - Changed: new `agent/submission.py`. A model still reads the page and chooses every field, value and button, but

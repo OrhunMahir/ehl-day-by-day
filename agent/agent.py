@@ -34,7 +34,17 @@ Approach:
 5. Call `submit_bid` with the final answer JSON. It validates the JSON, then an assistant enters and signs it.
    If time is short, submit your best answer: every field scores on its own; leave optional fields out if unknown.
 
-The clock: {minutes} minutes in total. Submit no later than ~3 minutes before the end."""
+The clock: about {minutes} minutes to investigate. Then you must call `submit_bid` with what you have; entering
+and signing the bid takes the rest of the time."""
+
+SCORED_RUN_SECONDS = 20 * 60
+# A test run expires hours after it starts and a local run never: those work with a shorter time, so a development
+# run reports sooner. A scored run always works with all the time the platform gives it.
+TEST_RUN_SECONDS = 10 * 60
+# How the working time is spent, as shares of it.
+COLLECT_SHARE = 0.65  # investigations end here
+SUBMIT_SHARE = 0.70  # from here on the lead must submit
+FINISH_SHARE = 0.95  # the bid must be entered and signed by here; the rest is a safety margin
 
 
 class Orchestrator:
@@ -42,8 +52,13 @@ class Orchestrator:
         self.task, self.token, self.tabs, self.model = task, token, tabs, model
         self.credentials = {a["siteId"]: a.get("credentials", {}) for a in task["access"]}
         self.started = started
-        budget = contract.seconds_left(task)
-        self.deadline = time.time() + (budget if budget != float("inf") else 20 * 60)
+        now = time.time()
+        left = contract.seconds_left(task)
+        if left > SCORED_RUN_SECONDS * 1.5:  # not a scored run
+            left = TEST_RUN_SECONDS - (now - started)
+        self.collect_until = now + left * COLLECT_SHARE
+        self.submit_from = now + left * SUBMIT_SHARE
+        self.deadline = now + left * FINISH_SHARE
         self.locks = {site: asyncio.Lock() for site in tabs}
         self.submitted = None
 
@@ -83,8 +98,10 @@ class Orchestrator:
         if site not in self.tabs:
             return f"Unknown site {site}; choose one of {', '.join(self.tabs)}"
         async with self.locks[site]:
+            if time.time() >= self.collect_until:
+                return "No time left to investigate: call submit_bid now with what you have."
             agent = BrowsingAgent(self.model, {site: self.tabs[site]}, self.credentials, task, self.context(),
-                                  name=site, deadline=self.deadline - 150, log=self.log)
+                                  name=site, deadline=self.collect_until, log=self.log)
             return await agent.run()
 
     async def submit(self, answer: dict, hints: str) -> str:
@@ -110,12 +127,12 @@ class Orchestrator:
                 "recompute. Report the receipt or any validation message verbatim.\n\nANSWER:\n"
                 + json.dumps(answer, ensure_ascii=False, indent=1) + (f"\n\nHINTS:\n{hints}" if hints else ""))
         agent = BrowsingAgent(self.model, sites, self.credentials, task, self.context(), name="submit",
-                              deadline=self.deadline + 120, max_steps=90, log=self.log)
+                              deadline=self.deadline, max_steps=90, log=self.log)
         self.submitted = answer
         return await agent.run()
 
     async def run(self):
-        minutes = round((self.deadline - time.time()) / 60)
+        minutes = round((self.submit_from - time.time()) / 60)
         messages = [
             {"role": "system", "content": ORCHESTRATOR.format(minutes=minutes)},
             {"role": "user", "content": self.context() + "\n\n# Websites\n" + "\n".join(
@@ -123,9 +140,9 @@ class Orchestrator:
         ]
         tools = self.tools()
         while time.time() < self.deadline:
-            left = self.deadline - time.time()
-            if left < 300 and not self.submitted:
-                messages.append({"role": "user", "content": f"Only {int(left)} s left: call submit_bid now with your best answer."})
+            if time.time() >= self.submit_from and not self.submitted:
+                messages.append({"role": "user", "content": "Investigation time is over: call submit_bid now with "
+                                 "your best answer. Leave out positions you could not complete."})
             message = await self.model.chat(messages, tools, temperature=0.2)
             calls = message.tool_calls or []
             if message.content:

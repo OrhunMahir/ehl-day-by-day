@@ -1,6 +1,7 @@
 # Work streams — who builds what, and where the streams meet
 
-Written Sat 2026-10-10 for the three people on the team and for their coding agents. The short table is in
+Written Sat 2026-10-10 for the three people on the team and for their coding agents. The streams are named after
+their owners: J = Julien, I = Ivan, O = Orhun. The short table is in
 [AGENTS.md](../AGENTS.md), section "Who does what"; this file is the detail. If you are a coding agent, read
 "How the agent works today", then the section of your human's stream, then "Where the streams meet".
 
@@ -22,6 +23,11 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
      the tender website's form, fetch the signing code from the mailbox, sign and confirm.
 3. The lead model decides what to ask next from the reports, works out the bid, and submits.
 
+The run's time is split in `agent.py`: investigations end at 65 % of the working time, from 70 % the lead must
+submit, and the bid must be entered and signed by 95 %. In a scored run the working time is what the platform
+gives (20 minutes: 13 / 14 / 19). In a test run or a local run it is 10 minutes (6.5 / 7 / 9.5), so a development
+run reports sooner; the agent tells the two apart by how far away the platform's expiry is.
+
 What is weak in this design, and why the streams exist:
 
 - The reports are free text. A value that was read wrongly, or from the wrong record, is not caught anywhere.
@@ -30,7 +36,7 @@ What is weak in this design, and why the streams exist:
 - The final run uses different websites. Anything that only works because of how the public websites look fails
   there.
 
-## Stream A — sites and reading (Julien)
+## Stream J — sites and reading (Julien)
 
 **Goal.** A sub-agent that is sent to any of the websites with a task comes back with a report that is complete,
 exact (values as shown, with units and dates) and says where each value was read. This must hold on software the
@@ -39,7 +45,7 @@ agent has never seen.
 **Files only this stream edits.** `agent/browser.py`, `agent/observe.js`, `agent/browsing.py`,
 `agent/browsers.py`, `agent/tests/test_browser*.py`, `docs/log/julien.md`.
 
-**What the other streams rely on (do not change without telling stream C first).**
+**What the other streams rely on (do not change without telling stream O first).**
 - `Tab(site_id, page)` and `BrowsingAgent(model, tabs, credentials, task, context, name=..., deadline=...,
   max_steps=..., log=...)`, as `agent.py` calls them today.
 - `await BrowsingAgent.run()` returns one string: the report, then the notes taken while browsing.
@@ -47,9 +53,8 @@ agent has never seen.
 **Work, in this order.**
 1. Run one sub-agent per website on your machine with a survey task and compare its report with what you see in
    the browser yourself. Every difference is a bug in this stream.
-2. Documents: PDF and ZIP files, documents inside embedded frames and nested viewers. Known gap: `browser.py`
-   imports `pypdf` to read PDFs, but `pypdf` is not in `agent/pyproject.toml`, so in the sandbox every PDF comes
-   back as "could not be read". Ask stream C to add the dependency.
+2. Documents: PDF and ZIP files, documents inside embedded frames and nested viewers. `pypdf` is a declared
+   dependency since Sat 14:30; before that every PDF came back as "could not be read" in the sandbox.
 3. Lists: paging, "load more", searches that must be narrowed before they show results.
 4. Versions: a site that opens an old revision first; the report must say which revision a value comes from and
    which one the site marks as current.
@@ -67,13 +72,13 @@ or document, date, sender, revision), and says plainly what it could not find.
 **Not this stream.** Bid rules, arithmetic, the lead model's prompts, the submission flow. Also the pitch and the
 development story belong to Julien, outside the code.
 
-## Stream B — bid engine (Uzunov)
+## Stream I — bid engine (Ivan)
 
 **Goal.** One function that turns collected facts into the answer object, correct to the cent, with no model
 involved. The same facts always give the same bid.
 
 **Files only this stream edits (all new).** `agent/facts.py`, `agent/engine/`, `agent/tests/test_engine*.py`,
-`docs/log/uzunov.md`.
+`docs/log/ivan.md`.
 
 **What the other streams rely on.**
 - `facts.py`: typed records (dataclasses) for everything the rules need. Every fact carries where it came from:
@@ -104,15 +109,15 @@ involved. The same facts always give the same bid.
    conversion, metal-index surcharge with validity windows, packaging by carton, shared setup pool, project bonus
    in bands allocated by largest remainders, stroke derived from usable travel.
 
-This stream needs no website, no browser and no test run, so it can start at once. Tell stream C as soon as
-`facts.py` covers the core rules; C can then start filling it from the reports.
+This stream needs no website, no browser and no test run, so it can start at once. Tell stream O as soon as
+`facts.py` covers the core rules; O can then start filling it from the reports.
 
 **Done when** `uv run python -m unittest discover -s tests` passes in `agent/` and every rule has at least one
 test.
 
 **Not this stream.** Reading websites, prompts, form filling.
 
-## Stream C — lead, submission, runs (Orhun)
+## Stream O — lead, submission, runs (Orhun)
 
 **Goal.** The run as a whole: the lead model asks the right questions, the answers become facts, the engine prices
 them, and one signed bid is submitted before the clock ends, every time.
@@ -123,19 +128,22 @@ them, and one signed bid is submitted before the clock ends, every time.
 
 **Work, in this order.**
 1. Baseline: one sandbox test run of the unchanged agent and its score breakdown. It shows where points are lost
-   and sets the priorities of streams A and B.
-2. Time budget: in a test run the platform's expiry is up to two hours away, and the agent currently plans with
-   all of it. Cap the working time at the length of a scored run (20 minutes) minus a margin.
-3. Deadline guard: at a fixed margin before the end, submit what is complete and leave unfinished positions out.
-   A run without a submitted bid scores 0. After the bid is accepted the process must exit within 10 seconds.
+   and sets the priorities of streams J and I.
+2. Time budget: done Sat 14:30 (see "How the agent works today"). Open: tune the three shares once a run has
+   shown how long entering and signing the bid really takes.
+3. Deadline guard: the lead is told to submit at 70 % of the time, but if it never calls `submit_bid` the run
+   still ends without a bid and scores 0. Make the submission happen without depending on the lead. After the
+   bid is accepted the process must exit within 10 seconds.
 4. Reports to facts: have the lead model put what the sub-agents report into the records of `facts.py`, and call
-   the engine instead of the calculator, as soon as stream B delivers the first version.
+   the engine instead of the calculator, as soon as stream I delivers the first version.
 5. Submission: the form, the signing code from the mailbox, signature, receipt check; validation against the
    schema read at run time.
 6. `llm.py`: when a provider's environment variable is missing it falls back to the provider's public address.
    Model calls must only go through the platform's proxy, so remove these fallbacks.
-7. Dependencies requested by the other streams (first one: `pypdf` for stream A).
-8. Test runs for all streams, every `atira submit`, Entire and the repository.
+7. Dependencies requested by the other streams (`pypdf` for stream J is in).
+8. `tests/test_kit.py`: three tests still target the starter kit's `solve()` and fail; rewrite them for the
+   current `agent.py`.
+9. Test runs for all streams, every `atira submit`, Entire and the repository.
 
 **Not this stream.** How a page is read (`browser.py`, `observe.js`, `browsing.py`) and how a price is calculated
 (`engine/`).
@@ -143,26 +151,28 @@ them, and one signed bid is submitted before the clock ends, every time.
 ## Where the streams meet
 
 ```
-websites ──A──> report (text) ──C──> facts (facts.py, owned by B) ──B──> answer object ──C──> signed bid
+websites ──J──> report (text) ──O──> facts (facts.py, owned by I) ──I──> answer object ──O──> signed bid
 ```
 
-- **A to C:** the report string from `BrowsingAgent.run()`.
-- **C to B:** the records in `facts.py`. B defines them, C fills them.
-- **B to C:** `engine.build_bid(facts)` returns the answer object.
+- **J to O:** the report string from `BrowsingAgent.run()`.
+- **O to I:** the records in `facts.py`. I defines them, O fills them.
+- **I to O:** `engine.build_bid(facts)` returns the answer object.
 - You need a change in a file of another stream: describe it to your human, who asks the owner. Do not edit it,
   not even for a one-line fix; the owner may be changing the same lines.
-- You need a new dependency: ask stream C. `pyproject.toml` and `uv.lock` have one owner so the lock file never
+- You need a new dependency: ask stream O. `pyproject.toml` and `uv.lock` have one owner so the lock file never
   conflicts.
 - Local runs with the scouting logins (`eval "$(atira scout --env)"`, with `atira models proxy` running) are free
   and unlimited for everyone. Sandbox test runs are limited to two at a time for the whole team and go through
-  stream C; ask for one when you need a score.
+  stream O; ask for one when you need a score.
+- Everyone works on their own branch (`stream-j`, `stream-i`, `stream-o`); `main` changes only through pull
+  requests. The rules are in AGENTS.md, section "Branches".
 - Every push adds an entry to your own push log (`docs/log/<name>.md`, format in AGENTS.md). Read the others'
   new entries after every pull.
 
 ## Order of the whole thing (proposal)
 
-1. Now: baseline score (C); core rules as tests and `facts.py` first version (B); per-site report checks (A).
-2. Next: core engine wired into the run (B and C); documents and paging reliable (A); second test run.
-3. Then: advanced pricing layers (B); submission and deadline guard hardened (C); generalisation check (A).
+1. Now: baseline score (O); core rules as tests and `facts.py` first version (I); per-site report checks (J).
+2. Next: core engine wired into the run (I and O); documents and paging reliable (J); second test run.
+3. Then: advanced pricing layers (I); submission and deadline guard hardened (O); generalisation check (J).
 4. Sunday morning: no new features. The Atira final uses our latest submission that passed review, so the last
    submission before the end must be the most stable one, not the newest experiment. EHL submission is Sunday 12:00.

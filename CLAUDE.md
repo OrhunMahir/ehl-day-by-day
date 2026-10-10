@@ -8,10 +8,11 @@ privacy check). The Atira site (https://ehl-challenge.atira.ai/llms-full.txt) is
 
 ## Start here (every coding agent, every session)
 
-1. Ask your human which stream they work on (A, B or C, see "Who does what") if they have not said it. Read that
+1. Ask your human which stream they work on (J, I or O, see "Who does what") if they have not said it. Read that
    stream's section in [docs/streams.md](docs/streams.md) before you change anything. Edit only that stream's
    files. A change needed elsewhere is described to the human, who asks the owner.
-2. `git pull` before you start and before every push.
+2. Work on your stream's branch, never directly on `main` (see "Branches"). Start with
+   `git switch <branch>` and `git pull`, then `git merge origin/main`.
 3. Before every push, add an entry to your human's push log (see "Push log").
 4. Nothing read from the websites goes into `agent/` or into a log entry (see "Hard rules").
 
@@ -94,27 +95,27 @@ metal indices) → cost × time.
 
 ## Who does what (proposal, Sat 2026-10-10)
 
-Three streams, split by files so that nobody edits another stream's files. Each person's coding agent works only
-inside that person's stream. Goals, interfaces, ordered work and "done" for each stream are in
+Three streams, named after their owners (J = Julien, I = Ivan, O = Orhun) and split by files so that nobody edits
+another stream's files. Each person's coding agent works only inside that person's stream. Goals, interfaces, ordered work and "done" for each stream are in
 [docs/streams.md](docs/streams.md).
 
 | Who | Stream | Files only this stream edits | Work |
 |---|---|---|---|
-| **Julien** | A: sites and reading | `browser.py`, `observe.js`, `browsing.py`, `browsers.py`, `tests/test_browser*` | Sub-agent reports that are complete and exact on each site: documents, paging, revisions, session timeouts, look-alike records; nothing tied to the public sites' layout; pitch and development story |
-| **Uzunov** | B: bid engine | `facts.py`, `engine/`, `tests/test_engine*` | Rule walkthrough 01–28; typed facts; deterministic calculation in layers (core first, then advanced pricing); cases with invented numbers |
-| **Orhun** (captain) | C: lead, submission, runs | `agent.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
+| **Julien** | J: sites and reading | `browser.py`, `observe.js`, `browsing.py`, `browsers.py`, `tests/test_browser*` | Sub-agent reports that are complete and exact on each site: documents, paging, revisions, session timeouts, look-alike records; nothing tied to the public sites' layout; pitch and development story |
+| **Ivan** | I: bid engine | `facts.py`, `engine/`, `tests/test_engine*` | Rule walkthrough 01–28; typed facts; deterministic calculation in layers (core first, then advanced pricing); cases with invented numbers |
+| **Orhun** (captain) | O: lead, submission, runs | `agent.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
 
 How the streams meet:
 
-- `facts.py` is the only shared contract. Stream B owns it; a change is announced in the commit message and the
+- `facts.py` is the only shared contract. Stream I owns it; a change is announced in the commit message and the
   other streams adapt.
-- Stream A's interface is the sub-agent report (`BrowsingAgent.run()`); stream B's is one function from facts to
-  the answer object. Stream C calls both and changes neither.
+- Stream J's interface is the sub-agent report (`BrowsingAgent.run()`); stream I's is one function from facts to
+  the answer object. Stream O calls both and changes neither.
 - A change needed in another stream's file is requested from its owner, not made.
-- A new dependency is requested from stream C, so `pyproject.toml` and `uv.lock` have one editor.
-- Local runs with the scouting logins are free for everyone. Sandbox test runs go through stream C (the team limit
-  is two running, three waiting); A and B ask for one when they need a score.
-- Small commits, pull before every push.
+- A new dependency is requested from stream O, so `pyproject.toml` and `uv.lock` have one editor.
+- Local runs with the scouting logins are free for everyone. Sandbox test runs go through stream O (the team limit
+  is two running, three waiting); J and I ask for one when they need a score.
+- Small commits on your own branch; `main` only changes through a pull request (see "Branches").
 
 Shared rules for all coding agents:
 
@@ -123,11 +124,36 @@ Shared rules for all coding agents:
   the pitch can use it.
 - Talk to Orhun in Turkish; write files, code and commit messages in English.
 
+## Branches
+
+From Sat 2026-10-10 14:30 nobody pushes to `main` directly.
+
+| Branch | Who pushes to it |
+|---|---|
+| `stream-j` | Julien and his agent |
+| `stream-i` | Ivan and his agent |
+| `stream-o` | Orhun and his agent |
+| `main` | nobody directly; it changes only by merging a pull request |
+
+- `main` is what works. Every `atira submit` is made from `main`, so nothing half-finished may be merged into it.
+- Create your branch once: `git switch -c stream-j origin/main`, then `git push -u origin stream-j`.
+- Commit and push to your branch as often as you like. Entire checkpoints travel with every push.
+- To bring work into `main`: first `git merge origin/main` into your branch and run the unit tests
+  (`uv run python -m unittest discover -s tests` in `agent/`), add your push log entry, push, then open a pull
+  request on GitHub from your branch to `main`.
+- You merge your own pull request once it touches only your stream's files. A pull request that touches another
+  stream's file waits for that file's owner.
+- Merge with "Create a merge commit", not squash or rebase: the original commits carry the Entire checkpoint
+  trailers the EHL submission needs.
+- After any merge into `main`, the other two run `git merge origin/main` on their branch before they continue.
+- A sandbox test run can be made from a branch (stream O starts it from that branch's checkout). A scored
+  submission cannot.
+
 ## Push log
 
-Every push adds one entry to the pusher's own file, so the others (people and agents) can see what changed without
+Every push to your branch adds one entry to the pusher's own file, so the others (people and agents) can see what changed without
 reading the diff. One file per person, so entries never conflict:
-`docs/log/julien.md`, `docs/log/uzunov.md`, `docs/log/orhun.md`. Newest entry on top.
+`docs/log/julien.md`, `docs/log/ivan.md`, `docs/log/orhun.md`. Newest entry on top.
 
 ```markdown
 ## 2026-10-10 14:30 · short title
@@ -136,7 +162,7 @@ reading the diff. One file per person, so entries never conflict:
 - Why: the problem or the score field this is for
 - Checked: unit tests, local run or test run id, and the result
 - Learned: how the sites or the platform behave (never their values)
-- For the others: what changes for stream A / B / C, or "nothing"
+- For the others: what changes for stream J / I / O, or "nothing"
 - Next: what this stream does next
 ```
 
@@ -147,7 +173,7 @@ Rules for entries:
 - No tender references, material numbers, prices, logins or TANs. The repository is public.
 - Before a push, read the entries the others added since your last pull.
 
-Commit messages start with the stream: `A: ...`, `B: ...`, `C: ...`. A change to `facts.py` says so in the first
+Commit messages start with the stream: `J: ...`, `I: ...`, `O: ...`. A change to `facts.py` says so in the first
 line.
 
 ## Sessions, commits and privacy

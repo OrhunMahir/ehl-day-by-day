@@ -1,0 +1,27 @@
+you can also make a test run on the website, and keep the local test
+
+---
+
+you can get a  subagent to follow the run and analyse what is going on. this is the website: https://ehl-challenge.atira.ai/runs/run_57f15cb68ad9f88a
+
+---
+
+i meant watch the UI. there the subagent can see exactly what is the agent typing, selecting and so on
+
+---
+
+okay, got it, keep me updated
+
+---
+
+Okay, we can leave them running, but the interesting thing is that the leading teams achieve a performance of 100 for much less cost than our model, which performs conisderably worse. I guess the finding is that the winners make less LLM requests, so prbably their whole system is simpler/ they use less agents
+
+---
+
+<task-notification>
+<task-id>bynucs9dp</task-id>
+<tool-use-id>toolu_01T72tp6cE58Xq8s6QRUFB7k</tool-use-id>
+<output-file>C:\Users\IVANUZ~1\AppData\Local\Temp\claude\c--Users-Ivan-Uzunov-projects-ehl-day-by-day\63b2d78c-bd7f-45fe-af13-734f4d6272aa\tasks\bynucs9dp.output</output-file>
+<status>completed</status>
+<summary>Background command "Second local run of the plan branch" completed (exit code 0)</summary>
+</task-notification>

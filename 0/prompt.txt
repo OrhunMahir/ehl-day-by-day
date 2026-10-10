@@ -1,0 +1,104 @@
+check if all requirements are met to start developing (atira and entire logins etc)
+
+---
+
+julienhartzer@dhcp-10-177-8-255 ehl_hackathon % claude mcp add atira -- atira mcp.
+zsh: command not found: claude
+
+---
+
+(atira-rfq-starter) julienhartzer@dhcp-10-177-8-255 ehl_hackathon % /mcp
+zsh: no such file or directory: /mcp
+
+---
+
+so everything works now from a setup perspective to start building?
+
+---
+
+we are a team. So you should use the latest changes and documents as the first source
+
+---
+
+lets say i put you to work on the agents and stream A. Would you use claude tokens or qwen?
+
+---
+
+Im going to code for the next 15 hours or so. Therefore try using the tokens accordingy
+
+---
+
+create a new branch for my task (stream a) and tell me what your plan is regarding what to implement
+
+---
+
+everything you work on has to be public and visible to hackathon judges
+
+---
+
+start implementing step 0 and 1. Dont forget to check if the code does what its supposed to do after finishing first drafts or implementations. If something needs supervision or youre stuck on a task: ask for my guidance if needed
+
+---
+
+<task-notification>
+<task-id>bzudkd5ju</task-id>
+<tool-use-id>toolu_01HHhhP5f65SAzMpTfhzWh3H</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-julienhartzer-ehl-hackathon/fd212338-599c-4aa2-a6fc-bee2055537fd/tasks/bzudkd5ju.output</output-file>
+<status>failed</status>
+<summary>Background command "Run the four-site survey with Qwen" failed with exit code 1</summary>
+</task-notification>
+
+---
+
+how could you confirm if the live survey fixes work?
+
+---
+
+can you check it`
+
+---
+
+report as soon as it finishes
+
+---
+
+<task-notification>
+<task-id>bh6fi8w07</task-id>
+<tool-use-id>toolu_01V71njTu1fFRAkrh75xmfm3</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-julienhartzer-ehl-hackathon/fd212338-599c-4aa2-a6fc-bee2055537fd/tasks/bh6fi8w07.output</output-file>
+<status>completed</status>
+<summary>Background command "Run the four-site survey with Qwen" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>by1hxyg9b</task-id>
+<tool-use-id>toolu_019XzMZKTkz3REaBdhKjcvC5</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-julienhartzer-ehl-hackathon/fd212338-599c-4aa2-a6fc-bee2055537fd/tasks/by1hxyg9b.output</output-file>
+<status>completed</status>
+<summary>Monitor "survey-1 completion (done, failed or traceback)" stream ended</summary>
+<event>survey ended</event>
+</task-notification>
+
+---
+
+can you fix the current issues?
+
+---
+
+what is the next step?
+
+---
+
+you can commit on stream j because its my branch. Once the tests finish evaluate and do step 2 if everything works as intended
+
+---
+
+<task-notification>
+<task-id>bcwa2f975</task-id>
+<tool-use-id>toolu_01S7FZhumkL6srC7Lup2Zc9u</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-julienhartzer-ehl-hackathon/fd212338-599c-4aa2-a6fc-bee2055537fd/tasks/bcwa2f975.output</output-file>
+<status>completed</status>
+<summary>Background command "Live check that the site guard refuses another site" completed (exit code 0)</summary>
+</task-notification>

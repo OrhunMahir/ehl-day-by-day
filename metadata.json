@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4JXPKVK3NC0665X20F8Y2ST",
+  "strategy": "manual-commit",
+  "branch": "stream-o",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "agent/agent.py",
+    "agent/llm.py",
+    "docs/challenge-atira.md",
+    "docs/streams.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 62,
+    "cache_creation_tokens": 30715,
+    "cache_read_tokens": 7063303,
+    "output_tokens": 24629,
+    "api_call_count": 24
+  }
+}

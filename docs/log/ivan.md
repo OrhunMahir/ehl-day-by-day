@@ -2,7 +2,7 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
-## 2026-10-10 15:15 · facts.py first version and the bid engine for rules 1–28
+## 2026-10-10 14:52 · facts.py first version and the bid engine
 
 - Changed: new `agent/facts.py` (typed records for everything the bid rules need, each with a `Source`: site,
   document, date, sender, revision) and new `agent/engine/` (`build_bid(facts)` returns the answer object,
@@ -13,7 +13,8 @@ Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Pu
 - Why: the lead model applied the bid rules by itself with the calculator; money is scored to the cent and 75
   points sit in the positions. The engine does the arithmetic and the authority and time rules in code.
 - Checked: 84 engine tests pass (`uv run python -m unittest discover -s tests -p "test_engine*"` in `agent/`).
-  The full rule text came from `atira challenge rfq`; each rule 1–28 has at least one test. Not checked: no run
+  The full rule text came from `atira challenge rfq`; every calculation rule (1–8, 12–18, 20–28) has at least one
+  test; rules 9–11, 19 and 29 are about the run and scoring, not the engine. Not checked: no run
   against real facts from the websites yet; nothing calls the engine in `agent.py` yet.
 - Learned: on Windows the full suite cannot import `tests/test_kit.py` because `browser.py` reads `observe.js`
   without `encoding="utf-8"` (it works with `PYTHONUTF8=1`; the sandbox is Linux, so the run is not affected). With

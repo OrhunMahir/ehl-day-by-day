@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4M3GD2P3MA9SDBPMRBCS018",
+  "strategy": "manual-commit",
+  "branch": "stream-o-cheaper",
+  "checkpoints_count": 6,
+  "files_touched": [
+    "agent/llm.py",
+    "agent/simple.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 20,
+    "cache_creation_tokens": 18124,
+    "cache_read_tokens": 4742676,
+    "output_tokens": 14006,
+    "api_call_count": 10
+  }
+}

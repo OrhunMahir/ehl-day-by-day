@@ -35,6 +35,7 @@ TOOLS = [
 OPTIONAL = {"enter", "offset", "source"}
 WRAP_UP_SECONDS = 90  # the wrap-up report may take at most this long
 WRAP_UP_TOKENS = 3000  # and at most this many tokens, so it cannot run on
+ACTION_SECONDS = 60  # one browser action may take at most this long
 NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
 
 
@@ -78,6 +79,21 @@ Working rules:
 """
 
 
+NAVIGATING = {"goto", "click", "type", "select", "press", "back", "look"}
+
+
+async def _shows_sign_in(tab: Tab) -> bool:
+    """Whether the page now shows a sign-in form (a visible password field in the main frame)."""
+    try:
+        return await tab.page.main_frame.locator("input[type=password]:visible").count() > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _looks_like_sign_in_url(url: str) -> bool:
+    return any(word in url.lower() for word in ("login", "logon", "signin", "sign-in", "anmeld"))
+
+
 def _no_thinking(model) -> dict:
     """Qwen reasons before it answers; a wrap-up only reformats notes, so its reasoning is switched off (otherwise
     the token limit can be spent on reasoning and the answer comes back empty). Other providers get nothing."""
@@ -96,6 +112,8 @@ class BrowsingAgent:
         self.last_tab: Tab = next(iter(tabs.values()))
         self.refusals = 0  # requests to open another website's pages, refused
         self.visited: list[str] = []  # pages the agent saw, in order, for the wrap-up report
+        self.signed_in: set[str] = set()  # sites where login succeeded, so a later sign-in form means an expired session
+        self.relogins = 0
         self.multi = len(tabs) > 1
 
     def _tab(self, args: dict) -> Tab:
@@ -130,6 +148,26 @@ class BrowsingAgent:
             if refusal:
                 self.refusals += 1
                 return refusal
+        if name in NAVIGATING and tab.site_id in self.signed_in:
+            before = tab.page.url
+            result = await self._dispatch(name, args, tab)
+            if await _shows_sign_in(tab):
+                return await self._sign_in_again(tab, before)
+            return result
+        return await self._dispatch(name, args, tab)
+
+    async def _sign_in_again(self, tab: Tab, before: str) -> str:
+        """The session expired and the site sent the agent back to its sign-in form: sign in again and return to the
+        page the agent was on, so it can repeat its last action."""
+        self.relogins += 1
+        self.log(f"[{self.name}] session expired on {tab.site_id}; signing in again")
+        await self._login(tab)
+        if before and not _looks_like_sign_in_url(before) and tab.page.url != before:
+            await tab.goto(before)
+        return ("(Your session had expired: you were signed in again automatically and are back on the page before "
+                "your last action. Repeat that action if it did not take effect.)\n" + await tab.observe())
+
+    async def _dispatch(self, name: str, args: dict, tab):
         if name == "look":
             return await tab.observe()
         if name == "goto":
@@ -155,7 +193,10 @@ class BrowsingAgent:
         if name == "read_file":
             return tab.read_file(args["name"], int(args.get("offset") or 0))
         if name == "login":
-            return await self._login(tab)
+            result = await self._login(tab)
+            if not await _shows_sign_in(tab):
+                self.signed_in.add(tab.site_id)
+            return result
         if name == "note":
             page = self.last_tab.page
             try:
@@ -177,7 +218,11 @@ class BrowsingAgent:
         ]
         # open each site so the model starts from a real page view
         for tab in self.tabs.values():
-            messages[1]["content"] += "\n\n# Current page\n" + await tab.observe()
+            try:
+                view = await asyncio.wait_for(tab.observe(), timeout=ACTION_SECONDS)
+            except asyncio.TimeoutError:
+                view = f"[{tab.site_id}] (the page did not respond in time; use look or goto)"
+            messages[1]["content"] += "\n\n# Current page\n" + view
         tools = tool_schemas(self.multi)
         warned_time = warned_steps = False
         since_note = 0
@@ -222,8 +267,13 @@ class BrowsingAgent:
                     self.log(f"[{self.name}] finished after {step + 1} steps")
                     return self._report(report)
                 self.log(f"[{self.name}] {call.function.name} {json.dumps(args, ensure_ascii=False)[:200]}")
-                try:
-                    result = await self._run_tool(call.function.name, args)
+                limit = min(ACTION_SECONDS, max(5.0, self.deadline - time.time()))
+                try:  # a browser action that hangs (a stuck page, a reload that never ends) must not hold the agent
+                    result = await asyncio.wait_for(self._run_tool(call.function.name, args), timeout=limit)
+                except asyncio.TimeoutError:
+                    self.log(f"[{self.name}] {call.function.name} did not finish within {limit:.0f} s")
+                    result = (f"Error: the action did not finish within {limit:.0f} s; the page may be stuck. Use "
+                              "look to see the page, or goto to load it again.")
                 except Exception as error:  # noqa: BLE001
                     result = f"Error: {str(error).splitlines()[0][:400]}"
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})

@@ -10,6 +10,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 OBSERVE_JS = (Path(__file__).parent / "observe.js").read_text()
+FRAME_READ_SECONDS = 10  # reading one frame may take at most this long
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
 
 
@@ -93,10 +94,12 @@ class Tab:
         self.events: list[str] = []  # dialogs, downloads, new tabs since the last observation
         self.aid_frames: dict[str, object] = {}
         self.last_text = ""
+        self.last_status = 0  # HTTP status of the last page load in the main frame
         self.scratch_pages: set = set()
         self._attach(page)
 
     def _attach(self, page):
+        page.on("response", self._on_response)
         page.on("dialog", lambda dialog: asyncio.ensure_future(self._on_dialog(dialog)))
         page.on("download", lambda download: asyncio.ensure_future(self._on_download(download)))
         page.context.on("page", lambda new: asyncio.ensure_future(self._on_new_page(new)))
@@ -133,6 +136,7 @@ class Tab:
         self._attach_page_only(new)
 
     def _attach_page_only(self, page):
+        page.on("response", self._on_response)
         page.on("dialog", lambda dialog: asyncio.ensure_future(self._on_dialog(dialog)))
         page.on("download", lambda download: asyncio.ensure_future(self._on_download(download)))
 
@@ -143,17 +147,44 @@ class Tab:
             pass
         await asyncio.sleep(0.4)
 
+    def _on_response(self, response):
+        try:
+            if response.request.resource_type == "document" and response.frame == self.page.main_frame:
+                self.last_status = response.status
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _retry_server_error(self, attempts: int = 2):
+        """Flaky server error pages usually work on a retry: reload, at most `attempts` times."""
+        for attempt in range(attempts):
+            if self.last_status < 500:
+                return
+            status = self.last_status
+            await asyncio.sleep(1.5 * (attempt + 1))
+            try:
+                await self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                self.events.append(f"The page answered HTTP {status}; reloaded it")
+            except Exception as error:  # noqa: BLE001
+                self.events.append(f"The page answered HTTP {status}; reload failed: {str(error).splitlines()[0]}")
+                return
+        if self.last_status >= 500:
+            self.events.append(f"The page still answers HTTP {self.last_status} after retries")
+
     async def observe(self, offset: int = 0) -> str:
         """The page as text: URL, title, each frame's content with numbered elements, and recent events."""
         await self.settle()
+        await self._retry_server_error()
         parts, start = [], 0
         self.aid_frames = {}
         for index, frame in enumerate(self.page.frames):
             prefix = "" if index == 0 else f"f{index}."
             try:
-                result = await frame.evaluate(OBSERVE_JS, {"prefix": prefix, "start": start if index == 0 else 0, "full": True})
+                result = await asyncio.wait_for(  # a frame stuck mid-navigation must not block the whole view
+                    frame.evaluate(OBSERVE_JS, {"prefix": prefix, "start": start if index == 0 else 0, "full": True}),
+                    timeout=FRAME_READ_SECONDS)
             except Exception as error:  # noqa: BLE001
-                parts.append(f"--- frame {index} ({frame.url}) could not be read: {error}")
+                reason = "it did not respond in time" if isinstance(error, asyncio.TimeoutError) else error
+                parts.append(f"--- frame {index} ({frame.url}) could not be read: {reason}")
                 continue
             if index == 0:
                 start = result["next"]

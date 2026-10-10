@@ -168,5 +168,42 @@ class HangingModelTest(unittest.TestCase):
         self.assertIn("Bore 42 mm", report)
 
 
+class HangingPageTest(unittest.TestCase):
+    def test_a_hanging_browser_action_does_not_hold_the_agent(self):
+        import time
+        import browsing
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+        calls = {"n": 0}
+
+        async def observe(offset=0):  # the first view works, every later one hangs
+            calls["n"] += 1
+            if calls["n"] > 1:
+                await asyncio.sleep(3600)
+            return "a page"
+        tab.observe = observe
+
+        class LookingModel(FakeModel):
+            async def chat(self, messages, tools=None, **kwargs):
+                if tools is None:
+                    return type("M", (), {"content": "FOUND:\nNOT FOUND:\n- everything", "tool_calls": None})()
+                self.n += 1
+                self.seen.append(messages[-1].get("content", ""))
+                return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "look", "{}")]})()
+        model = LookingModel()
+        old = browsing.ACTION_SECONDS
+        browsing.ACTION_SECONDS = 0.2
+        try:
+            started = time.time()
+            agent = BrowsingAgent(model, {"portal": tab}, {}, "task", "context", name="t",
+                                  deadline=time.time() + 600, max_steps=3, log=lambda *_: None)
+            report = asyncio.run(agent.run())
+        finally:
+            browsing.ACTION_SECONDS = old
+        self.assertLess(time.time() - started, 10)
+        self.assertTrue(any("did not finish" in m for m in model.seen))
+        self.assertIn("NOT FOUND", report)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,13 +30,14 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
      a field that only appears after an earlier choice is named by its label and looked up when its turn comes.
 3. The lead model decides what to ask next from the reports, works out the bid, and submits.
 
-The run's time is split in `agent.py`. Every run, scored or not, works with 20 minutes. One investigation is
-ended after 4 minutes, so that a survey round and one follow-up round fit before investigations end at 45 %
-(minute 9). Then the lead is made to call `price_bid`, and the engine's answer is submitted without asking the lead
-again; entering and signing the bid gets the rest. A "no bid" from the engine is only submitted when nothing else
-is open and the group of every unmatched position was searched on purpose; otherwise those positions are left out
-and the rest is bid. After each submission attempt the agent asks the platform whether the run is still open; the
-platform closes a run the moment it accepts a bid, so an open run means "not accepted yet" and it submits again.
+The run's time is split in `agent.py`. Every run, scored or not, works with 20 minutes. An investigation of the
+first round is ended after 3 minutes, a later one after 4, so that a round of follow-ups fits before investigations
+end at 45 % (minute 9). Then the facts recorded so far are priced in code and the answer is submitted without
+asking the lead again; entering and signing the bid gets the rest. A "no bid" from the engine is only submitted when
+the group of every unmatched position was searched on purpose; otherwise those positions are left out and the rest
+is bid. After each submission attempt the agent asks the platform whether the run is still open, and submits again
+while it is. Three model settings: the lead thinks with effort "low", the recorder with "medium", the sub-agents
+with "xhigh".
 
 What is weak in this design, and why the streams exist:
 

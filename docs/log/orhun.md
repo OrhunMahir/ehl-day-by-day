@@ -2,6 +2,27 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 18:12 · Short narrow first round, exact identifiers in the recording, recorder with its own model
+
+- Changed: `agent/agent.py`: an investigation of the first round is ended after 3 minutes (later ones after 4),
+  and the lead is told to give every site one narrow first job and to keep the ERP searches by catalogue group
+  for the second round. The lead's next turn waits 20 seconds for pending recordings (was 40). The recorder is
+  told to write identifiers character for character and to record every requirement's catalogue group, and it
+  has a model object of its own with reasoning effort "medium". Before this, in a commit of its own: the lead's
+  reasoning effort is "low". Two tests added.
+- Why: in `run_db0e16aac11819a1` the second round had 76 seconds; the specification's requirements were recorded
+  without catalogue groups and the positions' requirement identifiers did not match them (also named in a review
+  by another session).
+- Checked: all unit tests pass. Two recordings with the hosted model on invented tender and specification
+  reports took 19 seconds side by side: positions and requirements carry the same identifiers, every requirement
+  has its catalogue group, and the engine then asks for exactly the two ERP group searches. Not checked: no
+  sandbox run; one run of the "lead low" state alone was queued and cancelled at Orhun's request before it started.
+- Learned: the sub-agent stops browsing 45 seconds before its deadline to write its report, so a 3-minute
+  investigation has about 2 minutes and 15 seconds on the site.
+- For the others: J — first-round jobs are now narrow and 3 minutes long; a report that states each requirement's
+  catalogue group and the tender's requirement identifiers exactly is what unlocks the second round. I — nothing.
+- Next: one sandbox run of this state when Orhun says so.
+
 ## 2026-10-10 17:48 · A website that does not answer at the start no longer ends the run
 
 - Changed: `agent/agent.py`: at the start every website is opened with a 20-second limit and up to three

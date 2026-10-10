@@ -307,6 +307,47 @@ class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("add_facts", model.lead_calls)
 
 
+class TheFirstRoundIsShorter(unittest.IsolatedAsyncioTestCase):
+    async def test_first_investigations_get_less_time_than_follow_ups(self):
+        deadlines = []
+
+        class Notes:
+            def __init__(self, model, tabs, credentials, task, context, name, deadline, log):
+                deadlines.append(deadline - time.time())
+
+            async def run(self):
+                return "report"
+
+        task = {**TASK, "access": [{"siteId": "erp", "url": "https://erp.example.test"}]}
+        orchestrator = agent.Orchestrator(task, None, {"erp": FakeTab("erp", FakePage())}, None, time.time())
+        orchestrator.log = lambda text: None
+        with patch.object(agent, "BrowsingAgent", Notes), patch.object(agent, "Tab", FakeTab):
+            orchestrator.rounds = 1
+            await orchestrator.investigate("erp", "first job")
+            orchestrator.rounds = 2
+            await orchestrator.investigate("erp", "follow-up")
+        self.assertAlmostEqual(deadlines[0], agent.FIRST_ROUND_SECONDS, delta=2)
+        self.assertAlmostEqual(deadlines[1], agent.INVESTIGATION_SECONDS, delta=2)
+
+    async def test_the_recorder_asks_its_own_model(self):
+        asked = []
+
+        class Named:
+            def __init__(self, name):
+                self.name = name
+
+            async def chat(self, messages, tools, **kwargs):
+                asked.append(self.name)
+                return tool_call("add_facts", {"facts": facts_with(["G1"], [MATCH_1])})
+
+        orchestrator = agent.Orchestrator(TASK, None, {"erp": None}, Named("lead"), time.time(),
+                                          worker_model=Named("worker"), recorder_model=Named("recorder"))
+        orchestrator.log = lambda text: None
+        await orchestrator.record("erp", "report")
+        self.assertEqual(asked, ["recorder"])
+        self.assertEqual(len(orchestrator.builder.data["materials"]), 1)
+
+
 class AWebsiteThatDoesNotAnswerAtTheStart(unittest.IsolatedAsyncioTestCase):
     class Page:
         def __init__(self, failures):

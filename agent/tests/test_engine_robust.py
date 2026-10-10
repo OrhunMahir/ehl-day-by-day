@@ -57,7 +57,8 @@ def schema_problems(a: dict) -> list[str]:
                 out.append(f"{p['position']} {name} {p[name]!r}")
         if isinstance(p.get("quantity"), int) and isinstance(p.get("unit_price"), (int, float)):
             running += p["quantity"] * D(str(p["unit_price"]))
-    if isinstance(total, (int, float)) and D(str(total)) != running:
+    # a float holds an amount to the cent only below 2**53 / 100 (about 90 trillion); the damage can go beyond that
+    if isinstance(total, (int, float)) and abs(total) < 2 ** 53 / 100 and D(str(total)) != running:
         out.append(f"total {total} != sum of positions {running}")
     return out
 

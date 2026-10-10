@@ -185,10 +185,12 @@ def _members(facts: Facts, lines: list[Line], kind: AssignmentKind) -> dict[str,
 
 
 def _surcharges(facts: Facts, lines: list[Line], issues: list[str]):
-    """Rule 28: mass surcharge per piece = surcharge mass x index rate on the scenario date. Setup fee as read."""
+    """Rule 28: mass surcharge per piece = surcharge mass x index rate on the scenario date. Setup fee as read: the
+    one a Q&A answer sets for the position, else the one the ERP states for the material."""
     for ln in lines:
         m = ln.material
-        ln.setup = m.setup_fee_eur if m.setup_fee_eur is not None else ZERO
+        stated = resolve.setup_fee(facts, ln.position)
+        ln.setup = stated if stated is not None else m.setup_fee_eur if m.setup_fee_eur is not None else ZERO
         if not norm_key(m.metal_index):
             ln.mass_surcharge = ZERO
             continue

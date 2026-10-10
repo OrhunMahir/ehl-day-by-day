@@ -2,6 +2,35 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 01:24 · Test run run_114af65c08546a0a: quality 84.8; a setup fee that a Q&A answer sets for a position (touches facts.py, engine/)
+
+- Test run `run_114af65c08546a0a` (`1270c38`, with the grams fix): quality 84.8, eligible, 7:22, 175 model calls,
+  $1.70. The bid was complete at second 206; all four agents were done within 200 s.
+  - Three positions have every field right (13 of 13). The grams fix did what it should: their surcharge and unit
+    price are right now.
+  - Two positions still have a wrong surcharge and unit price. The net total and the dated metal-index check are 0.
+- Cause: for exactly those two positions a Q&A answer on the tender portal states a one-off setup fee for the
+  position, to be spread over the final quantity and not discounted. The facts had no place for it (a setup fee
+  could only be recorded with an ERP material), the agent put it into a free-text note, and the engine assumed 0.
+  These two positions have never had a right surcharge in any run, the 73.1 run included.
+- Changed:
+  - `agent/facts.py` (Ivan's file, changed on Orhun's request; this line announces it): new `SetupFee` (position,
+    fee, Q&A number, source) and `Facts.setup_fees`, with its identity, its field description and a line in the
+    filling guide.
+  - `agent/engine/resolve.py`: `setup_fee(facts, position)`: the latest remaining answer, not withdrawn, not after
+    the scenario date. `agent/engine/bid.py`: a position's ordinary setup fee is that one, else the material's.
+    `agent/engine/needs.py`: "0 assumed" is no longer reported for such a position.
+  - `agent/simple.py`: the job text names one-off setup fees among the Q&A answers to record.
+  - `agent/tests/test_engine_advanced.py`: six tests with invented numbers. `agent/tests/test_engine_robust.py`:
+    the comparison of the total with the positions is limited to amounts a float holds to the cent (below about 90
+    trillion); the new field shifted the test's random damage onto such an amount.
+- Checked: 237 unit tests pass (1 skipped). Not run in the sandbox yet.
+- Not known: whether the dated metal-index check passes once every surcharge is right. The index windows are
+  recorded and the window that contains the scenario date is used; three surcharges are right with it.
+- For the others: I: please look at `SetupFee` and at the choice "the answer's fee replaces the material's" (no run
+  has shown a material with a fee of its own). J: one phrase in the job text.
+- Next: one test run of this state; Orhun starts it.
+
 ## 2026-10-11 00:51 · Test run run_89557e681c1e8a71: quality 77; a mass recorded in grams is now read as grams (touches facts.py)
 
 - Test run `run_89557e681c1e8a71` (`64e82a1`, the merged state with `gpt-6.1-sol` reading the websites): quality

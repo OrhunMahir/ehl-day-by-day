@@ -10,7 +10,7 @@ from engine import build_bid, evaluate
 from facts import (Allocation, Assignment, AssignmentKind as K, Attr, BonusBand, ConditionGroupRule, DeliveryCommitment,
                    DiscountApproval, DiscountScope, EndReserve, Facts, FxRate, IndexWindow, MetalIndex,
                    PackagingTariff, ProjectBonus, Requirement, SetupPool, SpecRevision, TechnicalAmendment,
-                   TenderPosition, Unit, Withdrawal)
+                   TenderPosition, Unit, Withdrawal, SetupFee, FactsBuilder)
 
 SCEN = core_facts().scenario_date
 
@@ -35,6 +35,55 @@ def assign(f: Facts, kind, key, position="1", qa="Q9", day="2030-02-01"):
 def index(key="IX-1", day="2030-03-01", ref=REF, windows=None, sender="kalkulation"):
     windows = windows or [IndexWindow(D("3.50"))]
     return MetalIndex(ref, key, windows, mail(sender, day))
+
+
+class SetupFeeFromAClarification(unittest.TestCase):
+    """Rules 13, 25 and 27. Base 100.00 with 10 % discount, 10 pieces. A Q&A answer sets a one-off setup fee of 50.00
+    for the position: 5.00 a piece, not discounted."""
+
+    def position(self, f):
+        return build_bid(f)["positions"][0]
+
+    def test_the_fee_is_spread_over_the_pieces_and_not_discounted(self):
+        f = one_position()
+        f.setup_fees = [SetupFee("1", D(50), "Q7", at("2030-02-10"))]
+        bid = self.position(f)
+        self.assertEqual((bid["unit_price"], bid["surcharge_per_unit"], bid["base_unit_price"]), (95, 5, 100))
+
+    def test_without_an_answer_the_fee_of_the_material_counts(self):
+        f = one_position(setup_fee_eur=D(30))
+        self.assertEqual(self.position(f)["surcharge_per_unit"], 3)
+        f.setup_fees = [SetupFee("1", D(50), "Q7", at("2030-02-10"))]
+        self.assertEqual(self.position(f)["surcharge_per_unit"], 5)
+
+    def test_a_withdrawn_answer_and_one_after_the_scenario_date_do_not_count(self):
+        f = one_position()
+        f.setup_fees = [SetupFee("1", D(50), "Q7", at("2030-02-10")), SetupFee("1", D(80), "Q8", at("2030-04-01"))]
+        self.assertEqual(self.position(f)["surcharge_per_unit"], 5)
+        f.withdrawals = [Withdrawal("Q9", "Q7", at("2030-02-12"))]
+        bid = self.position(f)
+        self.assertEqual((bid["unit_price"], bid["surcharge_per_unit"]), (90, 0))
+
+    def test_the_latest_answer_for_the_position_wins_and_other_positions_are_untouched(self):
+        f = one_position()
+        f.setup_fees = [SetupFee("1", D(50), "Q7", at("2030-02-10")), SetupFee("1", D(20), "Q8", at("2030-02-20")),
+                        SetupFee("2", D(900), "Q6", at("2030-02-25"))]
+        self.assertEqual(self.position(f)["surcharge_per_unit"], 2)
+
+    def test_an_agent_records_it_as_the_answer_writes_it(self):
+        builder = FactsBuilder()
+        builder.add({"tender_reference": REF, "scenario_date": "2030-03-15T10:00:00Z", "setup_fees": [
+            {"position": "1", "fee_eur": "50,00 EUR", "qa_number": "Q7",
+             "source": {"site": "portal", "document": "Q&A 7", "date": "2030-02-10T09:00:00Z"}}]})
+        [fee] = builder.facts().setup_fees
+        self.assertEqual((fee.position, fee.fee_eur, fee.qa_number), ("1", D("50.00"), "Q7"))
+
+    def test_the_checklist_no_longer_assumes_zero_for_that_position(self):
+        f = one_position()
+        assumed = [n for n in evaluate(f).needed() if "setup fee" in n["what"]]
+        f.setup_fees = [SetupFee("1", D(50), "Q7", at("2030-02-10"))]
+        self.assertTrue(assumed)
+        self.assertEqual([n for n in evaluate(f).needed() if "setup fee" in n["what"]], [])
 
 
 class Clauses(unittest.TestCase):

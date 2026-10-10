@@ -148,6 +148,12 @@ def assignment(facts: Facts, position: str, kind: AssignmentKind) -> Assignment 
     return max(found, key=_qa_rank) if found else None
 
 
+def setup_fee(facts: Facts, position: str) -> Decimal | None:
+    """Rules 13 and 25: the one-off setup fee the latest remaining Q&A answer sets for the position, if any."""
+    found = [s for s in _live(facts.setup_fees, facts) if norm_key(s.position) == norm_key(position)]
+    return max(found, key=_qa_rank).fee_eur if found else None
+
+
 def stated_quantity(facts: Facts, pos: TenderPosition) -> Decimal:
     """Rules 1 and 13: the tender quantity, overridden by the latest remaining Q&A change, in the stated unit."""
     changes = [c for c in _live(facts.quantity_changes, facts) if norm_key(c.position) == norm_key(pos.position)]

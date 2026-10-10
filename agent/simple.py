@@ -28,8 +28,8 @@ JOB = """You work the website {site} ({url}) for the whole run, and only this we
 website of this tender holds; information may also sit where you would not expect it, so look at what yours shows.
 
 Record on the board every fact of the tender {reference} that your website shows and the bid rules need: the bill of
-quantities and every bidder Q&A answer (quantity changes, withdrawals, technical amendments, keys assigned to
-positions); specification revisions and the current one's requirements with all attributes and catalogue groups;
+quantities and every bidder Q&A answer (quantity changes, withdrawals, technical amendments, one-off setup fees for
+a position, keys assigned to positions); specification revisions and the current one's requirements with all attributes and catalogue groups;
 materials with their attributes, status, stock, lead times, price conditions, carton size, masses, metal index and
 setup fee; and every message naming the tender with its records. Read every page of a list and every version.
 

@@ -209,7 +209,7 @@ def _material(facts: Facts, ln, c: _Collector):
         c.add("find", ERP, f"stock of {name}", 6, p)
     if m.stock_lead_weeks is None or m.production_lead_weeks is None:
         c.add("find", ERP, f"stock and production lead times of {name}", 6, p)
-    if m.setup_fee_eur is None:
+    if m.setup_fee_eur is None and resolve.setup_fee(facts, p) is None:
         c.add("verify", ERP, f"setup fee (Rüstkosten) of {name}: none recorded, 0 assumed", 27, p)
     if resolve.assignment(facts, p, AssignmentKind.PACKAGING) and not m.pieces_per_carton:
         c.add("find", ERP, f"pieces per carton (Packinhalt) of {name}", 23, p)

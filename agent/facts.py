@@ -203,6 +203,16 @@ class QuantityChange:
 
 
 @dataclass
+class SetupFee:
+    """A clarification that sets a one-off setup fee (Rüstkosten) for a position: EUR net for the whole position. The
+    engine spreads it over the position's final pieces and does not discount it (rules 25, 27)."""
+    position: str
+    fee_eur: Decimal
+    qa_number: str = ""
+    source: Source | None = None
+
+
+@dataclass
 class Withdrawal:
     """A Q&A answer that withdraws (zieht zurück) an earlier answer by its number (rule 13)."""
     qa_number: str
@@ -471,6 +481,7 @@ class Facts:
 
     positions: list[TenderPosition] = field(default_factory=list)
     quantity_changes: list[QuantityChange] = field(default_factory=list)
+    setup_fees: list[SetupFee] = field(default_factory=list)
     withdrawals: list[Withdrawal] = field(default_factory=list)
     amendments: list[TechnicalAmendment] = field(default_factory=list)
     assignments: list[Assignment] = field(default_factory=list)
@@ -609,6 +620,8 @@ FIELD_DOCS = {
                                    "page writes it (\"3100 g\")",
     "Material.stock": "pieces in stock",
     "Material.setup_fee_eur": "ordinary setup fee (Rüstkosten) for the whole position, if the ERP states one",
+    "SetupFee.fee_eur": "the one-off setup fee (Rüstkosten) a Q&A answer states for this position, in EUR net for "
+                        "the whole position, as the answer writes it",
     "PriceCondition.price_unit": "number of pieces the price refers to (price per 100 pieces -> 100)",
     "PriceCondition.fx_key": "the FX key the condition names when its currency is not EUR",
     "Scale.min_quantity": "the scale starts at this many pieces",
@@ -690,6 +703,8 @@ FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you 
   documents their revision.
 - Quantities stay in the unit the tender or Q&A states (sets stay sets); the engine converts with the requirement's
   pieces_per_set. A Q&A answer that withdraws an earlier one goes into withdrawals with that answer's number.
+- A Q&A answer that states a one-off setup fee (Rüstkosten) for a position goes into setup_fees, with the position,
+  the amount and the answer's number and date. A setup fee the ERP states for a material stays with the material.
 - Requirements come from every revision you saw; mark the one the site marks as current/valid with current=true.
   A technical amendment names the revision and requirement it applies to; record it with that revision even if it
   is not the current one. For usable travel (nutzbarer Weg) enter the stated travel as stroke_mm, set
@@ -719,6 +734,7 @@ FILLING_GUIDE = """How to fill the facts (the engine applies the bid rules; you 
 _IDENTITY: dict[str, tuple[str, ...]] = {
     "positions": ("position",),
     "quantity_changes": ("position", "qa_number", "source.date"),
+    "setup_fees": ("position", "qa_number", "source.date"),
     "withdrawals": ("qa_number", "withdraws"),
     "amendments": ("revision", "requirement", "attribute", "qa_number", "source.date"),
     "assignments": ("position", "kind", "qa_number", "source.date"),

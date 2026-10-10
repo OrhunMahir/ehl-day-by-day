@@ -2,7 +2,7 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
-## 2026-10-10 15:30 · Fewer site assumptions in facts.py, randomised scenarios against a reference
+## 2026-10-10 15:05 · Fewer site assumptions in facts.py, randomised scenarios against a reference
 
 - Changed: `agent/facts.py` contract change: `QuantityChange`, `TechnicalAmendment` and `Assignment` take
   `qa_number` as an optional field after the values (order: values, then `qa_number`, then `source`), so a

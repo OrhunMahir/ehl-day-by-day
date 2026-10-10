@@ -5,7 +5,10 @@ Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Pu
 ## 2026-10-10 18:27 · Took back my edit of the working documents: Julien writes the rule about test runs
 
 - Changed: reverted commit `3a0362e`. `AGENTS.md`, `CLAUDE.md`, `docs/streams.md` and the head of
-  `docs/handover-stream-o.md` are as they were before it. Nothing under `agent/` changed, then or now.
+  `docs/handover-stream-o.md` are as they were before it. Nothing under `agent/` changed, then or now. The
+  revert also removed that commit's entry from this log; this entry replaces it. Still there from before:
+  `docs/handover-stream-o.md` (commit `96458dc`), the note on what stream O changed, the settings, what the runs
+  have shown and what to look at in the next run.
 - Why: Orhun decided that Julien starts all sandbox test runs, and that Julien writes this into the documents
   himself; two people editing the same passages would conflict at the merge.
 - Checked: `git diff 96458dc -- AGENTS.md CLAUDE.md docs/streams.md docs/handover-stream-o.md` is empty.

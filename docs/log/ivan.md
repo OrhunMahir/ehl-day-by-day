@@ -2,6 +2,27 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 15:25 · Facts in pieces: FactsBuilder, update_schema, to_dict
+
+- Changed: `agent/facts.py` gains `FactsBuilder` (collects the facts over several tool calls), `update_schema()`
+  (the schema of one update) and `to_dict()` (plain JSON of the facts, the reverse of `from_dict`). Nothing existing
+  changed. New `agent/tests/test_engine_builder.py`.
+- Why: with one big facts JSON, a single bad field throws away the whole tool call, and Qwen has to hold every fact
+  until the end. Now the lead can add facts as each report comes in.
+- How it behaves: each update is checked at once; an update with a bad field is rejected whole with the field
+  named, and what was collected before stays. Lists grow; an item with the same identity as an earlier one (same
+  position, same material number, same mail key + date + sender, ...) replaces it. Materials, revisions and
+  positions merge field by field, so a material's stock and conditions can come after its attributes; a null never
+  erases a known value. `replace_lists` takes back records added by mistake.
+- Checked: 101 engine tests pass. 50 of the random tenders are cut into random pieces (materials and revisions split
+  field by field, updates in random order) and must give the same bid as the facts sent at once; with the
+  field-by-field merge of materials switched off on purpose, 47 of the 50 fail, so the test catches it.
+- For the others: O — prefer two tools, `add_facts` (parameters `facts.update_schema()`, handler
+  `builder.add(args)`) and `price_bid` (no parameters, `engine.evaluate(builder.facts())`); the docstring of
+  `agent/engine/__init__.py` shows it. `from_dict` with one big JSON still works. Log `facts.to_dict(...)` or
+  `builder.data` in the run log so a test run's points can be traced to the facts. J — nothing.
+- Next: read O's first test run with the engine and trace lost points to facts or engine.
+
 ## 2026-10-10 15:10 · Re-read of /start and /challenges/rfq: pool allocation rule and omitted positions
 
 - Changed: `facts.SetupPool.allocation` (new enum `facts.Allocation`) carries the cent-allocation rule the Rüstpools

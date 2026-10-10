@@ -12,6 +12,7 @@ Conventions:
 """
 from __future__ import annotations
 
+import copy
 import re
 import types
 import typing
@@ -490,6 +491,25 @@ def from_dict(cls, data: dict):
     return cls(**kwargs)
 
 
+def to_dict(obj):
+    """Plain JSON of a facts dataclass (the reverse of `from_dict`): numbers as text, dates in ISO form."""
+    if is_dataclass(obj):
+        return {f.name: to_dict(getattr(obj, f.name)) for f in fields(obj)}
+    if isinstance(obj, list):
+        return [to_dict(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, Enum):
+        return obj.value
+    if isinstance(obj, Decimal):
+        text = format(obj.normalize(), "f")
+        # "1.234" would read as ambiguous; "1.2340" is the same value and is not
+        return text + "0" if re.fullmatch(r"-?[1-9]\d{0,2}\.\d{3}", text) else text
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    return obj
+
+
 def _members(tp) -> tuple[list, bool]:
     if typing.get_origin(tp) in (typing.Union, types.UnionType):
         args = typing.get_args(tp)
@@ -624,3 +644,142 @@ def _schema(tp) -> dict:
     if optional:
         out = {"anyOf": [out, {"type": "null"}]}
     return out
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Building the facts piece by piece, as the reports come in
+
+# Which fields identify an item of each list, so a re-sent item corrects the earlier one instead of adding a copy.
+_IDENTITY: dict[str, tuple[str, ...]] = {
+    "positions": ("position",),
+    "quantity_changes": ("position", "qa_number", "source.date"),
+    "withdrawals": ("qa_number", "withdraws"),
+    "amendments": ("revision", "requirement", "attribute", "qa_number", "source.date"),
+    "assignments": ("position", "kind", "qa_number", "source.date"),
+    "revisions": ("revision",),
+    "materials": ("material_number",),
+    "discount_approvals": ("reference", "source.date", "source.sender"),
+    "condition_groups": ("reference", "key", "source.date", "source.sender"),
+    "metal_indices": ("reference", "key", "source.date", "source.sender"),
+    "packaging_tariffs": ("reference", "key", "source.date", "source.sender"),
+    "delivery_commitments": ("reference", "key", "source.date", "source.sender"),
+    "fx_rates": ("reference", "key", "source.date", "source.sender"),
+    "setup_pools": ("reference", "key", "source.date", "source.sender"),
+    "project_bonuses": ("reference", "key", "source.date", "source.sender"),
+    "end_reserves": ("reference", "key", "revision", "source.date", "source.sender"),
+}
+# Items whose fields arrive in parts (a material's attributes, stock and conditions are on different pages).
+_FIELD_MERGE = {"positions", "revisions", "materials"}
+
+
+def _ident(item: dict, paths: tuple[str, ...]) -> tuple:
+    out = []
+    for path in paths:
+        value = item
+        for part in path.split("."):
+            value = value.get(part) if isinstance(value, dict) else None
+        if value is None or value == "":
+            out.append(None)
+        elif path.endswith("date"):
+            try:
+                out.append(when(value).isoformat())
+            except ValueError:
+                out.append(norm_key(str(value)))
+        else:
+            out.append(norm_key(str(value)))
+    return tuple(out)
+
+
+def _merge_fields(old: dict, new: dict) -> dict:
+    """Fields of `new` override `old`; a null never erases a known value; requirements merge by their id."""
+    merged = dict(old)
+    for name, value in new.items():
+        if value is None:
+            continue
+        if name == "requirements" and isinstance(value, list) and isinstance(old.get(name), list):
+            merged[name] = _merge_list(old[name], value, ("requirement",), field_merge=True)
+        else:
+            merged[name] = value
+    return merged
+
+
+def _merge_list(old: list, new: list, paths: tuple[str, ...], field_merge: bool) -> list:
+    items = list(old)
+    for item in new:
+        if not isinstance(item, dict):
+            raise ValueError(f"expected objects in the list, got {item!r}")
+        key = _ident(item, paths)
+        at = next((i for i, existing in enumerate(items) if _ident(existing, paths) == key), None)
+        if at is None:
+            items.append(item)
+        else:
+            items[at] = _merge_fields(items[at], item) if field_merge else item
+    return items
+
+
+class FactsBuilder:
+    """Collects the facts as plain JSON over several tool calls.
+
+    `add(update)` merges one update and checks the result at once: an update with a bad field is rejected whole
+    (ValueError naming the field) and the facts collected so far stay as they were. Lists grow; an item with the
+    same identity as an earlier one replaces it (positions, revisions and materials are merged field by field, so a
+    material's stock and conditions can arrive after its attributes). `replace_lists` in an update replaces whole
+    lists, to take back records added by mistake. `facts()` returns the typed `Facts` for the engine.
+    """
+
+    def __init__(self, data: dict | None = None):
+        self.data: dict = copy.deepcopy(data) if data else {}
+
+    def add(self, update: dict) -> str:
+        if not isinstance(update, dict):
+            raise ValueError("the update must be an object")
+        update = dict(update)
+        replace = set(update.pop("replace_lists", None) or [])
+        unknown = replace - set(_IDENTITY) - {"searched_groups"}
+        if unknown:
+            raise ValueError(f"replace_lists: unknown list(s) {', '.join(sorted(unknown))}")
+        merged = copy.deepcopy(self.data)
+        for name, value in update.items():
+            if name in replace or name not in _IDENTITY and name != "searched_groups":
+                if name == "authority" and isinstance(value, dict) and name not in replace:
+                    merged[name] = {**merged.get(name, {}), **value}
+                elif value is not None:
+                    merged[name] = value
+            elif name == "searched_groups":
+                groups = list(merged.get(name, []))
+                for g in value or []:
+                    if norm_key(g) not in {norm_key(x) for x in groups}:
+                        groups.append(g)
+                merged[name] = groups
+            else:
+                if not isinstance(value, list):
+                    raise ValueError(f"{name}: expected a list")
+                merged[name] = _merge_list(merged.get(name, []), value, _IDENTITY[name], name in _FIELD_MERGE)
+        for name in replace - set(update):
+            merged[name] = []
+        from_dict(Facts, {"tender_reference": "", "scenario_date": "2000-01-01", **merged})   # check only
+        self.data = merged
+        return self.summary()
+
+    def facts(self) -> Facts:
+        missing = [n for n in ("tender_reference", "scenario_date") if not self.data.get(n)]
+        if missing:
+            raise ValueError(f"still missing: {', '.join(missing)}")
+        return from_dict(Facts, self.data)
+
+    def summary(self) -> str:
+        parts = [f"{n}={self.data[n]}" for n in ("tender_reference", "scenario_date") if self.data.get(n)]
+        parts += [f"{n}: {len(v)}" for n, v in self.data.items() if isinstance(v, list) and v]
+        return "facts so far: " + ", ".join(parts) if parts else "no facts yet"
+
+
+def update_schema() -> dict:
+    """JSON Schema of one `FactsBuilder.add` update: any part of the facts, plus `replace_lists`."""
+    schema = json_schema(Facts)
+    schema.pop("required", None)
+    schema["properties"]["replace_lists"] = {
+        "type": "array", "items": {"type": "string", "enum": sorted(_IDENTITY) + ["searched_groups"]},
+        "description": "lists to replace entirely by the ones in this update (to take back wrong records)"}
+    schema["description"] = ("Add facts as they are found; send only what is new or corrected. An item with the "
+                             "same identity (e.g. the same material_number) updates the earlier one.")
+    return schema

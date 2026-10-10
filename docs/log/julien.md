@@ -2,6 +2,27 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 22:55 · Branch stream-j-tweaks: prices as written, every rule mail, until minute 11
+
+- Changed (`stream-j-tweaks`, from `stream-j-simple`):
+  - `simple.py`: agents record every price, amount, rate and mass as text exactly as the page writes it; the facts
+    module reads the German format.
+  - The job names every kind of rule mail the bid needs (end reserves, exchange rates, metal-index windows,
+    packaging tariffs, setup pools, bonus bands, condition-group rules, delivery commitments).
+  - Every page and validity period of a material's price conditions is read.
+  - Investigations run until minute 11 at the latest (was 9) and end as soon as the engine has nothing left to
+    find.
+  - `board.py`: up to 30 open items per update; `complete()` for the early end.
+- Why: what the engine missed in the 51.2 run (`run_9b8aee1022f379bc`):
+  - no rule mail was recorded at all, so there was no exchange rate, metal index, packaging, setup pool, bonus or
+    condition-group rule;
+  - "186.615,00" per 100 pieces was recorded as 186.615, so four base prices were a thousand times too low;
+  - the run ended after 11:44 with 8 minutes unused.
+- Checked: 218 unit tests pass (1 skipped), among them a German price kept at its value and the early end. Local run
+  and sandbox test: see the next entry.
+- For the others: nothing changes on `main`.
+- Next: local run with Qwen, then a sandbox test if it looks better than the 51.2 run.
+
 ## 2026-10-10 22:30 · Branch stream-j-simple: the board concept (best test run 51.2)
 
 - Changed: new branch `stream-j-simple` (from `stream-j` at `31f8933`). One browsing agent per website, connected

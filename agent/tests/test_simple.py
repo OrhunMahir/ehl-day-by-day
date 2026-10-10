@@ -90,6 +90,18 @@ class TheBoard(unittest.IsolatedAsyncioTestCase):
         board.record("site-c", {"searched_groups": ["G2"]})  # a later search of the same agent, found nothing
         self.assertEqual(board.builder.data["searched_groups"], ["G1", "G2"])
 
+    async def test_a_price_recorded_as_written_on_a_german_page_keeps_its_value(self):
+        # a sandbox run: "186.615,00" per 100 pieces turned into 186.615 when the model made it a number itself
+        board = Board(log=lambda *a: None)
+        board.record("site-a", {**START, **POSITIONS})
+        board.record("site-b", SPEC)
+        material = {**ERP["materials"][0], "conditions": [{**ERP["materials"][0]["conditions"][0], "price_unit": "100",
+                                                          "scales": [{"min_quantity": "1", "price": "186.615,00"}]}]}
+        board.record("site-c", {"materials": [material], "searched_groups": ["G1"]})
+        from engine import evaluate
+        position = next(p for p in evaluate(board.builder.facts()).answer["positions"] if p["position"] == "1")
+        self.assertEqual(position["base_unit_price"], 1866.15)
+
     async def test_a_bad_record_is_refused_and_changes_nothing(self):
         board = Board(log=lambda *a: None)
         with self.assertRaises(ValueError):
@@ -158,6 +170,32 @@ class TwoWebsitesNoHandOff(unittest.TestCase):
         self.assertEqual(len(seen_by_erp), 1, "the ERP agent never learnt of the catalogue group")
         self.assertLess(seen_by_erp[0] - started, 1.0)  # at once, not after the other agent ended
         self.assertEqual([m["material_number"] for m in board.builder.data["materials"]], ["M1"])
+
+
+class OnlyAsLongAsItHelps(unittest.TestCase):
+    def test_investigations_end_as_soon_as_the_bid_is_complete(self):
+        class Forever:
+            async def run(self):
+                await asyncio.sleep(3600)
+
+        async def scenario():
+            lead = agent.Orchestrator(TASK, None, {s: tab(s) for s in SITES}, None, time.time())
+            lead.log = lambda *a: None
+            lead.collect_until = time.time() + 600
+            board = Board(lead.builder, log=lead.log)
+            board.complete = lambda: True
+            started = time.time()
+            with patch.object(simple, "COMPLETE_CHECK_SECONDS", 0.1):
+                await simple.run_agents(lead, [Forever(), Forever()], board)
+            return time.time() - started
+
+        self.assertLess(asyncio.run(scenario()), 2)
+
+    def test_an_incomplete_bid_is_not_complete(self):
+        board = Board(log=lambda *a: None)
+        self.assertFalse(board.complete())
+        board.record("x", {**START, **POSITIONS})
+        self.assertFalse(board.complete())
 
 
 class OneAgentPerWebsite(unittest.TestCase):

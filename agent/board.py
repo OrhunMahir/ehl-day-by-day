@@ -13,7 +13,7 @@ import facts
 
 NEWS_RECORDS = 12  # most recent records of other agents shown in one update
 RECORD_CHARS = 700  # of each of them
-NEEDS_SHOWN = 15
+NEEDS_SHOWN = 30  # enough that the items for prices and rule mails are not cut off behind the others
 
 
 class Board:
@@ -74,6 +74,16 @@ class Board:
         except Exception as error:  # noqa: BLE001 - the board still shows the records
             self.log(f"[board] the engine could not read the facts: {error}")
             return []
+
+    def complete(self) -> bool:
+        """Whether the engine has everything it needs: every position bid with a confirmed material, every price part
+        known, nothing left to find."""
+        if not self.builder.data.get("tender_reference") or not self.builder.data.get("positions"):
+            return False
+        try:
+            return engine.evaluate(self.builder.facts(), allow_no_bid=False).complete
+        except Exception:  # noqa: BLE001
+            return False
 
     def news(self, who: str, since: int) -> str:
         """What changed for agent `who` since version `since`: the others' records, then what is still needed."""

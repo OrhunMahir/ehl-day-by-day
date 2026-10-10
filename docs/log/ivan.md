@@ -2,6 +2,69 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 15:50 · Thorough check: Python 3.12, damaged facts, speed, fair play
+
+- Changed: the engine now keeps the answer valid whatever the facts look like. A position listed twice counts once
+  (last entry), an empty or over-long position number or material number leaves the position out (in `omitted`),
+  a negative quantity is unknown, a discount outside 0–100 % counts as 0, a negative price component makes the
+  unit price unknown and its breakdown field blank, an unreadable amendment value is ignored, a bonus or pool
+  without usable weights is unknown; each case is named in `issues`. A no_bid now names the closest candidates
+  and what differs ("closest: M: pressure 170 (required 160)"), so the lead can re-check those values before
+  submitting a no_bid. `FactsBuilder` checks only what an update changes: 282 updates of a 100-position tender
+  took 235 s before and 2.8 s now. New `agent/tests/test_engine_robust.py`.
+- Why: a model fills the facts; a crash or an answer the configurator rejects costs the run. One misread attribute
+  turns a bid into a no_bid, which loses almost all points, so a no_bid must be easy to double-check.
+- Checked: 107 engine tests pass on Python 3.12 (the sandbox's version) and 3.14; ruff (errors, bugbear) clean.
+  400 damaged tenders in the tests and 3000 more with twice the damage in a one-off run: no crash, every answer
+  passes the answer schema with a total equal to the sum of its positions. A 100-position tender with 412 materials
+  and 3872 mail records: evaluate 1.5 s, explain 0.9 s. `atira test-run agent --dry-run` packs `facts.py` and
+  `engine/`. No value from the scouting notes in any package file (115 values checked). Full suite with
+  `PYTHONUTF8=1`: only the three known `test_kit` failures.
+- For the others: O — when `price_bid` returns a no_bid, have the lead re-check the values named after "closest:"
+  once before submitting. J — nothing.
+- Next: read O's first test run with the engine.
+
+## 2026-10-10 15:32 · Explanation of the bid for the run log, guide for filling the facts
+
+- Changed: `result.explain()` (new `agent/engine/explain.py`) returns plain text for the run log: per position
+  how the quantity came about (which Q&A answers, which withdrawn), the governing requirement, the chosen material
+  and why the other candidates of its group were not, the price condition and scale, every price component, the
+  discount scope, the lead-time inputs; per mail key which record counts and how many were ignored and why (older,
+  other tender reference, after the scenario date, sender not authorized). It decides nothing itself.
+  `facts.FILLING_GUIDE` is a text for the lead's prompt: which fact goes into which field, with the traps from the
+  rules and no values. The engine now reports an issue when `director_address` is empty, because then approvals
+  from any sender count. The builder from the previous entry (not pushed then) is part of this push.
+- Why: a test run shows only points per field; with the explanation in the log a lost point can be traced to a
+  wrong fact or a wrong calculation. The guide keeps the prompt and the facts' meaning in one place.
+- Checked: 105 engine tests pass; the explanation runs on all 300 random tenders and names the deciding facts in
+  a hand-checked case; a test fails if the guide names a field that does not exist. Full suite with
+  `PYTHONUTF8=1`: only the three known `test_kit` failures.
+- For the others: O — put `facts.FILLING_GUIDE` into the lead's prompt (next to the facts tool), set
+  `director_address` and `bidder_domain` from the brief, and print `result.explain()` into the run log after every
+  `price_bid`. J — nothing.
+- Next: read O's first test run with the engine; trace lost points with the explanation.
+
+## 2026-10-10 15:25 · Facts in pieces: FactsBuilder, update_schema, to_dict
+
+- Changed: `agent/facts.py` gains `FactsBuilder` (collects the facts over several tool calls), `update_schema()`
+  (the schema of one update) and `to_dict()` (plain JSON of the facts, the reverse of `from_dict`). Nothing existing
+  changed. New `agent/tests/test_engine_builder.py`.
+- Why: with one big facts JSON, a single bad field throws away the whole tool call, and Qwen has to hold every fact
+  until the end. Now the lead can add facts as each report comes in.
+- How it behaves: each update is checked at once; an update with a bad field is rejected whole with the field
+  named, and what was collected before stays. Lists grow; an item with the same identity as an earlier one (same
+  position, same material number, same mail key + date + sender, ...) replaces it. Materials, revisions and
+  positions merge field by field, so a material's stock and conditions can come after its attributes; a null never
+  erases a known value. `replace_lists` takes back records added by mistake.
+- Checked: 101 engine tests pass. 50 of the random tenders are cut into random pieces (materials and revisions split
+  field by field, updates in random order) and must give the same bid as the facts sent at once; with the
+  field-by-field merge of materials switched off on purpose, 47 of the 50 fail, so the test catches it.
+- For the others: O — prefer two tools, `add_facts` (parameters `facts.update_schema()`, handler
+  `builder.add(args)`) and `price_bid` (no parameters, `engine.evaluate(builder.facts())`); the docstring of
+  `agent/engine/__init__.py` shows it. `from_dict` with one big JSON still works. Log `facts.to_dict(...)` or
+  `builder.data` in the run log so a test run's points can be traced to the facts. J — nothing.
+- Next: read O's first test run with the engine and trace lost points to facts or engine.
+
 ## 2026-10-10 15:10 · Re-read of /start and /challenges/rfq: pool allocation rule and omitted positions
 
 - Changed: `facts.SetupPool.allocation` (new enum `facts.Allocation`) carries the cent-allocation rule the Rüstpools

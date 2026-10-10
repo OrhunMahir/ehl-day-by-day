@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4JXQ5T4N43599W8EMVD8K0T",
+  "strategy": "manual-commit",
+  "branch": "stream-o",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "docs/log/orhun.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2,
+    "cache_creation_tokens": 2035,
+    "cache_read_tokens": 316728,
+    "output_tokens": 512,
+    "api_call_count": 1
+  }
+}

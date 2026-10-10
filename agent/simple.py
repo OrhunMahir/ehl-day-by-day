@@ -21,6 +21,7 @@ import browsers
 import facts
 import run as contract
 from board import Board
+from browser import Tab
 from browsing import BrowsingAgent
 from llm import Model
 
@@ -154,6 +155,8 @@ async def main() -> int:
             return access["siteId"], await lead_module.open_site(access["siteId"], access["url"], page)
         # all websites at once: a slow one must not hold up the others (a sandbox run lost 80 s here)
         tabs = dict(await asyncio.gather(*(open_one(i, a) for i, a in enumerate(task["access"][:4]))))
+        # a website that stops answering its tab's session is opened again in another of these (browser.py)
+        Tab.browsers = list({id(b): b for b in (tab.page.context.browser for tab in tabs.values()) if b}.values())
         lead = lead_module.Orchestrator(task, token, tabs, model, started, model)
         try:
             await asyncio.wait_for(_run(lead, model, reader), timeout=lead.deadline - time.time() + 5)

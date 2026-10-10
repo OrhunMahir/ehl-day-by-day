@@ -2,6 +2,29 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 23:39 · A website that stops answering its tab is opened again in a fresh session (touches browser.py)
+
+- Changed (branch `stream-o-board-openai`):
+  - `agent/browser.py` (Julien's file, changed on Orhun's request): a tab counts the page requests in a row that
+    were given up without an answer (25 s or more). After two, the next action opens the website's start page in a
+    fresh browser session: a new context without cookies, in another browser of the run where there is one. The
+    agent is told to sign in again. At most three fresh sessions per tab and run. One answered page request sets
+    the count back, so a single hung request is still only requested again, as before.
+  - `agent/simple.py`: the run's browsers are registered for this at the start.
+  - `agent/tests/test_browser_fresh.py` (new): the behaviour on an invented website.
+- Why: in `run_fed0a871a9729e24` the tender portal's tab got no page for ten minutes (every load and every
+  sign-in ran into its limit) while the other three websites answered in seconds, and the submission later used the
+  same tab and session. Requesting again inside the same session did not help. This is the second sandbox run of
+  the board concept that one unanswering website ended (`run_930993c7fb3173ed`: the ERP).
+- Checked: 229 unit tests pass (1 skipped). Not checked: whether a fresh session is answered on the real websites
+  when the first one is not. That is the assumption this change rests on; the log of the next run with a hanging
+  website will show it (`fresh browser session 1 of 3`).
+- Learned: nothing new about the websites yet; the log of the failed run does not show whether the website was down
+  for everyone or only for that session.
+- For the others: J: `browser.py` has `Tab.browsers`, `_fresh_session`, `_other_browser`, `_new_session_page`,
+  `unanswered`; `_ensure_open` calls `_fresh_session` first. Please check it against what you know of the hangs.
+- Next: one test run of this branch.
+
 ## 2026-10-10 23:20 · Test run run_fed0a871a9729e24 ended without a bid: the tender portal hardly answered
 
 - Test run `run_fed0a871a9729e24` (`8118663`): failed, no answer submitted, 20 min, 141 model calls, $1.19.

@@ -29,6 +29,12 @@ MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can as
 # time: one attempt may take LOAD_SECONDS, and a plain page load is requested again only after STUCK_SECONDS.
 LOAD_SECONDS = 30
 STUCK_SECONDS = 25
+# A website can also stop answering one browser session altogether (every request of a run's tab went unanswered for
+# ten minutes in a sandbox run, sign-ins included) while the other websites of the run answer in seconds. After
+# this many page requests in a row without an answer the tab opens its website again in a fresh session, in another
+# browser of the run where there is one; the agent signs in again.
+UNANSWERED_BEFORE_FRESH = 2
+FRESH_SESSIONS = 3  # per tab and run
 
 
 class _HtmlText(HTMLParser):
@@ -99,6 +105,7 @@ class Tab:
     """One website in one browser page."""
 
     homes: dict[str, str] = {}  # site id -> the origin its tab started on, for every tab of this run
+    browsers: list = []  # the run's browsers, for a fresh session in another one (see `_fresh_session`)
 
     def __init__(self, site_id: str, page, log=print):
         self.site_id = site_id
@@ -115,6 +122,8 @@ class Tab:
         self.scratch_pages: set = set()
         self.previous: list = []  # pages below the active popup, newest last
         self.loading: tuple[str, str, float] | None = None  # the page request in flight: address, method, since
+        self.unanswered = 0  # page requests in a row that were given up without an answer
+        self.fresh_sessions = 0
         self._attach(page)
 
     def _attach(self, page):
@@ -174,9 +183,53 @@ class Tab:
             self.page = self.previous.pop()
             self.events.append("The popup closed; back on the page that opened it")
 
+    def _gave_up(self, pending) -> None:
+        """A page request ends without an answer; it counts when the website had its time to answer."""
+        if pending and time.time() - pending[2] >= STUCK_SECONDS:
+            self.unanswered += 1
+
+    def _other_browser(self):
+        """Where a fresh session opens: another browser of the run, each in turn, or this one when it is the only one."""
+        current = self.page.context.browser
+        others = [b for b in Tab.browsers if b is not current and b.is_connected()]
+        return others[self.fresh_sessions % len(others)] if others else current
+
+    async def _new_session_page(self):
+        context = await self._other_browser().new_context()
+        return await context.new_page()
+
+    async def _fresh_session(self) -> bool:
+        """The website has left several page requests in a row without an answer: open it again in a fresh session
+        (no cookies, another browser where there is one). Returns whether it did."""
+        pending = self.loading
+        stuck = self.unanswered + bool(pending and time.time() - pending[2] >= STUCK_SECONDS)
+        if stuck < UNANSWERED_BEFORE_FRESH or self.fresh_sessions >= FRESH_SESSIONS or not self.home:
+            return False
+        try:
+            page = await asyncio.wait_for(self._new_session_page(), timeout=15)
+        except Exception as error:  # noqa: BLE001 - the tab stays as it is
+            self.unanswered = 0  # not on every action: only after the website has gone unanswered again
+            self.events.append("The website does not answer and a fresh browser session could not be opened: "
+                               + (str(error).splitlines() or [type(error).__name__])[0][:120])
+            return False
+        self.fresh_sessions += 1
+        self.unanswered, self.loading = 0, None
+        self.page, self.previous = page, []
+        self._attach(page)
+        self.log(f"[{self.site_id}] {stuck} page requests in a row unanswered; fresh browser session "
+                 f"{self.fresh_sessions} of {FRESH_SESSIONS}")
+        self.events.append(f"The website had left {stuck} page requests in a row without an answer, so it was opened "
+                           "again in a fresh browser session: sign in again and continue where you were")
+        try:
+            await page.goto(self.home, wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)
+        except Exception as error:  # noqa: BLE001 - the next read reports what is there
+            self.events.append(f"Navigation error: {error}".splitlines()[0])
+        return True
+
     async def _ensure_open(self):
-        """The active page must be open: fall back to an earlier page of this tab, or reopen the site."""
-        if not self.page.is_closed():
+        """The active page must be open: fall back to an earlier page of this tab, or reopen the site. A website
+        that has stopped answering this session gets a fresh one first."""
+        if await self._fresh_session() or not self.page.is_closed():
             return
         while self.previous and self.previous[-1].is_closed():
             self.previous.pop()
@@ -220,16 +273,19 @@ class Tab:
 
     def _on_request(self, request):
         if self._main_document(request):
+            self._gave_up(self.loading)  # a new page request replaces one that was never answered
             self.loading = (request.url, request.method, time.time())
 
     def _on_request_failed(self, request):
         if self._main_document(request) and self.loading and self.loading[0] == request.url:
+            self._gave_up(self.loading)
             self.loading = None
 
     def _on_response(self, response):
         if self._main_document(response.request):
             self.last_status = response.status
             self.loading = None
+            self.unanswered = 0
 
     async def _unstick(self, force: bool = False) -> bool:
         """A plain page load the site has left unanswered for STUCK_SECONDS is made again: a new request is usually
@@ -247,6 +303,7 @@ class Tab:
         if not target or target == "about:blank":
             return False
         waited = time.time() - pending[2] if pending else 0
+        self._gave_up(pending)
         self.loading = None
         try:
             await self.page.goto(target, wait_until="domcontentloaded", timeout=LOAD_SECONDS * 1000)

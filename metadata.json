@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4JYF7D48SG40ATYC7912CV0",
+  "strategy": "manual-commit",
+  "branch": "stream-i",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "agent/engine/resolve.py",
+    "agent/facts.py",
+    "agent/tests/test_engine_advanced.py",
+    "agent/tests/test_engine_base.py",
+    "agent/tests/test_engine_core.py",
+    "agent/tests/test_engine_helpers.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 26,
+    "cache_creation_tokens": 19001,
+    "cache_read_tokens": 2775637,
+    "output_tokens": 13847,
+    "api_call_count": 13
+  }
+}

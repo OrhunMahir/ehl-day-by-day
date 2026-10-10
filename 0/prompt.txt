@@ -1,0 +1,13 @@
+yes you can push
+
+---
+
+so you cant run a test now to ensure that it works?
+
+---
+
+well it is important that we dont overfit the model, because the real submission quality will be evaluated on different websites with different data, I think
+
+---
+
+yes

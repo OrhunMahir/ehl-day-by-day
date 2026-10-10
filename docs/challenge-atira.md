@@ -181,7 +181,7 @@ acknowledged but never counts.
   cargo, gcc, make, git, curl, jq, `xdotool`, ImageMagick `import`.
 - Headful Chromium already open; attach with `chromium.connect_over_cdp(CDP_URL)`. Tabs and contexts are free.
   Starting any other browser (headless included) is stopped within seconds and logged.
-- One submission in flight per team (next upload gets `429`). Test runs: two at a time, three more may wait.
+- One submission in flight per team (next upload gets `429`). Test runs: four at a time, three more may wait (re-read Sat 14:40; an earlier reading said two).
   Scored runs start before test runs; teams take turns.
 - Hosted model outage: retry. If ≥ 80 % of hosted calls failed over at least half the run and it ended without an
   answer, the run does not count and a scored run restarts once by itself.

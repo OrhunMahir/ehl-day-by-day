@@ -21,28 +21,33 @@ DEFAULT_MODELS = {
     "openrouter": "anthropic/claude-sonnet-5.5",
 }
 
+# Longest lead call seen in a run was about 90 s; a call that hangs must not eat the run.
+CALL_TIMEOUT_SECONDS = 240
+
 
 def _client_config(provider: str) -> tuple[str, str]:
+    """Base URL and key of a provider. Every base URL comes from the run's environment, where it points at the
+    platform's metering proxy; there is no address to fall back to."""
     env = os.environ
     if provider == "qwen":
         return env["QWEN_BASE_URL"], env["QWEN_API_KEY"]
     if provider == "anthropic":
-        base = env.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
-        return base + "/v1", env["ANTHROPIC_API_KEY"]
+        return env["ANTHROPIC_BASE_URL"].rstrip("/") + "/v1", env["ANTHROPIC_API_KEY"]
     if provider == "openai":
-        return env.get("OPENAI_BASE_URL", "https://api.openai.com/v1"), env["OPENAI_API_KEY"]
+        return env["OPENAI_BASE_URL"], env["OPENAI_API_KEY"]
     if provider == "openrouter":
-        base = env.get("LLM_PROXY_URL")
-        return (base + "/openrouter/v1") if base else "https://openrouter.ai/api/v1", env["OPENROUTER_API_KEY"]
+        return env["LLM_PROXY_URL"].rstrip("/") + "/openrouter/v1", env["OPENROUTER_API_KEY"]
     raise SystemExit(f"Unknown AGENT_PROVIDER {provider!r}; use one of {', '.join(DEFAULT_MODELS)}")
 
 
 class Model:
-    def __init__(self, provider: str | None = None, model: str | None = None):
+    def __init__(self, provider: str | None = None, model: str | None = None, reasoning_effort: str | None = None):
+        # how much the model thinks before it answers; None leaves the provider's default
+        self.reasoning_effort = reasoning_effort
         self.provider = provider or os.environ.get("AGENT_PROVIDER", "qwen")
         self.model = model or os.environ.get("AGENT_MODEL") or DEFAULT_MODELS[self.provider]
         base_url, api_key = _client_config(self.provider)
-        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=600, max_retries=0)
+        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key, timeout=CALL_TIMEOUT_SECONDS, max_retries=0)
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -54,6 +59,8 @@ class Model:
             try:
                 started = time.time()
                 args = dict(model=self.model, messages=messages, **kwargs)
+                if self.reasoning_effort:
+                    args.setdefault("reasoning_effort", self.reasoning_effort)
                 if tools:
                     args["tools"] = tools
                 reply = await self.client.chat.completions.create(**args)

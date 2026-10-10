@@ -14,19 +14,26 @@ Everything submitted to Atira is the folder `agent/`. One run goes like this:
 
 1. `agent.py` reads the run (`run.py`: the brief with the bid rules, each website's address and login, the answer
    schema, the expiry time) and opens one browser tab per website (`browsers.py`, `browser.py`).
-2. A **lead model** (`Orchestrator` in `agent.py`) reads the brief. It cannot browse. It has three tools:
+2. A **lead model** (`Orchestrator` in `agent.py`) reads the brief. It cannot browse. It has five tools:
    - `investigate(site, task)` sends a **browsing sub-agent** (`BrowsingAgent` in `browsing.py`) to one website with
      a task in plain language. The sub-agent drives the browser through a text view of the page (`observe.js`,
      `Tab` in `browser.py`), takes notes, and returns one text report. Several sites run in parallel.
-   - `calculate(expression)` does exact decimal arithmetic (`calc.py`).
-   - `submit_bid(answer, hints)` checks the answer against the schema, then sends a sub-agent to type the bid into
-     the tender website's form, fetch the signing code from the mailbox, sign and confirm.
+   - `add_facts(facts)` adds records to a `facts.FactsBuilder` (lists grow, a record with the same identity
+     replaces the earlier one), runs the bid engine (`engine/`) and returns the priced answer, what is missing
+     (`issues`, `needed`) and whether the facts are `complete`. `price_bid()` prices again without adding.
+   - `calculate(expression)` does exact decimal arithmetic (`calc.py`); a fallback since the engine exists.
+   - `submit_bid(answer, hints)` checks the answer against the schema, then sends the submission agent
+     (`submission.py`) to enter the bid in the tender website's form, fetch the signing code from the mailbox, sign
+     and confirm. It reads the page like a browsing sub-agent, but sets all fields of a form step in one call.
 3. The lead model decides what to ask next from the reports, works out the bid, and submits.
 
-The run's time is split in `agent.py`: investigations end at 65 % of the working time, from 70 % the lead must
-submit, and the bid must be entered and signed by 95 %. In a scored run the working time is what the platform
-gives (20 minutes: 13 / 14 / 19). In a test run or a local run it is 10 minutes (6.5 / 7 / 9.5), so a development
-run reports sooner; the agent tells the two apart by how far away the platform's expiry is.
+The run's time is split in `agent.py`. Every run, scored or not, works with 20 minutes. One investigation is
+ended after 4 minutes, so that a survey round and one follow-up round fit before investigations end at 45 %
+(minute 9). Then the lead is made to call `price_bid`, and the engine's answer is submitted without asking the lead
+again; entering and signing the bid gets the rest. A "no bid" from the engine is only submitted when nothing else
+is open and the group of every unmatched position was searched on purpose; otherwise those positions are left out
+and the rest is bid. After each submission attempt the agent asks the platform whether the run is still open; the
+platform closes a run the moment it accepts a bid, so an open run means "not accepted yet" and it submits again.
 
 What is weak in this design, and why the streams exist:
 
@@ -49,6 +56,8 @@ agent has never seen.
 - `Tab(site_id, page)` and `BrowsingAgent(model, tabs, credentials, task, context, name=..., deadline=...,
   max_steps=..., log=...)`, as `agent.py` calls them today.
 - `await BrowsingAgent.run()` returns one string: the report, then the notes taken while browsing.
+- Stream O also uses these internals; rename or change them only together with O: `Tab._locate`,
+  `Tab.aid_frames`, `Tab._absolute`, `Tab.observe`, `BrowsingAgent._login`, `BrowsingAgent._report`.
 
 **Work, in this order.**
 1. Run one sub-agent per website on your machine with a survey task and compare its report with what you see in
@@ -122,28 +131,38 @@ test.
 **Goal.** The run as a whole: the lead model asks the right questions, the answers become facts, the engine prices
 them, and one signed bid is submitted before the clock ends, every time.
 
-**Files only this stream edits.** `agent/agent.py`, `agent/llm.py`, `agent/models.py`, `agent/run.py`,
+**Files only this stream edits.** `agent/agent.py`, `agent/submission.py`, `agent/llm.py`, `agent/models.py`, `agent/run.py`,
 `agent/calc.py`, `agent/agent.json`, `agent/pyproject.toml`, `agent/uv.lock`, `agent/tests/test_kit.py`,
+`agent/tests/test_lead.py`,
 `README.md`, `AGENTS.md`, `CLAUDE.md`, `.gitignore`, `docs/` (except the other two push logs).
 
 **Work, in this order.**
 1. Baseline: one sandbox test run of the unchanged agent and its score breakdown. It shows where points are lost
    and sets the priorities of streams J and I.
-2. Time budget: done Sat 14:30 (see "How the agent works today"). Open: tune the three shares once a run has
-   shown how long entering and signing the bid really takes.
-3. Deadline guard: the lead is told to submit at 70 % of the time, but if it never calls `submit_bid` the run
-   still ends without a bid and scores 0. Make the submission happen without depending on the lead. After the
-   bid is accepted the process must exit within 10 seconds.
+2. Time budget: in place (see "How the agent works today"). The shares are a first guess from one run in which
+   the first round of investigations took 4 to 7 minutes and each lead decision 1 to 1.5 minutes; tune them once
+   a run has shown how long entering and signing the bid takes.
+3. Deadline guard: the lead is forced to call `submit_bid` at 50 % and again after every attempt the platform did
+   not accept. Still open: the submission sub-agent is told by `browsing.py` to "finish" 90 seconds before its
+   end, which fits an investigation but not a submission (stream J's file; the task text asks it not to stop).
 4. Reports to facts: have the lead model put what the sub-agents report into the records of `facts.py`, and call
    the engine instead of the calculator, as soon as stream I delivers the first version.
-5. Submission: the form, the signing code from the mailbox, signature, receipt check; validation against the
-   schema read at run time.
+5. Submission: `submission.py` fills a whole form step per model call. Open: it has not yet been seen to reach
+   the signature on the website; the signing code from the mailbox and the receipt check are untested.
 6. `llm.py`: when a provider's environment variable is missing it falls back to the provider's public address.
    Model calls must only go through the platform's proxy, so remove these fallbacks.
 7. Dependencies requested by the other streams (`pypdf` for stream J is in).
-8. `tests/test_kit.py`: three tests still target the starter kit's `solve()` and fail; rewrite them for the
-   current `agent.py`.
+8. Tests: the three starter-kit tests for the removed `solve()` are gone; `tests/test_lead.py` covers the
+   schedule, adding facts and the no-bid rule. Not covered by tests: the lead's loop and the submission agent.
 9. Test runs for all streams, every `atira submit`, Entire and the repository.
+10. Later, once a bid with positions is signed reliably: try an OpenAI model in place of Qwen (Orhun's idea,
+    Sat 16:05; the team has OpenAI credits from the event, about 70 USD). What is known: `llm.py` already switches
+    with `AGENT_PROVIDER=openai` and `AGENT_MODEL`; the key goes in a team secret named `OPENAI_API_KEY`, never in
+    the package or a chat; calls still go through the platform's proxy and count at the model's published price in
+    the cost ranking. Open: the exact model id (Orhun named it "GPT Sol 6.1"; confirm the id and that the proxy
+    accepts it), and how to select the provider in the sandbox, since a team secret must be at least 16 characters
+    long and "openai" is not, so the choice has to be made in code. Compare on the same package: quality first,
+    then time per lead decision, then cost.
 
 **Not this stream.** How a page is read (`browser.py`, `observe.js`, `browsing.py`) and how a price is calculated
 (`engine/`).
@@ -162,7 +181,7 @@ websites ──J──> report (text) ──O──> facts (facts.py, owned by I
 - You need a new dependency: ask stream O. `pyproject.toml` and `uv.lock` have one owner so the lock file never
   conflicts.
 - Local runs with the scouting logins (`eval "$(atira scout --env)"`, with `atira models proxy` running) are free
-  and unlimited for everyone. Sandbox test runs are limited to two at a time for the whole team and go through
+  and unlimited for everyone. Sandbox test runs are limited to four at a time for the whole team (three more can wait) and go through
   stream O; ask for one when you need a score.
 - Everyone works on their own branch (`stream-j`, `stream-i`, `stream-o`); `main` changes only through pull
   requests. The rules are in AGENTS.md, section "Branches".

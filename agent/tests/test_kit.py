@@ -164,47 +164,5 @@ class TheModels(Case):
         self.assertEqual(request["headers"]["Authorization"], "Bearer local")
 
 
-class TheEntryPoint(Case):
-    """main() with a fake browser: no answer exits cleanly, an answer is submitted."""
-
-    async def start(self, environment, answer=None):
-        async def connect(playwright, number=0):
-            return "browser", "page"
-
-        async def solve(task, page):
-            self.seen = (task, page)
-            return answer
-
-        out = io.StringIO()
-        with patch.dict(os.environ, environment, clear=True), patch.object(browsers, "connect", connect), \
-                patch.object(agent, "solve", solve), redirect_stdout(out):
-            code = await agent.main()
-        return code, out.getvalue()
-
-    async def test_without_an_answer_it_exits_cleanly(self):
-        api = self.serve({"/v1/runs/current": [(200, RUN)]})
-        code, out = await self.start({"CHALLENGE_API_URL": api.url, "CHALLENGE_RUN_TOKEN": "rt_secret"})
-        self.assertEqual(code, 0)
-        self.assertEqual(self.seen, (RUN, "page"))
-        self.assertIn("No answer to submit", out)
-        self.assertEqual([request["method"] for request in api.requests], ["GET"])
-        self.assertNotIn("s3cret", out)
-
-    async def test_an_answer_is_submitted_once(self):
-        api = self.serve({"/v1/runs/current/answer": [(202, {"status": "accepted"})]})
-        api.replies["/v1/runs/current"] = [(200, {**RUN, "submission": {
-            "kind": "api", "url": api.url + "/v1/runs/current/answer"}})]
-        code, out = await self.start({"CHALLENGE_API_URL": api.url, "CHALLENGE_RUN_TOKEN": "rt_secret"}, {"bid": 1})
-        self.assertEqual(code, 0)
-        self.assertIn("HTTP 202", out)
-        self.assertEqual(api.requests[-1]["body"], {"bid": 1})
-
-    async def test_locally_the_answer_is_printed_not_submitted(self):
-        code, out = await self.start({"CHALLENGE_SCOUTING": json.dumps(RUN)}, {"bid": 1})
-        self.assertEqual(code, 0)
-        self.assertIn('{"bid": 1}', out)
-        self.assertIn("local", out)
-
-
 if __name__ == "__main__":
     unittest.main()

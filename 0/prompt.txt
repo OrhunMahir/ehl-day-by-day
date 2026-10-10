@@ -1,0 +1,13 @@
+<bash-input>atira test-run agent</bash-input><bash-stdout>Test run reh_1c79e49fb54fc6fa queued as run_1b5a222ad6c3505e: 38 files, 134.5 KB compressed.
+Watch it: https://ehl-challenge.atira.ai/runs/run_1b5a222ad6c3505e
+Logs: atira logs run_1b5a222ad6c3505e --follow</bash-stdout><bash-stderr></bash-stderr>
+
+---
+
+<task-notification>
+<task-id>btoz1k22m</task-id>
+<tool-use-id>toolu_016Lbr5Kj5LaWegjE8BJgUUK</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/btoz1k22m.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the test run the user started to finish" completed (exit code 0)</summary>
+</task-notification>

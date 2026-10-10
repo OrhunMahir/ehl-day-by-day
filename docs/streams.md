@@ -56,12 +56,6 @@ agent has never seen.
 **Files only this stream edits.** `agent/browser.py`, `agent/observe.js`, `agent/browsing.py`,
 `agent/browsers.py`, `agent/tests/test_browser*.py`, `docs/log/julien.md`.
 
-**Sandbox test runs.** Since Sat 18:26 Julien starts every sandbox test run, for all three streams, and nobody
-else does: one person, so that no state is run twice and results stay comparable. Before a run he merges the
-branches to be tested into his own; afterwards he notes in `docs/log/julien.md` the run id, which commits were in
-the package and the points per field (points and timings only). What stream O changed and what to look at in a
-run is in [handover-stream-o.md](handover-stream-o.md).
-
 **What the other streams rely on (do not change without telling stream O first).**
 - `Tab(site_id, page)` and `BrowsingAgent(model, tabs, credentials, task, context, name=..., deadline=...,
   max_steps=..., log=...)`, as `agent.py` calls them today.
@@ -136,7 +130,7 @@ test.
 
 **Not this stream.** Reading websites, prompts, form filling.
 
-## Stream O — lead, submission (Orhun)
+## Stream O — lead, submission, runs (Orhun)
 
 **Goal.** The run as a whole: the lead model asks the right questions, the answers become facts, the engine prices
 them, and one signed bid is submitted before the clock ends, every time.
@@ -165,8 +159,7 @@ them, and one signed bid is submitted before the clock ends, every time.
 7. Dependencies requested by the other streams (`pypdf` for stream J is in).
 8. Tests: the three starter-kit tests for the removed `solve()` are gone; `tests/test_lead.py` covers the
    schedule, adding facts and the no-bid rule. Not covered by tests: the lead's loop and the submission agent.
-9. Every `atira submit` (from `main`, with Orhun's yes), Entire and the repository. Sandbox test runs are
-   started by Julien (see stream J); stream O reads their logs and score breakdowns.
+9. Test runs for all streams, every `atira submit`, Entire and the repository.
 10. Later, once a bid with positions is signed reliably: try an OpenAI model in place of Qwen (Orhun's idea,
     Sat 16:05; the team has OpenAI credits from the event, about 70 USD). What is known: `llm.py` already switches
     with `AGENT_PROVIDER=openai` and `AGENT_MODEL`; the key goes in a team secret named `OPENAI_API_KEY`, never in
@@ -193,8 +186,8 @@ websites ──J──> report (text) ──O──> facts (facts.py, owned by I
 - You need a new dependency: ask stream O. `pyproject.toml` and `uv.lock` have one owner so the lock file never
   conflicts.
 - Local runs with the scouting logins (`eval "$(atira scout --env)"`, with `atira models proxy` running) are free
-  and unlimited for everyone. Sandbox test runs are limited to four at a time for the whole team (three more can wait) and are
-  started by Julien only; ask him for one when you need a score, and name the branch and commit.
+  and unlimited for everyone. Sandbox test runs are limited to four at a time for the whole team (three more can wait) and go through
+  stream O; ask for one when you need a score.
 - Everyone works on their own branch (`stream-j`, `stream-i`, `stream-o`); `main` changes only through pull
   requests. The rules are in AGENTS.md, section "Branches".
 - Every push adds an entry to your own push log (`docs/log/<name>.md`, format in AGENTS.md). Read the others'

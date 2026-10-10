@@ -102,9 +102,9 @@ another stream's files. Each person's coding agent works only inside that person
 
 | Who | Stream | Files only this stream edits | Work |
 |---|---|---|---|
-| **Julien** | J: sites and reading | `browser.py`, `observe.js`, `browsing.py`, `browsers.py`, `tests/test_browser*` | Sub-agent reports that are complete and exact on each site: documents, paging, revisions, session timeouts, look-alike records; nothing tied to the public sites' layout; **starts every sandbox test run** (since Sat 18:26); pitch and development story |
+| **Julien** | J: sites and reading | `browser.py`, `observe.js`, `browsing.py`, `browsers.py`, `tests/test_browser*` | Sub-agent reports that are complete and exact on each site: documents, paging, revisions, session timeouts, look-alike records; nothing tied to the public sites' layout; pitch and development story |
 | **Ivan** | I: bid engine | `facts.py`, `engine/`, `tests/test_engine*` | Rule walkthrough 01–28; typed facts; deterministic calculation in layers (core first, then advanced pricing); cases with invented numbers |
-| **Orhun** (captain) | O: lead, submission | `agent.py`, `submission.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, `tests/test_lead.py`, `tests/test_submission.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; reading the score breakdowns of test runs; Entire and repo hygiene; every `atira submit` |
+| **Orhun** (captain) | O: lead, submission, runs | `agent.py`, `submission.py`, `llm.py`, `models.py`, `run.py`, `calc.py`, `agent.json`, `pyproject.toml`, `uv.lock`, `tests/test_kit.py`, `tests/test_lead.py`, `tests/test_submission.py`, repo files (`README.md`, `CLAUDE.md`, `AGENTS.md`, `.gitignore`, `docs/` except the others' push logs) | Lead prompts and flow; reports to typed facts; submission (configurator, TAN, signature, receipt); deadline guard; test runs and score breakdowns; Entire and repo hygiene; every `atira submit` |
 
 How the streams meet:
 
@@ -114,18 +114,13 @@ How the streams meet:
   the answer object. Stream O calls both and changes neither.
 - A change needed in another stream's file is requested from its owner, not made.
 - A new dependency is requested from stream O, so `pyproject.toml` and `uv.lock` have one editor.
-- Local runs with the scouting logins are free for everyone.
-- **Sandbox test runs are started by Julien only** (decided Sat 18:26): one person, so that no state is run twice
-  and results stay comparable. Whoever needs a run asks him and names the branch and commit; he notes the run id,
-  what was in the package and the points per field in `docs/log/julien.md`. The team limit is four running, three
-  waiting.
+- Local runs with the scouting logins are free for everyone. Sandbox test runs go through stream O (the team limit
+  is four running, three waiting); J and I ask for one when they need a score.
 - Small commits on your own branch; `main` only changes through a pull request (see "Branches").
 
 Shared rules for all coding agents:
 
 - Never run `atira submit`, `atira cancel` on a scored run, or `atira final` without Orhun's explicit yes.
-- Never start a sandbox test run (`atira test-run`) unless your human is Julien and asks for it. Reading a run's
-  status, logs and score is open to everyone.
 - Write what a test run taught us into `docs/` (how the sites behave, not their values), so the other streams and
   the pitch can use it.
 - Talk to Orhun in Turkish; write files, code and commit messages in English.
@@ -152,8 +147,8 @@ From Sat 2026-10-10 14:30 nobody pushes to `main` directly.
 - Merge with "Create a merge commit", not squash or rebase: the original commits carry the Entire checkpoint
   trailers the EHL submission needs.
 - After any merge into `main`, the other two run `git merge origin/main` on their branch before they continue.
-- A sandbox test run can be made from a branch (Julien starts it from a checkout of that branch, or of his own
-  branch with the other merged in). A scored submission cannot.
+- A sandbox test run can be made from a branch (stream O starts it from that branch's checkout). A scored
+  submission cannot.
 
 ## Push log
 

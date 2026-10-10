@@ -1,20 +1,19 @@
-# Push log · Orhun · stream O: lead, submission
+# Push log · Orhun · stream O: lead, submission, runs
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
-## 2026-10-10 18:26 · Julien starts all sandbox test runs; hand-over note
+## 2026-10-10 18:27 · Took back my edit of the working documents: Julien writes the rule about test runs
 
-- Changed: `AGENTS.md`, `CLAUDE.md` and `docs/streams.md`: sandbox test runs are started by Julien only, for all
-  three streams; a coding agent starts one only when its human is Julien and asks. Stream O is now "lead,
-  submission". New `docs/handover-stream-o.md`: what stream O changed, the settings, what the runs have shown
-  (points only), what to look at in the next run, what is not proven. Nothing under `agent/` changed.
-- Why: Orhun's decision: one person starts runs, so that no state is run twice and results stay comparable.
-- Checked: read the three documents again for other places that say who starts runs; none left. No run started.
+- Changed: reverted commit `3a0362e`. `AGENTS.md`, `CLAUDE.md`, `docs/streams.md` and the head of
+  `docs/handover-stream-o.md` are as they were before it. Nothing under `agent/` changed, then or now.
+- Why: Orhun decided that Julien starts all sandbox test runs, and that Julien writes this into the documents
+  himself; two people editing the same passages would conflict at the merge.
+- Checked: `git diff 96458dc -- AGENTS.md CLAUDE.md docs/streams.md docs/handover-stream-o.md` is empty.
 - Learned: nothing new about the sites.
-- For the others: J — you start the runs. The three commits `b54879f`, `d9c00ce`, `b98ce09` are on `stream-o`
-  only and not on `main`; merge `origin/stream-o` into your branch to have them in a run. Please note run ids
-  and points per field in your log. I — ask Julien for a run when you need a score.
-- Next: wait for the run's result and read its log.
+- For the others: J — the wording about who starts test runs is yours to write; until it is merged, the
+  documents on `stream-o` still say that test runs go through stream O, which no longer holds. Stream O starts no
+  sandbox test run. The three code commits `b54879f`, `d9c00ce`, `b98ce09` are on `stream-o` only.
+- Next: read the next run's log and score when Julien has run it.
 
 ## 2026-10-10 18:12 · Short narrow first round, exact identifiers in the recording, recorder with its own model
 

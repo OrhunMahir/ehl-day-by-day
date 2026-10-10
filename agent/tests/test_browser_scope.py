@@ -260,5 +260,37 @@ class ForgetViewsTest(unittest.TestCase):
         self.assertEqual(len(messages[3]["content"]), len("[s] URL: page2\n") + 9000)
 
 
+class HtmlTextTest(unittest.TestCase):
+    def test_a_stray_closing_tag_does_not_hide_the_rest(self):
+        from browser import html_to_text
+        text = html_to_text("<p>Before</p></script><p>After 12 units</p><script>var x = 1;</script><p>End</p>")
+        self.assertIn("After 12 units", text)
+        self.assertIn("End", text)
+        self.assertNotIn("var x", text)
+
+
+class FinishLastTest(unittest.TestCase):
+    def test_a_note_sent_with_finish_in_the_same_turn_is_kept(self):
+        import time
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+
+        async def observe(offset=0):
+            return "a page"
+        tab.observe = observe
+
+        class FinishThenNote:
+            async def chat(self, messages, tools=None, **kwargs):
+                return type("M", (), {"content": "", "tool_calls": [
+                    FakeCall(1, "finish", '{"report": "FOUND: see notes"}'),
+                    FakeCall(2, "note", '{"facts": "Bore 42 mm", "document": "Spec C"}')]})()
+        agent = BrowsingAgent(FinishThenNote(), {"portal": tab}, {}, "task", "context", name="t",
+                              deadline=time.time() + 600, log=lambda *_: None)
+        report = asyncio.run(agent.run())
+        self.assertIn("FOUND: see notes", report)
+        self.assertIn("Bore 42 mm", report)
+        self.assertIn("document: Spec C", report)
+
+
 if __name__ == "__main__":
     unittest.main()

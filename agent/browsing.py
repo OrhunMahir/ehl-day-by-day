@@ -116,10 +116,24 @@ Working rules:
 NAVIGATING = {"goto", "click", "type", "select", "press", "back", "look", "collect_pages"}
 
 
-async def _shows_sign_in(tab: Tab) -> bool:
-    """Whether the page now shows a sign-in form (a visible password field in the main frame)."""
+async def _has_password_field(tab: Tab) -> bool:
     try:
         return await tab.page.main_frame.locator("input[type=password]:visible").count() > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _shows_sign_in(tab: Tab) -> bool:
+    """Whether the page now shows a sign-in form: a visible password field together with a user-name field, or on
+    a sign-in address. A password-type field alone (e.g. a signing code) is not a sign-in form."""
+    if not await _has_password_field(tab):
+        return False
+    if _looks_like_sign_in_url(tab.page.url):
+        return True
+    try:
+        user = ("form:has(input[type=password]:visible) input:visible:not([type=password]):not([type=hidden])"
+                ":not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button])")
+        return await tab.page.main_frame.locator(user).count() > 0
     except Exception:  # noqa: BLE001
         return False
 
@@ -195,8 +209,9 @@ class BrowsingAgent:
                 return refusal
         if name in NAVIGATING and tab.site_id in self.signed_in:
             before = tab.page.url
+            had_password = await _has_password_field(tab)
             result = await self._dispatch(name, args, tab)
-            if await _shows_sign_in(tab):
+            if not had_password and await _shows_sign_in(tab):
                 return await self._sign_in_again(tab, before)
             return result
         return await self._dispatch(name, args, tab)
@@ -306,7 +321,8 @@ class BrowsingAgent:
             if not calls:
                 messages.append({"role": "user", "content": "Use a tool: continue the task, or call finish with your report."})
                 continue
-            for call in calls:
+            # finish last: notes and actions sent in the same turn must not be lost
+            for call in sorted(calls, key=lambda c: c.function.name == "finish"):
                 try:
                     args = json.loads(call.function.arguments or "{}")
                 except ValueError:

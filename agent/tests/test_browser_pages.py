@@ -49,10 +49,12 @@ class FakeSite:
 
     def __init__(self):
         self.fail_next = 0
+        self.hits: dict[str, int] = {}
 
     async def handle(self, route):
         request = route.request
         path = request.url[len(SITE):] or "/"
+        self.hits[path] = self.hits.get(path, 0) + 1
         signed_in = "session=ok" in (await request.all_headers()).get("cookie", "")
         if path.startswith("/login") and request.method == "POST":
             # answered in place: Chromium does not follow redirects fulfilled for a form POST
@@ -72,6 +74,11 @@ class FakeSite:
             "/popup": '<h1>Catalogue</h1><p>Item list</p><div role="dialog" aria-modal="true"><p>Quick survey</p>'
                       '<button>Close</button></div>',
             "/flaky": "<h1>Report</h1><p>All good</p>",
+            "/secret": '<h1>Profile</h1><label>Password <input type="password" name="pw" value="hunter2-invented"></label>'
+                       '<label>Other <input type="password" name="pw2"></label>',
+            "/sign": '<h1>Sign the offer</h1><form><label>Signing code <input type="password" name="code"></label>'
+                     '<button>Sign</button></form>',
+            "/start-sign": '<h1>Offer</h1><a href="/sign">Continue to signing</a>',
             "/form": '<h1>Order form</h1><a href="/picker" target="_blank">Search help</a>',
             "/picker": '<h1>Pick an item</h1><button onclick="window.close()">Take Valve</button>',
             "/modern": '<h1>Stock</h1><div role="grid"><div role="row"><span role="columnheader">Item</span>'
@@ -265,6 +272,40 @@ class BrowserPagesTest(unittest.TestCase):
         self.assertIn("Order form", closing)
         self.assertIn("back on the page that opened it", closing)
         self.assertIn("Orders", again)
+
+    def test_password_values_never_reach_the_page_view(self):
+        async def check(tab, site, context):
+            await self.agent(tab)._run_tool("login", {})
+            return await tab.goto(f"{SITE}/secret")
+        view = self.run_async(check)
+        self.assertNotIn("hunter2-invented", view)
+        self.assertIn("value=<filled>", view)
+        self.assertIn("value=<empty>", view)
+
+    def test_an_html_download_requests_the_address_once(self):
+        async def check(tab, site, context):
+            agent = self.agent(tab)
+            await agent._run_tool("login", {})
+            before = site.hits.get("/orders/2", 0)
+            view = await agent._run_tool("download", {"url": "/orders/2"})
+            return view, site.hits.get("/orders/2", 0) - before
+        view, requests = self.run_async(check)
+        self.assertIn("Total 17 units", view)
+        self.assertNotIn("999", view)
+        self.assertEqual(requests, 1)
+
+    def test_a_code_field_is_not_taken_for_an_expired_session(self):
+        async def check(tab, site, context):
+            agent = self.agent(tab)
+            await agent._run_tool("login", {})
+            view = await tab.goto(f"{SITE}/start-sign")
+            import re
+            aid = re.search(r'\[(\d+)\] link "Continue to signing"', view).group(1)
+            view = await agent._run_tool("click", {"element": aid})
+            return agent, view
+        agent, view = self.run_async(check)
+        self.assertEqual(agent.relogins, 0)
+        self.assertIn("Sign the offer", view)
 
 
 if __name__ == "__main__":

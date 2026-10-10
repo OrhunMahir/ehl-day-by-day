@@ -2,6 +2,28 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 21:20 · Branch `18-ivan-lean`: two browsing agents, no lead model in the loop
+
+Branch `18-ivan-lean`, from `18-ivan` (rewrites stream O's `agent.py` and takes stream J's newest files, at Ivan's
+request, for review; nothing merged).
+
+- Changed:
+  - `agent.py` rewritten. One setup call (reasoning "low") names which website plays which role and records the
+    brief's facts. Then two browsing agents work at the same time without thinking: a chain agent on the tender
+    portal, the specification and the ERP, and a mail agent on the mailbox. Both record facts with `record` as they
+    read; after each record the engine's checklist (`needed()`) tells them what their sites still owe. An agent
+    that ends while facts are missing is started again with only those. Reading stops 420 s before the end, or as
+    soon as the facts are complete; code prices (with the no-bid guard of `18-ivan`) and the submission agent
+    signs, retried while time is left.
+  - Taken from `plan-facts-at-source`: `browsing.py` (stall retries, `read_pages`, `record`), `browser.py`,
+    `observe.js`, `run.py`, `submission.py`, `facts.py` and `engine/` (checklist, builder) with their tests.
+- Why: in every run the time went into hand-offs: reports retyped as facts, the lead thinking between rounds,
+  rounds waiting for each other. The chain specification → ERP → mails is sequential, so more agents did not help.
+- Checked: 180 of 183 unit tests pass (the 3 old `test_kit.py` errors). Local run started: setup 17 s, both agents
+  reading from 17 s (the baseline started at 40–278 s). Result of that local run not in yet. No sandbox run yet.
+- For the others: nothing merged.
+- Next: sandbox test run of this branch; compare with `18-ivan` locally.
+
 ## 2026-10-10 20:46 · Branch `18-ivan`: the baseline without overthinking, a stricter no-bid guard
 
 Branch `18-ivan`, from `baseline-18` (touches stream J and O files at Ivan's request, for review; nothing merged).

@@ -1,0 +1,53 @@
+https://github.com/OrhunMahir/ehl-day-by-day/tree/stream-j-simple buraya pushladı galiba kodu
+
+---
+
+<task-notification>
+<task-id>bfysgxb7y</task-id>
+<tool-use-id>toolu_011AQaTHZcQevUNZbUPK9iZz</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bfysgxb7y.output</output-file>
+<status>completed</status>
+<summary>Background command "Add a test for the choice of the reading model and run the whole test suite of the new branch" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bjbc5s9ag</task-id>
+<tool-use-id>toolu_01RzkNrLXhcv1qpkp9YtzRDN</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bjbc5s9ag.output</output-file>
+<status>completed</status>
+<summary>Background command "Start one sandbox test run of the new branch, retrying if the platform times out and never starting a second run" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bcxburgjr</task-id>
+<tool-use-id>toolu_01NnaxhZkMQxFeuyeSV8VvCH</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/bcxburgjr.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait until the new run is running, then show its start-up line, any model errors, and counts of board records and stalled model calls (structure only)" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+4 ajan kullanmak yerine 1 ajan kullandığımız yere 1den fazla ajan koysak daha hızlı ve iyi çalışmaz mı bu mümkün mü yani totalde 4ten fazla ajan kullanmak mantıklı mı
+
+---
+
+<task-notification>
+<task-id>b6r4wngnb</task-id>
+<tool-use-id>toolu_01AJc5jbsPbNJ43revpxPtcF</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/2c05f60b-5bde-40ae-ac6c-81c260a01ec5/tasks/b6r4wngnb.output</output-file>
+<status>completed</status>
+<summary>Background command "Follow the run's log into a scratch file until it ends, then show status, model errors, stalled-call counts and the score as points per field next to the 51-point run" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+tamam bizim runladığımız koşu failladı neden onu incele sonrasında da erpye birden fazla ajan atama işini yapalım
+
+---
+
+dur koşuyu hiçbir değişiklik yapmadan tekrar başlatmanın ne mantığı var bu na bir çözüm bulamaz mıyız ?Bir sitenin takılmasına karşı ise bir şey yapmadım; teklifin girildiği site cevap vermiyorsa ajanın yapabileceği pek bir şey yok. Bu, Julien’in notunda da “açık sorun” olarak duruyor ve koşudan koşuya şansa bağlı

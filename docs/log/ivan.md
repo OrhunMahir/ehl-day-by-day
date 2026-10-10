@@ -2,6 +2,29 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 19:59 · Plan branch implemented and run locally; a bug that wipes the facts (also on main)
+
+Branch `plan-facts-at-source` (changes stream J and O files at Ivan's request, for review; nothing merged).
+
+- Changed: the plan in `docs/plan-facts-at-source.md` is implemented: `record` tool for the browsing agents, report
+  recorder only fills gaps, dispatcher that starts a small investigation for every new "find" need (the lead model
+  names the site and writes the task), need ids, a timeline, a `wait` tool. Switches: `RECORD_AT_SOURCE`, `DISPATCH`.
+- **Bug, also on `main` and `stream-j`:** the report recorder gets the `add_facts` tool with `replace_lists`. A
+  list named there and not refilled in the same update is emptied. In the local run one recording emptied the
+  positions, revisions, materials and Q&A at once (519 s) and the bid went out with no positions. Fixed on the plan
+  branch: only the lead may use `replace_lists`; `add(by_lead=False)` and `record` drop it. A second, smaller one:
+  in a field-by-field merge an empty list replaced a known one (a material's conditions vanished); fixed in
+  `facts.py`.
+- Checked: 214 tests pass. Local run with the scouting logins (masked analysis, counts and times only): the ERP
+  search by catalogue group started 6 s after the group was recorded, 2 of 5 groups were searched and 2 materials
+  with attributes recorded, for the first time in any run; then the wipe above. Also seen: the call that assigns
+  needs to sites timed out twice (45 s each), so 4 group searches started only at 510 s; 13 single-key mail tasks
+  were started at once for 4 tabs and most ended without time; the first-round agents hardly used `record`.
+- For the others: **O — please take the `replace_lists` fix into `main` now** (see the prompt Ivan passes on);
+  it is independent of the rest of the plan. J — nothing yet.
+- Next: a leaner assignment with a fallback, needs bundled per site and topic, the first round recording at once;
+  then another local run.
+
 ## 2026-10-10 18:10 · Branch exp-speed: less model thinking, bounded lead calls, fewer ERP page views
 
 Branch `exp-speed`, not `stream-i`: it changes two of stream O's files at Ivan's request, as an experiment for

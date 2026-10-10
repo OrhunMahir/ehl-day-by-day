@@ -2,6 +2,28 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 00:51 · Test run run_89557e681c1e8a71: quality 77; a mass recorded in grams is now read as grams (touches facts.py)
+
+- Test run `run_89557e681c1e8a71` (`64e82a1`, the merged state with `gpt-6.1-sol` reading the websites): quality
+  77, eligible, 9:32, 199 model calls, $1.65. The bid was complete at second 223; no model call hung.
+  - Right in all five positions: material, quantity, base price, packaging, project bonus, lead time. Right as
+    well: decision, tender reference, discount, total consistent with the positions, the withdrawn Q&A check.
+  - Wrong in all five positions: the metal surcharge and, with it, the unit price. Also 0: the net total and the
+    dated metal-index check.
+  - Compared with Julien's `run_e7b86a346e4fe041` (Qwen only, 73.1, $0.60, 13:29): there the base price was right
+    in three positions, the project bonus in two, the unit price in one, the surcharge in three.
+- Cause of the wrong surcharge: the agents record a mass as the page writes it, with its unit in grams, into a field
+  that holds kilograms, and `facts.from_dict` dropped the unit. The surcharge came out a thousand times too high.
+- Changed: `agent/facts.py` (Ivan's file, changed on Orhun's request; this line announces it): a field whose name
+  ends in `_mass_kg` reads text that names a mass unit ("625 g", "0,625 kg", "3100 Gramm") through the new
+  `mass_field_kg`; a number without a unit is kg as before. The two field descriptions say so.
+  `agent/tests/test_engine_helpers.py`: a test with invented masses.
+- Checked: 231 unit tests pass (1 skipped). Not run in the sandbox yet.
+- Not known: whether the unit price, the net total and the metal-index check are right once the surcharge is; they
+  depend on it, so the 77 run cannot show it.
+- For the others: I: `facts.py` changed as described; `mass_kg` is untouched. J: nothing.
+- Next: one test run of this state, started after the team's running test has ended.
+
 ## 2026-10-11 00:26 · stream-o-board-openai: merged stream-j-tweaks (the 73.1 run's code); the OpenAI reading model on top
 
 - Changed (branch `stream-o-board-openai`): merged `stream-j-tweaks` at `7f5e89d`.

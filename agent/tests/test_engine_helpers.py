@@ -192,6 +192,19 @@ class Json(unittest.TestCase):
         self.assertTrue(used, "no field names found")
         self.assertEqual(used - names, set())
 
+    def test_a_mass_recorded_with_its_unit_is_a_mass_in_kg(self):
+        from facts import Material, from_dict, mass_field_kg
+        for written, kg in (("625 g", "0.625"), ("625g/Stück", "0.625"), ("3100 Gramm", "3.1"), ("0,625 kg", "0.625"),
+                            ("2,5 Kilogramm", "2.5"), ("0.75", "0.75"), ("1.250,5 g", "1.2505")):
+            self.assertEqual(mass_field_kg(written), D(kg), written)
+        self.assertEqual(mass_field_kg(D("0.4")), D("0.4"))
+        material = from_dict(Material, {"material_number": "M-1", "catalogue_group": "G-1", "metal_index": "IX-1",
+                                        "surcharge_mass_kg": "625 g", "allocation_mass_kg": "3100 g"})
+        self.assertEqual((material.surcharge_mass_kg, material.allocation_mass_kg), (D("0.625"), D("3.1")))
+        in_kg = from_dict(Material, {"material_number": "M-2", "catalogue_group": "G-1",
+                                     "surcharge_mass_kg": 0.625, "allocation_mass_kg": "3,1"})
+        self.assertEqual((in_kg.surcharge_mass_kg, in_kg.allocation_mass_kg), (D("0.625"), D("3.1")))
+
     def test_mass(self):
         from facts import mass_kg
         self.assertEqual(mass_kg("625 g/Stück"), D("0.625"))

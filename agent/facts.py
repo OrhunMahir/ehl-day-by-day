@@ -121,6 +121,21 @@ def mass_kg(text, unit_name: str | None = None) -> Decimal:
     return dec(text) * _MASS_FACTORS[found.group(1)]
 
 
+_MASS_WORDS = {**_MASS_FACTORS, "gramm": Decimal("0.001"), "gram": Decimal("0.001"), "grams": Decimal("0.001"),
+               "kilogramm": Decimal(1), "kilogram": Decimal(1), "kilograms": Decimal(1), "kilo": Decimal(1)}
+
+
+def mass_field_kg(value) -> Decimal:
+    """The value of a field that holds a mass in kg. The agents record a mass as the page writes it, so text that
+    names its unit ("625 g", "625g/Stück", "0,625 kg") is converted; a number without a unit is taken as kg."""
+    number = dec(value, strict=True)
+    if not isinstance(value, str):
+        return number
+    found = re.search(r"(?<![a-zäöüß])(" + "|".join(sorted(_MASS_WORDS, key=len, reverse=True)) + r")\b",
+                      clean(value).lower())
+    return number * _MASS_WORDS[found.group(1)] if found else number
+
+
 def when(value) -> datetime | date:
     """Parse a date or timestamp. ISO forms (2030-02-01, 2030-02-01T10:00:00Z) and German dates (01.02.2030,
     01.02.2030 10:00) are read; a timestamp without a zone is taken as UTC."""
@@ -493,7 +508,10 @@ def from_dict(cls, data: dict):
     kwargs = {}
     for name, value in data.items():
         try:
-            kwargs[name] = _convert(hints[name], value)
+            if name.endswith("_mass_kg") and isinstance(value, str) and value.strip():
+                kwargs[name] = mass_field_kg(value)
+            else:
+                kwargs[name] = _convert(hints[name], value)
         except (ValueError, TypeError) as exc:
             raise ValueError(f"{cls.__name__}.{name}: {exc}") from exc
     return cls(**kwargs)
@@ -585,8 +603,10 @@ FIELD_DOCS = {
     "Requirement.certification": "as stated; null or empty when no certification is required",
     "Requirement.pieces_per_set": "pieces in one Satz/set, when the requirement defines it",
     "Material.active": "true only when the ERP status says the material is active/released",
-    "Material.surcharge_mass_kg": "Zuschlagsmasse per piece in kg (625 g = 0.625)",
-    "Material.allocation_mass_kg": "Umlagegewicht per piece in kg (3100 g = 3.1)",
+    "Material.surcharge_mass_kg": "Zuschlagsmasse per piece: a number in kg (0.625), or the text with its unit as "
+                                  "the page writes it (\"625 g\")",
+    "Material.allocation_mass_kg": "Umlagegewicht per piece: a number in kg (3.1), or the text with its unit as the "
+                                   "page writes it (\"3100 g\")",
     "Material.stock": "pieces in stock",
     "Material.setup_fee_eur": "ordinary setup fee (Rüstkosten) for the whole position, if the ERP states one",
     "PriceCondition.price_unit": "number of pieces the price refers to (price per 100 pieces -> 100)",

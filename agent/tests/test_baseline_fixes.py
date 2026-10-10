@@ -63,7 +63,7 @@ class Thinking(unittest.TestCase):
 
 
 def guarded(collected):
-    return agent.Orchestrator.without_hasty_no_bid(None, collected, engine.evaluate(collected))
+    return agent.Lead.without_hasty_no_bid(None, collected, engine.evaluate(collected))
 
 
 class TheNoBidGuard(unittest.TestCase):

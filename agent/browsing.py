@@ -4,10 +4,11 @@ The model picks every navigation target, search and document. Code only executes
 page as text, and keeps the conversation small: older page views are dropped once newer ones exist, while the
 facts the model saved with `note` stay.
 """
+import asyncio
 import json
 import time
 
-from browser import Tab
+from browser import Tab, origin
 
 TOOLS = [
     ("look", "Show the current page again (after waiting for it to update).", {}),
@@ -19,23 +20,74 @@ TOOLS = [
     ("press", "Press a keyboard key on the page, e.g. Escape, Enter, F4, Tab.", {"key": "string"}),
     ("back", "Go back in the browser history.", {}),
     ("read_more", "Continue reading a long page view from a character offset.", {"offset": "integer"}),
+    ("read_pages", "Read up to 6 pages at once whose addresses you see (links '-> /path' of records, tabs, messages, "
+     "documents): they are opened in the background and returned together. Much faster than visiting them one by "
+     "one; use goto when you need to act on a page.", {"urls": "array"}),
+    ("collect_pages", "Read a paged list in one step: give the number of its 'next page' or 'load more' control; it "
+     "is followed until it disappears (or max_pages) and the pages are returned together.",
+     {"element": "string", "max_pages": "integer"}),
     ("download", "Download a link target with this site's login (ZIP, CSV, PDF, document pages) and read its text.", {"url": "string"}),
     ("read_file", "Read a file that was downloaded earlier, from an optional offset.", {"name": "string", "offset": "integer"}),
     ("login", "Fill in this website's username and password on the current login form and submit it.", {}),
-    ("note", "Save facts you read, verbatim with their exact numbers, dates, units, references and senders. Notes are "
-     "the only thing you keep from pages you leave; your final report is built from them.", {"facts": "string"}),
-    ("finish", "End your investigation with your report: every fact the task asked for, with where you found it, and "
-     "what you could not find.", {"report": "string"}),
+    ("note", "Save facts you read, verbatim with their exact numbers, units and identifiers, with where they come "
+     "from: `document` (title, number or id of the document, record or message), `date` (its issue date as shown, "
+     "with time and zone if shown), `sender` (mail address or author), `revision` (version or revision id), "
+     "`status` (as the site marks it: e.g. current, valid, superseded, draft, blocked, withdrawn) and `reference` "
+     "(the exact tender or case reference the record names, character for character). Leave out what does not "
+     "apply. The page you are on is added automatically. Notes are the only thing you keep from pages you leave.",
+     {"facts": "string", "document": "string", "date": "string", "sender": "string", "revision": "string",
+      "status": "string", "reference": "string", "source": "string"}),
+    ("finish", "End your investigation with your report in four parts. FOUND: every fact the task asked for, one per "
+     "line, as `value (unit) — document, date, sender, revision, status, reference`. SUPERSEDED / LOOK-ALIKE: "
+     "records that resemble what was asked but do not apply (older versions, other references, other senders, "
+     "dated after the scenario date, drafts), each with why. CHECKED, NOT PRESENT: what you searched for completely "
+     "and found does not exist, with the evidence (search terms, number of results, how many you opened). NOT "
+     "CHECKED: what you did not reach or only partly checked (e.g. 2 of 5 results opened, a tab not opened), so "
+     "nobody mistakes it for absent.", {"report": "string"}),
 ]
-OPTIONAL = {"enter", "offset"}
+# Recording at the source: the agent writes what it reads straight into the run's facts, so a timeout loses nothing
+# it has recorded. The description is completed with the facts' field reference when the agent gets a recorder.
+RECORD_TOOL = ("record", "Record facts you just read into the bid's facts, at once: an object with only the new "
+               "records, e.g. {'materials': [{...}]}, each item with its `source`. Answers what was added, or the "
+               "field that was wrong (correct it and record again).", {"facts": "object"})
+RECORD_EVERY = 3  # actions without a record before an agent with a recorder is reminded to record what it read
+RECORD_RULES = """
+Recording facts: you have a `record` tool that writes facts into the bid's facts at once. Record every record you
+read as soon as you have read it, in the next step, not at the end: anything not recorded is lost if your time runs
+out. Copy values and identifiers character for character, numbers as JSON numbers, masses in kg, dates as shown with
+their time and zone. Give each item its `source` (site, page or document, date, and for a message the sender's
+address). Record what you see, including superseded versions, look-alikes and later-dated records, each with its own
+source: the bid engine decides which one counts. In an ERP result list record every result with the attributes the
+list shows; open the details only of results that match what you are looking for. When you have searched a
+catalogue group and read every result, add the group to `searched_groups`. Use `note` only for what has no field.
+Fields:
+"""
+SOURCE_FIELDS = ("document", "date", "sender", "revision", "status", "reference")
+OPTIONAL = {"enter", "offset", "source", "max_pages", *SOURCE_FIELDS}
+WRAP_UP_SECONDS = 90  # the wrap-up report may take at most this long
+# and at most this many tokens: Qwen writes about 40 tokens per second, so 1000 tokens fit into WRAP_UP_RESERVE
+# (2000 took about 50 s and were cut off); the notes themselves are appended to the report anyway
+WRAP_UP_TOKENS = 1000
+WRAP_UP_RESERVE = 45  # seconds before the deadline at which browsing stops, so the wrap-up fits inside it
+CALL_SECONDS = 75  # one model call may take at most this long before it is retried
+# a model without thinking answers a step in 2-3 s, so a call still open after this long has stalled
+QUICK_CALL_SECONDS = 30
+CALL_ATTEMPTS = 5  # attempts per step, as far as the deadline allows
+UNNOTED_KEPT = 2  # results of the last actions without a note after them, kept for a report written in a hurry
+UNNOTED_CHARS = 5000  # of each of them
+ACTION_SECONDS = 60  # one browser action may take at most this long
+PREVIOUS_VIEW_CHARS = 4000  # the page view before the newest one is cut to this length
+SHORTENED = "\n... (older page view shortened to save space; your notes keep what mattered)"
+NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
 
 
-def tool_schemas(multi_site: bool) -> list[dict]:
+def tool_schemas(multi_site: bool, recording: bool = False) -> list[dict]:
     schemas = []
-    for name, description, params in TOOLS:
-        properties = {key: {"type": kind} for key, kind in params.items()}
+    for name, description, params in TOOLS + ([RECORD_TOOL] if recording else []):
+        properties = {key: ({"type": "array", "items": {"type": "string"}} if kind == "array" else {"type": kind})
+                      for key, kind in params.items()}
         required = [key for key in params if key not in OPTIONAL]
-        if multi_site and name not in ("note", "finish"):
+        if multi_site and name not in ("note", "finish", "record"):
             properties["site"] = {"type": "string", "description": "which website (siteId)"}
             required.append("site")
         schemas.append({"type": "function", "function": {
@@ -56,24 +108,93 @@ Working rules:
   unrelated offers), decoy buttons that do nothing, error pages that work on a retry, session timeouts that send you
   back to the login (use the login tool again), paging and "load more" controls, superseded documents shown first,
   look-alike records for other references. Verify that what you read belongs to the exact reference you need.
+- Several pages to read whose addresses you can see (a record's tabs, the messages in a result list, documents):
+  use read_pages with all of them in one call instead of visiting each.
+- Paged lists and "load more": use collect_pages instead of clicking through page by page. A search that shows
+  no results may be too broad or too narrow: refine it before concluding that nothing exists.
 - Prefer direct links: if an element shows "-> /some/path", you may goto that path. For files (ZIP, CSV, PDF), use
   download. Use search forms with specific terms; over-broad searches may list nothing.
 - Save every relevant fact with note as soon as you read it (verbatim numbers, units, dates, senders, record ids,
-  status). Pages you leave are removed from your memory; notes are kept.
+  status), with its source. Pages you leave are removed from your memory; notes are kept.
+- Stay on your own website(s). Facts that live on another website are another assistant's job: list them under
+  NOT FOUND instead of going there.
 - Do not guess values. If something is missing, say so in the report.
+- Records often keep their details in separate tabs, registers or sub-views (details, scales, history, items):
+  open them before you report a value as missing.
+- Versions: documents, approvals, rates and answers come in versions (revisions, newer mails, later answers,
+  other folders or pages). Find all versions, note each with its date and status, and say which one the site marks
+  as current or valid and on what basis (an explicit marker, or the latest date). Say which version each value comes
+  from. A version that opens first is not necessarily the current one.
+- Look-alikes: check every record's reference character for character against the one you need (a suffix such as
+  "-A" or a different number makes it another case), its sender against the brief's authorised senders, and its
+  date against the scenario date. A record that fails any check goes under SUPERSEDED / LOOK-ALIKE, never under
+  FOUND. Unsent drafts, previews and hidden texts are not records.
+- Searches: note how complete a search was (terms, number of results, how many you opened). Report something as
+  absent only after a complete search; otherwise it is NOT CHECKED.
 - Be quick: time is limited. Several tool calls in one turn are fine when they don't depend on each other.
 - Finish with finish(report) once you have what the task needs.
 """
 
 
+NAVIGATING = {"goto", "click", "type", "select", "press", "back", "look", "collect_pages"}
+
+
+async def _has_password_field(tab: Tab) -> bool:
+    try:
+        return await tab.page.main_frame.locator("input[type=password]:visible").count() > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _shows_sign_in(tab: Tab) -> bool:
+    """Whether the page now shows a sign-in form: a visible password field together with a user-name field, or on
+    a sign-in address. A password-type field alone (e.g. a signing code) is not a sign-in form."""
+    if not await _has_password_field(tab):
+        return False
+    if _looks_like_sign_in_url(tab.page.url):
+        return True
+    try:
+        user = ("form:has(input[type=password]:visible) input:visible:not([type=password]):not([type=hidden])"
+                ":not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button])")
+        return await tab.page.main_frame.locator(user).count() > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _looks_like_sign_in_url(url: str) -> bool:
+    return any(word in url.lower() for word in ("login", "logon", "signin", "sign-in", "anmeld"))
+
+
+def _no_thinking(model) -> dict:
+    """Qwen reasons before it answers; a wrap-up only reformats notes, so its reasoning is switched off (otherwise
+    the token limit can be spent on reasoning and the answer comes back empty). Other providers get nothing."""
+    if getattr(model, "provider", None) == "qwen":
+        return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
+    return {}
+
+
 class BrowsingAgent:
     def __init__(self, model, tabs: dict[str, Tab], credentials: dict[str, dict], task: str, context: str,
-                 name: str, deadline: float, max_steps: int = 60, log=print):
+                 name: str, deadline: float, max_steps: int = 60, log=print, recorder=None,
+                 field_reference: str = ""):
         self.model, self.tabs, self.credentials = model, tabs, credentials
+        # recorder(update) -> str adds a facts update to the run's facts and says what was added or what was wrong
+        self.recorder, self.field_reference = recorder, field_reference
+        self.records = 0  # updates the recorder accepted
         self.task, self.context, self.name = task, context, name
         self.deadline, self.max_steps, self.log = deadline, max_steps, log
         self.notes: list[str] = []
+        self.last_tab: Tab = next(iter(tabs.values()))
+        self.refusals = 0  # requests to open another website's pages, refused
+        self.visited: list[str] = []  # pages the agent saw, in order, for the wrap-up report
+        self.signed_in: set[str] = set()  # sites where login succeeded, so a later sign-in form means an expired session
+        self.relogins = 0
+        self.stalls = 0  # model calls that hit CALL_SECONDS
         self.multi = len(tabs) > 1
+        # what the last actions showed, since the last note: when time runs out before the agent noted it, the
+        # report carries it instead of losing it
+        self.unnoted: list[str] = []
+        self.finished = False
 
     def _tab(self, args: dict) -> Tab:
         if not self.multi:
@@ -99,7 +220,47 @@ class BrowsingAgent:
         return await tab.observe()
 
     async def _run_tool(self, name: str, args: dict) -> str:
+        if name == "record":
+            return self._record(args)
         tab = self._tab(args) if name not in ("note", "finish") else None
+        if tab is not None:
+            self.last_tab = tab
+        if name == "read_pages":
+            urls = args.get("urls") or []
+            if isinstance(urls, str):
+                urls = [u.strip() for u in urls.replace("\n", ",").split(",") if u.strip()]
+            refused = [u for u in urls if self._foreign_site(tab, u)]
+            if refused:
+                self.refusals += len(refused)
+            args = {**args, "urls": [u for u in urls if u not in refused]}
+            if not args["urls"]:
+                return "Refused: those pages belong to other websites; stay on your own and list them under NOT CHECKED."
+        if name in ("goto", "download"):
+            refusal = self._foreign_site(tab, args.get("url", ""))
+            if refusal:
+                self.refusals += 1
+                return refusal
+        if name in NAVIGATING and tab.site_id in self.signed_in:
+            before = tab.page.url
+            had_password = await _has_password_field(tab)
+            result = await self._dispatch(name, args, tab)
+            if not had_password and await _shows_sign_in(tab):
+                return await self._sign_in_again(tab, before)
+            return result
+        return await self._dispatch(name, args, tab)
+
+    async def _sign_in_again(self, tab: Tab, before: str) -> str:
+        """The session expired and the site sent the agent back to its sign-in form: sign in again and return to the
+        page the agent was on, so it can repeat its last action."""
+        self.relogins += 1
+        self.log(f"[{self.name}] session expired on {tab.site_id}; signing in again")
+        await self._login(tab)
+        if before and not _looks_like_sign_in_url(before) and tab.page.url != before:
+            await tab.goto(before)
+        return ("(Your session had expired: you were signed in again automatically and are back on the page before "
+                "your last action. Repeat that action if it did not take effect.)\n" + await tab.observe())
+
+    async def _dispatch(self, name: str, args: dict, tab):
         if name == "look":
             return await tab.observe()
         if name == "goto":
@@ -118,6 +279,10 @@ class BrowsingAgent:
             return await tab.press(args["key"])
         if name == "back":
             return await tab.back()
+        if name == "read_pages":
+            return await tab.read_pages([str(u) for u in args["urls"]])
+        if name == "collect_pages":
+            return await tab.collect_pages(str(args["element"]), int(args.get("max_pages") or 10))
         if name == "read_more":
             return tab.read_more(int(args.get("offset") or 0))
         if name == "download":
@@ -125,30 +290,81 @@ class BrowsingAgent:
         if name == "read_file":
             return tab.read_file(args["name"], int(args.get("offset") or 0))
         if name == "login":
-            return await self._login(tab)
+            result = await self._login(tab)
+            if not await _shows_sign_in(tab):
+                self.signed_in.add(tab.site_id)
+            return result
         if name == "note":
-            self.notes.append(args.get("facts", ""))
+            page = self.last_tab.page
+            try:
+                title = await page.title()
+            except Exception:  # noqa: BLE001
+                title = ""
+            where = f"{self.last_tab.site_id} · page \"{title}\" · {page.url}"
+            parts = [f"{key}: {str(args[key]).strip()}" for key in SOURCE_FIELDS if str(args.get(key) or "").strip()]
+            if str(args.get("source") or "").strip():
+                parts.append(str(args["source"]).strip())
+            source = "; ".join(parts)
+            self.notes.append(f"{args.get('facts', '').strip()}\n  source: {source or '(not given)'}\n  read on: {where}")
             return "Saved."
         raise ValueError(f"Unknown tool {name}")
+
+    def _record(self, args: dict) -> str:
+        if self.recorder is None:
+            return "Error: recording is not available; use note."
+        update = args.get("facts", args)
+        if isinstance(update, str):
+            try:
+                update = json.loads(update)
+            except ValueError:
+                return "Error: `facts` must be a JSON object, e.g. {'materials': [{...}]}."
+        outcome = self.recorder(update)
+        if not outcome.startswith(("Error", "The update was not added")):
+            self.records += 1
+            self.notes.append("(recorded) " + outcome.splitlines()[0][:300])
+        return outcome
 
     async def run(self) -> str:
         sites = "\n".join(f"- {site_id}: {tab.page.url if tab.page.url != 'about:blank' else ''} (login with the login tool)"
                           for site_id, tab in self.tabs.items())
+        system = SYSTEM + (RECORD_RULES + self.field_reference if self.recorder else "")
         messages = [
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": f"{self.context}\n\n# Your websites\n{sites}\n\n# Your task\n{self.task}"},
         ]
         # open each site so the model starts from a real page view
         for tab in self.tabs.values():
-            messages[1]["content"] += "\n\n# Current page\n" + await tab.observe()
-        tools = tool_schemas(self.multi)
+            try:
+                view = await asyncio.wait_for(tab.observe(), timeout=ACTION_SECONDS)
+            except asyncio.TimeoutError:
+                view = f"[{tab.site_id}] (the page did not respond in time; use look or goto)"
+            messages[1]["content"] += "\n\n# Current page\n" + view
+        tools = tool_schemas(self.multi, recording=self.recorder is not None)
+        warned_time = warned_steps = False
+        since_note = since_record = 0
         for step in range(self.max_steps):
             remaining = self.deadline - time.time()
-            if remaining < 20:
+            if remaining < WRAP_UP_RESERVE:  # leave the wrap-up its time inside the deadline
                 break
-            if remaining < 90:
-                messages.append({"role": "user", "content": "Time is almost up: call finish now with what you have."})
-            message = await self.model.chat(messages, tools, temperature=0.2)
+            if remaining < 90 and not warned_time:
+                warned_time = True
+                messages.append({"role": "user", "content": "Time is almost up: save unsaved facts with note, then "
+                                                            "call finish with what you have."})
+            if self.max_steps - step <= 3 and not warned_steps:
+                warned_steps = True
+                messages.append({"role": "user", "content": f"Only {self.max_steps - step} steps left: save unsaved "
+                                                            "facts with note, then call finish."})
+            if self.recorder is not None and since_record >= RECORD_EVERY:
+                since_record = 0
+                messages.append({"role": "user", "content": f"You have taken {RECORD_EVERY} actions without a record. "
+                                 "If the pages you read held facts, record them now with `record`, each with source."})
+            if since_note >= NOTE_EVERY and self.recorder is None:
+                since_note = 0
+                messages.append({"role": "user", "content": f"You have taken {NOTE_EVERY} actions without a note. If "
+                                 "the pages you read held facts the task needs, save them with note now, with source."})
+            message = await self._ask(messages, tools)
+            if message is None:
+                break
             calls = message.tool_calls or []
             entry = {"role": "assistant", "content": message.content or ""}
             if calls:
@@ -158,28 +374,113 @@ class BrowsingAgent:
             if not calls:
                 messages.append({"role": "user", "content": "Use a tool: continue the task, or call finish with your report."})
                 continue
-            for call in calls:
+            # finish last: notes and actions sent in the same turn must not be lost
+            for call in sorted(calls, key=lambda c: c.function.name == "finish"):
                 try:
                     args = json.loads(call.function.arguments or "{}")
                 except ValueError:
                     args = {}
                 if call.function.name == "finish":
                     report = args.get("report", "")
+                    self.finished = True
                     self.log(f"[{self.name}] finished after {step + 1} steps")
                     return self._report(report)
                 self.log(f"[{self.name}] {call.function.name} {json.dumps(args, ensure_ascii=False)[:200]}")
-                try:
-                    result = await self._run_tool(call.function.name, args)
+                limit = min(ACTION_SECONDS, max(5.0, self.deadline - time.time()))
+                try:  # a browser action that hangs (a stuck page, a reload that never ends) must not hold the agent
+                    result = await asyncio.wait_for(self._run_tool(call.function.name, args), timeout=limit)
+                except asyncio.TimeoutError:
+                    self.log(f"[{self.name}] {call.function.name} did not finish within {limit:.0f} s")
+                    result = (f"Error: the action did not finish within {limit:.0f} s; the page may be stuck. Use "
+                              "look to see the page, or goto to load it again.")
                 except Exception as error:  # noqa: BLE001
                     result = f"Error: {str(error).splitlines()[0][:400]}"
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+                if call.function.name in ("note", "record"):
+                    since_note = 0
+                    if call.function.name == "record":
+                        since_record = 0
+                    self.unnoted = []
+                else:
+                    if call.function.name != "login" and not result.startswith(("Error", "Refused")):
+                        self.unnoted = [*self.unnoted, f"{call.function.name} -> {result[:UNNOTED_CHARS]}"][-UNNOTED_KEPT:]
+                    since_note += 1
+                    since_record += 1
+                    url = self.last_tab.page.url
+                    if url not in self.visited:
+                        self.visited.append(url)
             self._forget_old_views(messages)
-        self.log(f"[{self.name}] stopped without finish")
-        return self._report("(stopped before finishing: out of steps or time)")
+        self.log(f"[{self.name}] stopped without finish; writing the report from its notes")
+        return self._report(await self._wrap_up())
+
+    async def _ask(self, messages: list[dict], tools: list[dict]):
+        """One model step. A call can stall for minutes (a full queue, a stuck request); a fresh attempt usually
+        returns quickly, so each attempt is capped and retried while the deadline allows. None: no answer in time."""
+        cap = QUICK_CALL_SECONDS if getattr(self.model, "thinking", None) is False else CALL_SECONDS
+        for attempt in range(1, CALL_ATTEMPTS + 1):
+            budget = self.deadline - WRAP_UP_RESERVE - time.time()
+            if budget < 10:
+                return None
+            limit = min(cap, budget)
+            try:
+                return await asyncio.wait_for(self.model.chat(messages, tools, temperature=0.2), timeout=limit)
+            except asyncio.TimeoutError:
+                self.stalls += 1
+                self.log(f"[{self.name}] model call stalled for {limit:.0f} s (attempt {attempt} of {CALL_ATTEMPTS})")
+        return None
+
+    async def _wrap_up(self) -> str:
+        """The agent ran out of steps or time: one call without tools turns its notes into the usual report, so the
+        lead model learns what was found and, as important, what was not checked."""
+        notes = "\n".join(f"- {n}" for n in self.notes) or "(none)"
+        pages = "\n".join(f"- {u}" for u in self.visited[-40:]) or "(none)"
+        unnoted = "\n\n".join(self.unnoted) or "(none)"
+        prompt = (f"# Task\n{self.task}\n\n# Notes you saved\n{notes}\n\n# Pages you visited\n{pages}\n\n"
+                  f"# What your last actions showed, not noted yet\n{unnoted}\n\n"
+                  "You ran out of steps or time before finishing. Write your final report from the notes and the "
+                  "not-yet-noted results above only, in four parts. FOUND: each fact the task asked for, one line "
+                  "each; for a fact from the notes give only what it is and its document (the notes are appended to "
+                  "this report word for word), for a fact from the not-yet-noted results write it out in full as "
+                  "`value (unit) — source`. SUPERSEDED / LOOK-ALIKE: records that do not apply, with why. CHECKED, "
+                  "NOT PRESENT: only what was searched completely and does not exist, with the evidence. NOT "
+                  "CHECKED: everything else the task asked for, including newer versions, other folders, further "
+                  "pages and unopened results, so nobody mistakes it for absent. Do not add facts that are not "
+                  "above. One short line per fact; no introduction.")
+        timeout = min(WRAP_UP_SECONDS, max(30.0, self.deadline - time.time()))
+        try:
+            message = await asyncio.wait_for(
+                self.model.chat([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=WRAP_UP_TOKENS,
+                                **_no_thinking(self.model)),
+                timeout=timeout)
+            if message.content:
+                return "(written from notes after running out of steps or time)\n" + message.content
+        except Exception as error:  # noqa: BLE001
+            self.log(f"[{self.name}] wrap-up failed: {type(error).__name__} {error}")
+        return ("(stopped before finishing: out of steps or time; no report could be written, see the notes)\n"
+                "NOT FOUND: nothing beyond the notes below was verified. Pages visited:\n" + pages)
+
+    def _foreign_site(self, tab: Tab, url: str) -> str:
+        """A refusal when the URL belongs to another website of this run that this agent was not given."""
+        from urllib.parse import urljoin
+        target = origin(urljoin(tab.page.url, url))
+        mine = {t.home for t in self.tabs.values()} | {origin(t.page.url) for t in self.tabs.values()}
+        if not target or target in mine:
+            return ""
+        for site_id, home in Tab.homes.items():
+            if home == target and site_id not in self.tabs:
+                return (f"Refused: {url} belongs to the website {site_id!r}, which another assistant handles. Stay on "
+                        f"{', '.join(self.tabs)}; list what you need from {site_id!r} under NOT FOUND in your report.")
+        return ""
 
     def _report(self, report: str) -> str:
+        """The report as the lead gets it: the agent's own words, then every note. An agent that did not finish
+        (out of steps or time, or cut off) also passes on what its last actions showed and it had not noted yet."""
         notes = "\n".join(f"- {n}" for n in self.notes)
-        return f"REPORT:\n{report}\n\nNOTES TAKEN WHILE BROWSING:\n{notes or '(none)'}"
+        text = f"REPORT:\n{report}\n\nNOTES TAKEN WHILE BROWSING:\n{notes or '(none)'}"
+        if self.unnoted and not self.finished:
+            text += ("\n\nLAST PAGES READ, NOT NOTED YET (verbatim, possibly cut; check the source before using a "
+                     "value):\n" + "\n\n".join(self.unnoted))
+        return text
 
     @staticmethod
     def _forget_old_views(messages: list[dict], keep: int = 2):
@@ -187,3 +488,6 @@ class BrowsingAgent:
         for i in views[:-keep]:
             first = messages[i]["content"].splitlines()[0][:200]
             messages[i]["content"] = f"(older page view removed to save space; it began: {first})"
+        for i in views[-keep:-1]:  # the previous view is kept short; only the newest one stays whole
+            if len(messages[i]["content"]) > PREVIOUS_VIEW_CHARS and not messages[i]["content"].endswith(SHORTENED):
+                messages[i]["content"] = messages[i]["content"][:PREVIOUS_VIEW_CHARS] + SHORTENED

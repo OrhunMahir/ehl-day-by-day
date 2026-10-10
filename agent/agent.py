@@ -1,8 +1,17 @@
 """Entry point: agent.json runs `uv run --no-sync python agent.py`, in the sandbox and on your machine.
 
-An orchestrating model reads the brief and directs browsing sub-agents, one browser per website, in parallel. It
-decides what to investigate where, follows up on gaps, works out the bid with exact arithmetic helpers, and finally
-has a sub-agent enter and sign the bid on the submission website.
+A lean flow with two browsing agents and no lead model in the loop:
+
+1. Setup: one model call reads the brief, names which website plays which role (tender portal, specification, ERP,
+   mailbox) and records the brief's own facts (tender reference, scenario date, director, our mail domain).
+2. A chain agent works the tender portal, the specification and the ERP in one conversation, in the order the bid
+   needs them; a mail agent works the mailbox at the same time. Both record facts the moment they read them. After
+   every record the bid engine says what its sites still owe, and the agent goes on with that. An agent that ends
+   while facts are still missing is started again with only those.
+3. Code prices the facts (rules in `engine/`), and a submission agent enters and signs the bid.
+
+Fair play: the models choose every website, page, search and document. Code only asks the engine what is missing and
+passes that list on as text.
 """
 import asyncio
 import dataclasses
@@ -19,89 +28,79 @@ import facts
 import run as contract
 from browser import Tab
 from browsing import BrowsingAgent
-from calc import calculate
 from llm import Model
 from submission import SubmissionAgent
 
-ORCHESTRATOR = """You are the lead sales engineer preparing exactly one tender response. You cannot browse yourself:
-you direct browsing assistants, one per website, and they report back. You make the decisions.
-
-Approach:
-1. Read the brief and its rules closely; they define the one correct answer. Plan which facts you need.
-2. Send assistants to the websites with `investigate` — several in one turn run in parallel. Give each a precise
-   task: what to find, which exact reference, which details (dates, units, status, validity, senders), and to report
-   verbatim. Their first pass should survey their site for everything the rules might need; information may sit on
-   any site, so ask each assistant to report anything relevant it sees.
-3. Time allows two rounds of investigations: the first survey and one round of follow-ups. Every investigation
-   is ended after about {round_minutes} minutes, so give each assistant one clear job. Use the follow-up round for
-   what depends on another site's answer (e.g. a catalogue group found in the specification must then be searched
-   in the ERP by that group, reading every result; amendments must be applied to the right revision).
-4. Put the facts from the reports into the facts JSON of `price_bid` and call it. It applies the bid rules in code
-   and returns the priced answer, `issues` (what is missing or ambiguous), `incomplete` positions and `omitted`
-   positions. Do not price anything yourself. On a later call pass only the top-level fields that are new or
-   changed: a list you pass replaces that list, fields you leave out stay as they were.
-5. Call `submit_bid`. It submits the last answer `price_bid` returned; you only add hints for filling the form.
-
-Filling the facts JSON:
-- Copy values exactly as reported; a fact you never saw stays out. Do not invent values.
-- Numbers as JSON numbers. Masses in kg (625 g is 0.625).
-- Give every fact its `source`: site, page or document, date, and the revision of a versioned document. For a
-  value from a message also give the sender's address in `source` and the exact tender reference the message
-  names in the fact's `reference`.
-- Give every material read in the ERP its `catalogue_group`, also the ones that do not match.
-- `searched_groups` lists a catalogue group only when the ERP was searched by that group and every result of
-  the search was read; then also list a search that found nothing. A group of which you only happen to know some
-  materials is not searched: leave it out, and leave those materials out too.
-- Keys that tie a position to a rule (condition group, packaging, delivery, setup pool, project bonus) go into
-  `assignments`, wherever they were read.
-- Set a setup pool's `allocation` from the wording of the message that defines the pool.
-
-`calculate` is only for checks of your own; the numbers of the bid come from `price_bid`.
-
-The clock: about {minutes} minutes to investigate. Then you are asked for `price_bid` and the priced answer is
-submitted; entering and signing the bid takes the rest of the time."""
-
-# Appended to every investigation task, so each reported value can be turned into a fact with its source.
-PROVENANCE = ("For every value you report, say where it is from: the website, the page or document, its date, the "
-              "sender's address if it is a message, and the revision if the document has revisions.")
-
 SCORED_RUN_SECONDS = 20 * 60
-# How the working time is spent, as shares of it. Entering and signing the bid gets everything after SUBMIT_SHARE.
-COLLECT_SHARE = 0.45  # investigations end here
-SUBMIT_SHARE = 0.45  # from here on the lead has to price and submit
-# One investigation may take this long, so that a round of follow-ups fits before the investigations end.
-INVESTIGATION_SECONDS = 240
-# A sub-agent checks the clock between its steps; one step that hangs is cut off this long after its time is up.
-INVESTIGATION_GRACE_SECONDS = 30
-FORCE_SUBMIT = {"type": "function", "function": {"name": "submit_bid"}}
-FORCE_PRICE = {"type": "function", "function": {"name": "price_bid"}}
-PRICE_ATTEMPTS = 2  # forced price_bid calls that may fail before the lead has to hand in an answer of its own
-# Thinking: the lead plans and fills the facts, so it thinks, but briefly. Browsing and submitting are routine steps
-# (a click, a form field) and do not think at all; a call of theirs that has not answered by then is asked again.
-LEAD_REASONING = "low"
-WORKER_CALL_SECONDS = 60
+SUBMISSION_RESERVE_SECONDS = 420  # the agents stop reading this long before the end: entering and signing the bid
+LEAD_REASONING = "low"  # the setup call thinks, briefly
+WORKER_CALL_SECONDS = 60  # browsing and submission do not think; a call open this long is asked again
+SETUP_CALL_SECONDS = 90
+AGENT_STEPS = 80  # steps of one browsing agent before it is started again with what is still missing
+IDLE_SECONDS = 15  # an agent with nothing to do looks again after this long, or as soon as a fact arrives
+EMPTY_SESSIONS = 2  # sessions in a row that recorded nothing before an agent waits for new facts instead
+LAST_SESSION_SECONDS = 60  # no new session starts this close to the end of reading
+SHOWN_NEEDS = 10  # missing facts listed after a record
+
+ROLES = ("tender portal", "specification", "ERP", "mailbox")  # as the engine's checklist names them
+CHAIN_ROLES = {"tender portal", "specification", "ERP"}
+MAIL_ROLES = {"mailbox"}
+
+SETUP = """You prepare one tender response. Read the brief and the list of websites, then call `setup` once:
+- roles: for each role, the siteId of the website that plays it. "tender portal": where the tender, its bill of
+  quantities (positions) and the bidder Q&A are published. "specification": where the technical specification
+  (requirements, revisions, catalogue groups) is published; it may be the tender portal or the customer/supplier
+  portal. "ERP": our internal material and price system. "mailbox": our webmail.
+- facts: what the brief itself states: tender_reference (character for character), scenario_date (ISO 8601 with
+  time and zone if given), director_address (the mail address of the person whose approval counts for discounts, if
+  the brief names it), bidder_domain (the domain of our own mail addresses, if the brief shows one). Leave out what
+  the brief does not state."""
+
+CHAIN_JOB = """Your job: collect, in this order, what the bid needs from these websites, and record each record the
+moment you have read it.
+1. The tender: its bill of quantities (every position: number, quantity, unit, requirement) and every answer of the
+   bidder Q&A that changes a quantity, withdraws an earlier answer, amends a requirement or ties a position to a key
+   (condition group, packaging, delivery, setup pool, project bonus).
+2. The technical specification: every revision with its date and which one is marked current, and every requirement
+   (bore, stroke or usable travel, pressure, mounting, certification, pieces per set, catalogue group).
+3. The ERP: search by each catalogue group of the current requirements. Record every result with what the list
+   shows (material number, status, attributes, catalogue group), then open the details of the results that match a
+   requirement and record status, stock, lead times, every price condition with all scales, masses and packaging.
+   Add a group to `searched_groups` once you have read every result of its search.
+Do not wait for one step to be perfect before the next: the engine's list after each record says what is still
+missing."""
+
+MAIL_JOB = """Your job: find and record every message in this mailbox that the bid rules of the brief depend on,
+for the exact tender reference: the discount approval, and the rule messages (condition rules, packaging tariffs,
+delivery commitments, setup pools, project bonuses, FX fixings, metal indices, technical approvals such as end
+reserves). Search the inbox and the archive and every folder; record each message the moment you have read it, with
+its sender's address, its date and time, and the reference it names. Record older and newer versions and look-alikes
+too, each with its own source: the bid engine decides which one counts. The engine's list after each record says
+what is still missing; keys that tie positions to rules arrive while the tender is being read, so look again at the
+list when you think you are done."""
+
+PROVENANCE = ("Give every recorded item its `source`: the website, the page or document, its date, the sender's "
+              "address for a message, and the revision for a versioned document.")
 
 
-class Orchestrator:
-    def __init__(self, task: dict, token: str | None, tabs: dict[str, Tab], model: Model, started: float,
-                 worker: Model | None = None):
-        self.task, self.token, self.tabs, self.model = task, token, tabs, model
-        self.worker = worker or model  # the model of the browsing and submission agents
+class Lead:
+    def __init__(self, task: dict, token: str | None, tabs: dict[str, Tab], model: Model, worker: Model,
+                 started: float):
+        self.task, self.token, self.tabs, self.model, self.worker = task, token, tabs, model, worker
         self.credentials = {a["siteId"]: a.get("credentials", {}) for a in task["access"]}
         self.started = started
         now = time.time()
-        # Every run works with the length of a scored run: a test run expires much later, a local run never.
+        # every run works with the length of a scored run: a test run expires much later, a local run never
         left = min(contract.seconds_left(task), SCORED_RUN_SECONDS - (now - started))
-        self.collect_until = now + left * COLLECT_SHARE
-        self.submit_from = now + left * SUBMIT_SHARE
         self.deadline = now + left
-        self.locks = {site: asyncio.Lock() for site in tabs}
-        self.facts_data: dict = {}  # the facts JSON as the lead has built it up so far
-        self.priced: engine.BidResult | None = None  # what the bid engine made of the latest facts
-        self.price_failures = 0
-        self.submitted = None  # the last answer a submission was attempted with
-        self.sent_without_lead = False
-        self.accepted = False  # the platform took the bid; nothing more to do
+        self.read_until = self.deadline - SUBMISSION_RESERVE_SECONDS
+        self.builder = facts.FactsBuilder()
+        self.changed = asyncio.Event()
+        self.complete = False
+        self.roles: dict[str, str] = {}
+        self.priced: engine.BidResult | None = None
+        self.submitted = None
+        self.accepted = False
 
     def log(self, text: str):
         print(f"[{time.time() - self.started:6.1f}s] {text}", flush=True)
@@ -110,72 +109,159 @@ class Orchestrator:
         return (f"# The brief (rules apply exactly)\n{self.task['brief']}\n\n"
                 f"# Answer schema\n{json.dumps(self.task['answer_schema'], ensure_ascii=False)}")
 
-    def tools(self) -> list[dict]:
-        sites = list(self.tabs)
-        return [
-            {"type": "function", "function": {
-                "name": "investigate",
-                "description": "Send a browsing assistant to one website with a precise task; returns its report.",
-                "parameters": {"type": "object", "properties": {
-                    "site": {"type": "string", "enum": sites},
-                    "task": {"type": "string"}}, "required": ["site", "task"]}}},
-            {"type": "function", "function": {
-                "name": "calculate",
-                "description": "Exact decimal arithmetic. Python-like expressions with + - * / ( ), and functions "
-                               "round_half_up(x, places), ceil(x), floor(x), min, max, sum([..]). "
-                               "Several named lines allowed: 'a = 2*3\\nb = a/7\\nround_half_up(b, 2)'. Returns every value.",
-                "parameters": {"type": "object", "properties": {"expression": {"type": "string"}},
-                               "required": ["expression"]}}},
-            {"type": "function", "function": {
-                "name": "price_bid",
-                "description": "Apply the bid rules to the collected facts in code. Returns the priced answer, "
-                               "`issues` (what is missing or ambiguous), `incomplete` and `omitted` positions. "
-                               "The first call needs tender_reference and scenario_date; a later call may pass "
-                               "only the top-level fields that changed.",
-                "parameters": {"type": "object", "properties": {"facts": facts_schema()},
-                               "required": ["facts"]}}},
-            {"type": "function", "function": {
-                "name": "submit_bid",
-                "description": "Have an assistant enter and sign the last answer price_bid returned on the "
-                               "submission website. Give any form hints you learned. Pass `answer` only if "
-                               "price_bid could not be made to return one.",
-                "parameters": {"type": "object", "properties": {
-                    "hints": {"type": "string"},
-                    "answer": {"type": "object"}}, "required": []}}},
-        ]
-
-    async def investigate(self, site: str, task: str) -> str:
-        if site not in self.tabs:
-            return f"Unknown site {site}; choose one of {', '.join(self.tabs)}"
-        async with self.locks[site]:
-            if time.time() >= self.collect_until:
-                return "No time left to investigate: call submit_bid now with what you have."
-            until = min(self.collect_until, time.time() + INVESTIGATION_SECONDS)
-            agent = BrowsingAgent(self.worker, {site: self.tabs[site]}, self.credentials, f"{task}\n\n{PROVENANCE}",
-                                  self.context(), name=site, deadline=until, log=self.log)
+    # ---- setup -------------------------------------------------------------------------------------------------
+    async def setup(self) -> None:
+        sites = [a["siteId"] for a in self.task["access"]]
+        tool = {"type": "function", "function": {
+            "name": "setup", "description": "Name the website of each role and record the brief's own facts.",
+            "parameters": {"type": "object", "properties": {
+                "roles": {"type": "object", "properties": {role: {"type": "string", "enum": sites} for role in ROLES}},
+                "facts": {"type": "object", "properties": {
+                    "tender_reference": {"type": "string"}, "scenario_date": {"type": "string"},
+                    "director_address": {"type": "string"}, "bidder_domain": {"type": "string"}}}},
+                "required": ["roles", "facts"]}}}
+        messages = [{"role": "system", "content": SETUP},
+                    {"role": "user", "content": self.context() + "\n\n# Websites\n" + "\n".join(
+                        f"- {a['siteId']}: {a['url']}" for a in self.task["access"])}]
+        for attempt in range(2):
             try:
-                return await asyncio.wait_for(agent.run(), timeout=until - time.time() + INVESTIGATION_GRACE_SECONDS)
-            except TimeoutError:
-                self.log(f"[{site}] cut off: a step did not return in time")
-                return agent._report("(cut off: out of time; only the notes below were saved)")
+                message = await asyncio.wait_for(
+                    self.model.chat(messages, [tool], temperature=0.2,
+                                    tool_choice={"type": "function", "function": {"name": "setup"}}),
+                    timeout=SETUP_CALL_SECONDS)
+                call = next(c for c in message.tool_calls or [] if c.function.name == "setup")
+                args = json.loads(call.function.arguments or "{}")
+            except Exception as error:  # noqa: BLE001 - asked once more, then the agents work every site
+                self.log(f"[lead] setup call failed ({type(error).__name__}), attempt {attempt + 1}")
+                continue
+            roles = args.get("roles") if isinstance(args.get("roles"), dict) else {}
+            self.roles = {role: site for role, site in roles.items() if role in ROLES and site in self.tabs}
+            brief = {k: v for k, v in (args.get("facts") or {}).items() if isinstance(v, str) and v.strip()}
+            self.log("[lead] setup: roles " + json.dumps(self.roles) + "; brief facts " + ", ".join(sorted(brief)))
+            if brief:
+                self.log("[lead] " + self.record(brief).splitlines()[0][:300])
+            return
+        self.log("[lead] setup failed: one agent works every website")
 
-    def price(self, data) -> str:
-        if not isinstance(data, dict):
-            self.price_failures += 1
-            return "price_bid needs the facts as a JSON object."
-        merged = {**self.facts_data, **{key: value for key, value in data.items() if key in FACT_FIELDS}}
+    # ---- facts ---------------------------------------------------------------------------------------------------
+    def record(self, update) -> str:
+        """Adds one update from an agent. Which sender may decide what is the engine's own default, and nobody
+        takes records back here."""
+        if not isinstance(update, dict):
+            return "The update was not added: it must be a JSON object such as {'materials': [{...}]}."
+        update = {k: v for k, v in update.items() if k not in ("authority", "replace_lists")}
         try:
-            collected = facts.from_dict(facts.Facts, merged)
-            result = engine.evaluate(collected)
-            result = self.without_hasty_no_bid(collected, result)
-        except Exception as error:  # noqa: BLE001 - a ValueError names the bad field; the model corrects it
-            self.price_failures += 1
-            return f"The facts could not be priced: {error}. Correct this and call price_bid again."
-        if merged != self.facts_data:  # the platform keeps only the end of a long log: log facts once per change
-            self.log("[lead] facts " + json.dumps(merged, ensure_ascii=False))
-        self.facts_data, self.priced = merged, result
-        return json.dumps({"answer": result.answer, "issues": result.issues, "incomplete": result.incomplete,
-                           "omitted": result.omitted}, ensure_ascii=False)
+            outcome = self.builder.add(update)
+        except ValueError as error:
+            return f"The update was not added: {error}. Correct this and record again."
+        self.changed.set()
+        self.check_complete()
+        return outcome
+
+    def evaluate(self) -> engine.BidResult | None:
+        data = dict(self.builder.data)
+        data.setdefault("tender_reference", "(not recorded yet)")
+        data.setdefault("scenario_date", "2100-01-01")
+        try:
+            return engine.evaluate(facts.from_dict(facts.Facts, data))
+        except Exception as error:  # noqa: BLE001 - asked again with the next fact
+            self.log(f"[lead] facts could not be evaluated: {str(error)[:200]}")
+            return None
+
+    def open_needs(self, roles: set[str]) -> list[dict]:
+        result = self.evaluate()
+        if result is None:
+            return []
+        return [n for n in result.needed() if n["site"] in roles
+                or (n["site"] == "brief" and roles & MAIL_ROLES)]  # the brief's gaps are read from our own mails
+
+    def check_complete(self) -> None:
+        result = self.evaluate()
+        if result is not None and self.builder.data.get("tender_reference") and result.complete:
+            if not self.complete:
+                self.log("[lead] the facts are complete")
+            self.complete = True
+
+    def counts(self) -> str:
+        data = self.builder.data
+        return ", ".join(f"{k} {len(v)}" for k, v in data.items() if isinstance(v, list) and v)
+
+    def recorder(self, name: str, roles: set[str]):
+        def record(update) -> str:
+            outcome = self.record(update)
+            if outcome.startswith("The update was not added"):
+                self.log(f"[{name}] record rejected")
+                return outcome
+            self.log(f"[{name}] recorded; facts: {self.counts()}")
+            return outcome.splitlines()[0][:300] + "\n" + self.missing_text(roles)
+        return record
+
+    def missing_text(self, roles: set[str]) -> str:
+        needs = self.open_needs(roles)
+        finds = [n for n in needs if n["kind"] == "find"]
+        if not finds:
+            return "Nothing your websites owe is missing right now."
+        lines = [f"- {n['what']}" + (f" (positions {', '.join(n['positions'])})" if n.get("positions") else "")
+                 for n in finds[:SHOWN_NEEDS]]
+        more = f"\n(and {len(finds) - SHOWN_NEEDS} more)" if len(finds) > SHOWN_NEEDS else ""
+        return "Still missing from your websites:\n" + "\n".join(lines) + more
+
+    # ---- the two agents ----------------------------------------------------------------------------------------
+    def split(self) -> list[tuple[str, set[str], list[str], str]]:
+        """(name, roles, sites, job) for each agent."""
+        mail = [self.roles["mailbox"]] if "mailbox" in self.roles else []
+        chain = list(dict.fromkeys(self.roles[r] for r in ("tender portal", "specification", "ERP") if r in self.roles))
+        chain = [s for s in chain if s not in mail]
+        if not mail or not chain:
+            return [("all", CHAIN_ROLES | MAIL_ROLES, list(self.tabs), CHAIN_JOB + "\n\n" + MAIL_JOB)]
+        rest = [s for s in self.tabs if s not in chain and s not in mail]  # a site no role named: the chain reads it
+        return [("chain", CHAIN_ROLES, chain + rest, CHAIN_JOB), ("mail", MAIL_ROLES, mail, MAIL_JOB)]
+
+    async def work(self, name: str, roles: set[str], sites: list[str], job: str) -> None:
+        tabs = {site: self.tabs[site] for site in sites}
+        session = empty = 0
+        while not self.complete and self.read_until - time.time() > LAST_SESSION_SECONDS:
+            needs = self.open_needs(roles)
+            finds = [n for n in needs if n["kind"] == "find" or "no_bid" in n["what"]]
+            if session and (not finds or empty >= EMPTY_SESSIONS):
+                self.changed.clear()
+                try:
+                    await asyncio.wait_for(self.changed.wait(), timeout=IDLE_SECONDS)
+                except TimeoutError:
+                    pass
+                empty = 0 if self.changed.is_set() else empty
+                continue
+            session += 1
+            if session == 1:
+                task = job
+            else:
+                task = ("Continue where an earlier agent stopped on these websites. Find and record what is still "
+                        "missing:\n" + "\n".join(f"- {n['what']}" for n in finds[:SHOWN_NEEDS]))
+            task += "\n\n" + self.missing_text(roles) + "\n\n" + PROVENANCE
+            agent = BrowsingAgent(self.worker, tabs, self.credentials, task, self.context(),
+                                  name=f"{name}#{session}", deadline=self.read_until, max_steps=AGENT_STEPS,
+                                  log=self.log, recorder=self.recorder(name, roles),
+                                  field_reference=facts.field_reference())
+            self.log(f"[{name}] session {session} starts with {len(finds)} missing fact(s)")
+            try:
+                await asyncio.wait_for(agent.run(), timeout=self.read_until - time.time() + 30)
+            except Exception as error:  # noqa: BLE001 - a broken session is started again with what is missing
+                self.log(f"[{name}] session {session} ended: {type(error).__name__}")
+            empty = empty + 1 if agent.records == 0 else 0
+            self.log(f"[{name}] session {session} done: {agent.records} record(s), {agent.stalls} stalled call(s)")
+
+    # ---- the bid -----------------------------------------------------------------------------------------------
+    def price(self) -> engine.BidResult | None:
+        try:
+            collected = self.builder.facts()
+            result = self.without_hasty_no_bid(collected, engine.evaluate(collected))
+        except Exception as error:  # noqa: BLE001
+            self.log(f"[lead] the facts could not be priced: {str(error)[:300]}")
+            return None
+        self.log("[lead] facts " + json.dumps(self.builder.data, ensure_ascii=False, default=str))
+        self.log(f"[lead] priced: decision {result.answer.get('decision')}, {len(result.answer.get('positions', []))} "
+                 f"position(s), {len(result.issues)} issue(s), omitted {len(result.omitted)}")
+        return result
 
     def without_hasty_no_bid(self, collected: facts.Facts, result: engine.BidResult) -> engine.BidResult:
         """A "no bid" is final only when the engine has nothing else to report and every position without a
@@ -195,7 +281,9 @@ class Orchestrator:
                       if facts.norm_key(requirement.requirement) == facts.norm_key(position.requirement)} - {""}
             return bool(groups) and groups <= searched
 
-        if len(result.issues) <= 1 and all(conclusive(p) for p in collected.positions if p.position in unresolved):
+        no_match = [i for i in result.issues if "no active material matches" in i]
+        if len(result.issues) == len(no_match) and all(
+                conclusive(p) for p in collected.positions if p.position in unresolved):
             return result
         kept = [position for position in collected.positions if position.position not in unresolved]
         partial = engine.evaluate(dataclasses.replace(collected, positions=kept))
@@ -203,13 +291,7 @@ class Orchestrator:
                 "position(s) " + ", ".join(unresolved) + " are left out instead")
         return dataclasses.replace(partial, issues=[*result.issues, note], omitted=[*partial.omitted, *unresolved])
 
-    def answer_to_submit(self, own: dict | None) -> dict | None:
-        """The engine's last answer; the lead's own only when the engine has none that fits the schema."""
-        if self.priced and not validate(self.priced.answer, self.task["answer_schema"]):
-            return self.priced.answer
-        return own if isinstance(own, dict) else None
-
-    async def submit(self, answer: dict, hints: str) -> str:
+    async def submit(self, answer: dict, hints: str = "") -> str:
         problems = validate(answer, self.task["answer_schema"])
         if problems:
             return "The answer does not match the schema: " + "; ".join(problems)
@@ -239,10 +321,7 @@ class Orchestrator:
         self.submitted = answer
         report = await agent.run()
         self.accepted = await self.run_is_over()
-        if self.accepted:
-            return report + "\n\nThe platform has closed the run: the bid was accepted."
-        return report + ("\n\nThe run is still open, so no bid has been accepted yet. Call submit_bid again and say "
-                         "in the hints what is already entered and what went wrong.")
+        return report
 
     def left_out(self, answer: dict) -> str:
         if not self.priced or answer is not self.priced.answer or not self.priced.omitted:
@@ -262,105 +341,29 @@ class Orchestrator:
             return False
         return status in (401, 403, 404, 409, 410)
 
-    async def ask(self, messages: list[dict], tools: list[dict], force: dict | None):
-        if force:
-            try:
-                return await self.model.chat(messages, tools, temperature=0.2, tool_choice=force)
-            except Exception as error:  # noqa: BLE001 - a model that refuses a forced tool still gets asked plainly
-                self.log(f"[lead] forced {force['function']['name']} call failed ({str(error)[:200]}); asking without it")
-        return await self.model.chat(messages, tools, temperature=0.2)
-
-    async def time_is_up(self, messages: list[dict]) -> dict | None:
-        """What happens once the time to investigate is over: the engine's answer is submitted without asking the
-        lead; without one the lead is made to price, and after that to submit. Returns the tool to force."""
-        if self.priced and self.submitted is None and not self.sent_without_lead:
-            self.sent_without_lead = True
-            self.log("[lead] time to submit: sending the last priced answer")
-            report = await self.submit(self.priced.answer, "")
-            self.log(f"[lead] <- submit: {report[:3000]}")
-            messages.append({"role": "user", "content": "The time to investigate was over, so the last priced answer "
-                             "was submitted for you. The result:\n\n" + report})
-        if self.accepted:
-            return None
-        if self.priced or self.price_failures >= PRICE_ATTEMPTS:
-            if self.submitted is None:
-                messages.append({"role": "user", "content": "Investigation time is over: call submit_bid now" + (
-                    "." if self.priced else ", passing your best answer yourself. Leave out positions you could not "
-                    "complete.")})
-            return FORCE_SUBMIT
-        messages.append({"role": "user", "content": "Investigation time is over: call price_bid now with every fact "
-                         "you have."})
-        return FORCE_PRICE
-
-    async def run(self):
-        minutes = round((self.submit_from - time.time()) / 60)
-        messages = [
-            {"role": "system", "content": ORCHESTRATOR.format(minutes=minutes,
-                                                               round_minutes=round(INVESTIGATION_SECONDS / 60))},
-            {"role": "user", "content": self.context() + "\n\n# Websites\n" + "\n".join(
-                f"- {a['siteId']}: {a['url']}" for a in self.task["access"]) + "\n\nBegin."},
-        ]
-        tools = self.tools()
-        while time.time() < self.deadline and not self.accepted:
-            force = await self.time_is_up(messages) if time.time() >= self.submit_from else None
-            if self.accepted:
-                return
-            try:
-                message = await asyncio.wait_for(self.ask(messages, tools, force),
-                                                 timeout=self.deadline - time.time())
-            except TimeoutError:
-                self.log("[lead] out of time")
-                return
-            calls = message.tool_calls or []
-            if message.content:
-                self.log(f"[lead] {message.content[:1500]}")
-            entry = {"role": "assistant", "content": message.content or ""}
-            if calls:
-                entry["tool_calls"] = [{"id": c.id, "type": "function",
-                                        "function": {"name": c.function.name, "arguments": c.function.arguments}} for c in calls]
-            messages.append(entry)
-            if not calls:
-                messages.append({"role": "user", "content": (
-                    "No bid has been accepted yet: call submit_bid again." if self.submitted
-                    else "Continue: investigate, price_bid, or submit_bid.")})
-                continue
-
-            async def execute(call):
-                try:
-                    args = json.loads(call.function.arguments or "{}")
-                except ValueError:
-                    return "Error: arguments were not valid JSON"
-                self.log(f"[lead] {call.function.name} {json.dumps(args, ensure_ascii=False)[:600]}")
-                try:
-                    if call.function.name == "investigate":
-                        return await self.investigate(args["site"], args["task"])
-                    if call.function.name == "calculate":
-                        return calculate(args["expression"])
-                    if call.function.name == "price_bid":
-                        return self.price(args.get("facts"))
-                    if call.function.name == "submit_bid":
-                        answer = self.answer_to_submit(args.get("answer"))
-                        if answer is None:
-                            return ("There is no priced answer yet: call price_bid first. Pass `answer` yourself "
-                                    "only if price_bid cannot be made to return one.")
-                        return await self.submit(answer, args.get("hints", ""))
-                    return f"Unknown tool {call.function.name}"
-                except Exception as error:  # noqa: BLE001
-                    return f"Error: {error}"
-
-            results = await asyncio.gather(*(execute(c) for c in calls))
-            for call, result in zip(calls, results):
-                self.log(f"[lead] <- {call.function.name}: {result[:3000]}")
-                messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
-
-
-# The facts the lead fills in. Which sender may decide what is the engine's own default, not the model's to set.
-FACT_FIELDS = {f.name for f in dataclasses.fields(facts.Facts)} - {"authority"}
-
-
-def facts_schema() -> dict:
-    schema = facts.json_schema()
-    return {**schema, "properties": {name: rule for name, rule in schema["properties"].items() if name in FACT_FIELDS}}
+    # ---- the run -----------------------------------------------------------------------------------------------
+    async def run(self) -> None:
+        await self.setup()
+        parts = self.split()
+        self.log("[lead] agents: " + "; ".join(f"{n} on {', '.join(s)}" for n, _, s, _ in parts))
+        agents = [asyncio.ensure_future(self.work(*part)) for part in parts]
+        while not self.complete and time.time() < self.read_until and not all(a.done() for a in agents):
+            await asyncio.sleep(2)
+        if self.complete:  # nothing is missing: stop reading and submit at once
+            for agent in agents:
+                agent.cancel()
+        await asyncio.gather(*agents, return_exceptions=True)
+        self.priced = self.price()
+        if self.priced is None:
+            self.log("[lead] nothing to submit")
+            return
+        hints = ""
+        while not self.accepted and self.deadline - time.time() > 60:
+            self.log("[lead] time to submit: sending the priced answer")
+            report = await self.submit(self.priced.answer, hints)
+            self.log(f"[lead] <- submit: {report[:1500]}")
+            hints = ("An earlier attempt did not end with an accepted bid. Check what is already entered, complete "
+                     "it and sign. Its report:\n" + report[:1500])
 
 
 def validate(answer: dict, schema: dict) -> list[str]:
@@ -408,15 +411,15 @@ async def main() -> int:
         tabs = {}
         for index, access in enumerate(task["access"][:4]):
             available = max(len(browsers.cdp_urls()), 1)
-            browser, page = await browsers.connect(playwright, index if index < available else 0)
+            _, page = await browsers.connect(playwright, index if index < available else 0)
             if index >= available:  # fewer browsers than sites: a tab of its own in the first browser
                 page = await page.context.new_page()
             await page.goto(access["url"], wait_until="domcontentloaded")
             tabs[access["siteId"]] = Tab(access["siteId"], page)
-        lead = Orchestrator(task, token, tabs, model, started, worker)
+        lead = Lead(task, token, tabs, model, worker, started)
         await lead.run()
     print(f"Done in {time.time() - started:.0f}s; lead {model.usage()}; agents {worker.usage()}; submitted: "
-          f"{json.dumps(lead.submitted, ensure_ascii=False) if lead.submitted else 'nothing'}", flush=True)
+          f"{'an answer' if lead.submitted else 'nothing'}", flush=True)
     return 0
 
 

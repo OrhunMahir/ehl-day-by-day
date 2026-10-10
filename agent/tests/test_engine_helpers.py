@@ -24,8 +24,8 @@ class Numbers(unittest.TestCase):
         self.assertEqual(dec("1,234", "de"), D("1.234"))
 
     def test_zero_width_characters(self):
-        self.assertEqual(dec("2​0​0"), D(200))
-        self.assertEqual(norm_key("K​-​1 "), "K-1")
+        self.assertEqual(dec("2\u200b0\u200b0"), D(200))
+        self.assertEqual(norm_key("K\u200b-\u200b1 "), "K-1")
 
     def test_rejects_text_without_number(self):
         with self.assertRaises(ValueError):
@@ -107,8 +107,9 @@ class Json(unittest.TestCase):
         "revisions": [{"revision": "R-2", "current": True, "date": "2030-01-20", "requirements": [
             {"requirement": "A", "bore_mm": "50", "stroke_mm": "300", "pressure_bar": "160", "mounting": "Flansch",
              "certification": "keine gefordert", "catalogue_group": "G-A"}]}],
-        "materials": [{"material_number": "M-A1", "active": "aktiv", "catalogue_group": "G-A", "bore_mm": 50, "stroke_mm": "300,0",
-                       "pressure_bar": "160", "mounting": "Flansch", "stock": "1250", "pieces_per_carton": "2,5", "stock_lead_weeks": "1",
+        "materials": [{"material_number": "M-A1", "active": "aktiv", "catalogue_group": "G-A", "bore_mm": 50,
+                       "stroke_mm": "300,0", "pressure_bar": "160", "mounting": "Flansch", "stock": "1250",
+                       "pieces_per_carton": "2,5", "stock_lead_weeks": "1",
                        "conditions": [{"valid_from": "01.01.2030, 00:00:00 UTC", "valid_to": "31.12.2030",
                                        "price_unit": "1", "scales": [{"min_quantity": "1", "price": "1.234,50"}]}]}],
         "discount_approvals": [{"reference": "T-TEST-1", "percent": "4", "min_order_value": "3.000,00",
@@ -174,6 +175,22 @@ class Json(unittest.TestCase):
         self.assertFalse(material["additionalProperties"])
         self.assertIn("conditions", material["properties"])
         json.dumps(schema)
+
+    def test_filling_guide_names_real_fields(self):
+        import re
+        from facts import FILLING_GUIDE, json_schema
+        names = set()
+
+        def collect(schema):
+            for name, sub in schema.get("properties", {}).items():
+                names.add(name)
+                for part in (sub, sub.get("items", {}), *sub.get("anyOf", [])):
+                    if isinstance(part, dict):
+                        collect(part.get("items", part) if part.get("type") == "array" else part)
+        collect(json_schema())
+        used = set(re.findall(r"\b[a-z]+_[a-z_]+\b", FILLING_GUIDE)) - {"base_and_surcharge"}
+        self.assertTrue(used, "no field names found")
+        self.assertEqual(used - names, set())
 
     def test_mass(self):
         from facts import mass_kg

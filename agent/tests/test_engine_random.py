@@ -385,7 +385,8 @@ def render(w: World, rng: random.Random) -> Facts:
             key = f"TZ-{p.id}"
             number, ceiling, weeks = p.commit
             f.delivery_commitments += keyed(
-                lambda r, k, v, s: DeliveryCommitment(r, k, number, D(ceiling), v, s), "logistik", key, weeks, 0)
+                lambda r, k, v, s, n=number, c=ceiling: DeliveryCommitment(r, k, n, D(c), v, s), "logistik", key, weeks,
+                0)
             assign(p, K.DELIVERY, key)
 
     if w.approval:
@@ -429,7 +430,7 @@ class RandomScenarios(unittest.TestCase):
                     self.assertEqual(as_dec(got[name]), as_dec(want[name]), name)
                 self.assertEqual([p["position"] for p in got["positions"]],
                                  [p["position"] for p in want["positions"]])
-                for g, e in zip(got["positions"], want["positions"]):
+                for g, e in zip(got["positions"], want["positions"], strict=True):
                     self.assertEqual(set(g), set(e), g["position"])
                     for name in e:
                         if isinstance(e[name], str):

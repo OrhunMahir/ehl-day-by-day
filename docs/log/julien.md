@@ -2,6 +2,20 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 02:20 · stream-j-tweaks: an agent never gives up before its deadline
+
+- Test run `run_c388b41a14fc6ede` (`09daad5`): quality 10.
+  - The supplier portal's and the webmail's agents stopped for good at 214 s and 223 s. After reading several pages,
+    their next answer (a long record) took over 30 s; the 30 s limit for models without thinking cut it off five
+    times in a row, and after five attempts an agent gave up.
+  - Without the specification no material was found, and the submission left all positions out.
+- Changed: `browsing.py`: a model call may take 120 s (was 30 s without thinking, 75 s with). An agent asks again
+  until its deadline instead of stopping after five attempts, and a model error ends only that attempt.
+- Checked: 227 unit tests pass (1 skipped), among them an agent whose model hangs seven times and then fails once,
+  and still finishes. No local run.
+- For the others: nothing changes on `main`.
+- Next: sandbox test of this commit.
+
 ## 2026-10-11 01:30 · stream-j-tweaks: amounts as written, setup fees per position, no hasty no bid
 
 - Test run `run_e7b86a346e4fe041` (`7f5e89d`): quality 73.1, eligible, 13:29. Position 01.01 completely right;

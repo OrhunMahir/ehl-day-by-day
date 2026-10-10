@@ -386,6 +386,47 @@ class QuickStallTest(unittest.TestCase):
         self.assertIn("FOUND: y", report)
 
 
+class NeverGivesUpTest(unittest.TestCase):
+    """A sandbox run: two agents' calls were cut off five times in a row and the agents stopped for good."""
+
+    def test_an_agent_keeps_asking_until_its_deadline(self):
+        import time
+        import browsing
+        Tab.homes.clear()
+        tab = Tab("portal", FakePage("https://portal.example.test/"))
+
+        async def observe(offset=0):
+            return "a page"
+        tab.observe = observe
+
+        class StallsSevenTimesThenErrsThenAnswers:
+            def __init__(self):
+                self.calls = 0
+
+            async def chat(self, messages, tools=None, **kwargs):
+                self.calls += 1
+                if self.calls <= 7:
+                    await asyncio.sleep(3600)  # stuck or very slow
+                if self.calls == 8:
+                    raise RuntimeError("model unavailable after retries")
+                return type("M", (), {"content": "", "tool_calls": [FakeCall(self.calls, "finish", '{"report": "FOUND: z"}')]})()
+        model = StallsSevenTimesThenErrsThenAnswers()
+        old = browsing.CALL_SECONDS, browsing.RETRY_PAUSE_SECONDS
+        browsing.CALL_SECONDS, browsing.RETRY_PAUSE_SECONDS = 0.1, 0.01
+        try:
+            agent = BrowsingAgent(model, {"portal": tab}, {}, "task", "context", name="t",
+                                  deadline=time.time() + 600, log=lambda *a: None)
+            report = asyncio.run(agent.run())
+        finally:
+            browsing.CALL_SECONDS, browsing.RETRY_PAUSE_SECONDS = old
+        self.assertEqual(model.calls, 9)
+        self.assertIn("FOUND: z", report)
+
+    def test_a_slow_but_working_answer_is_not_cut_off(self):
+        import browsing
+        self.assertGreaterEqual(browsing.QUICK_CALL_SECONDS, 90)  # a long record takes a minute or more
+
+
 class FreshSessionTest(unittest.TestCase):
     def test_two_unanswered_loads_in_a_row_bring_a_fresh_session(self):
         import time

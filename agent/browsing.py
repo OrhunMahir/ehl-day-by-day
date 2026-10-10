@@ -52,10 +52,12 @@ WRAP_UP_SECONDS = 90  # the wrap-up report may take at most this long
 # (2000 took about 50 s and were cut off); the notes themselves are appended to the report anyway
 WRAP_UP_TOKENS = 1000
 WRAP_UP_RESERVE = 45  # seconds before the deadline at which browsing stops, so the wrap-up fits inside it
-CALL_SECONDS = 75  # one model call may take at most this long before it is retried
-# a model without thinking answers a step in 2-3 s, so a call still open after this long has stalled
-QUICK_CALL_SECONDS = 30
-CALL_ATTEMPTS = 5  # attempts per step, as far as the deadline allows
+# One model call may take this long before it is dropped and asked again. A step without thinking usually answers
+# in 2-3 s, but recording many facts after reading several pages takes a minute or more (Qwen writes about 40 tokens
+# per second): at 30 s two agents of a sandbox run were cut off five times in a row and gave up for good.
+CALL_SECONDS = 120
+QUICK_CALL_SECONDS = 120  # the same for a model without thinking
+RETRY_PAUSE_SECONDS = 2  # after a model error, before asking again
 UNNOTED_KEPT = 2  # results of the last actions without a note after them, kept for a report written in a hurry
 UNNOTED_CHARS = 5000  # of each of them
 ACTION_SECONDS = 60  # one browser action may take at most this long
@@ -473,7 +475,9 @@ class BrowsingAgent:
         """One model step. A call can stall for minutes (a full queue, a stuck request); a fresh attempt usually
         returns quickly, so each attempt is capped and retried while the deadline allows. None: no answer in time."""
         cap = QUICK_CALL_SECONDS if getattr(self.model, "thinking", None) is False else CALL_SECONDS
-        for attempt in range(1, CALL_ATTEMPTS + 1):
+        attempt = 0
+        while True:  # never give up before the deadline: a later attempt usually answers
+            attempt += 1
             budget = self.deadline - getattr(self, "reserve", WRAP_UP_RESERVE) - time.time()
             if budget < 10:
                 return None
@@ -482,8 +486,10 @@ class BrowsingAgent:
                 return await asyncio.wait_for(self.model.chat(messages, tools, temperature=0.2), timeout=limit)
             except asyncio.TimeoutError:
                 self.stalls += 1
-                self.log(f"[{self.name}] model call stalled for {limit:.0f} s (attempt {attempt} of {CALL_ATTEMPTS})")
-        return None
+                self.log(f"[{self.name}] model call stalled for {limit:.0f} s (attempt {attempt}); asking again")
+            except Exception as error:  # noqa: BLE001 - a model error ends one attempt, not the agent
+                self.log(f"[{self.name}] model call failed ({type(error).__name__}: {str(error)[:120]}); asking again")
+                await asyncio.sleep(RETRY_PAUSE_SECONDS)
 
     async def _wrap_up(self) -> str:
         """The agent ran out of steps or time: one call without tools turns its notes into the usual report, so the

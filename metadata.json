@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4KFDRK3DA7XB8W547N69WR9",
+  "strategy": "manual-commit",
+  "branch": "plan-facts-at-source",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "agent/agent.py",
+    "agent/facts.py",
+    "agent/tests/test_dispatch.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 24,
+    "cache_creation_tokens": 21449,
+    "cache_read_tokens": 8512143,
+    "output_tokens": 11699,
+    "api_call_count": 11
+  }
+}

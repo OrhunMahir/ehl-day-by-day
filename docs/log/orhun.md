@@ -2,6 +2,29 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-10 19:35 · Submission never goes back; two local runs and what they showed
+
+- Changed: `agent/submission.py`: the agent is told to read the form's notices and, on a form that discards later
+  steps when one goes back, never to go back or reopen the form's address; a form found partly entered is
+  continued from the step it shows. The step limit per attempt is 400 (was 80), so only the time ends the work.
+  The outcome of every `fill_form` (field labels and what was set or why not) goes to the run log.
+  `agent/agent.py`: a second submission attempt is told that an earlier one has entered part of the bid and to
+  continue from the step shown. `AGENT_RUN_SECONDS` asks for a longer run where the platform allows one; a scored
+  run never gets more than the platform's own time. New `docs/local-run-findings.md`. Tests added.
+- Why: in the sandbox run `run_a1424b6668fbc7f4` the submission went forward and back through the form's steps:
+  the first attempt stopped at 80 steps, the second started over, and the form says that going back discards the
+  later steps.
+- Checked: all unit tests pass. Two runs on this machine against the public websites with the scouting logins (no
+  score, nothing counts). The 20-minute one: second round from 5:03 with 4 minutes, all 13 requirements recorded
+  with a catalogue group, no position priced because the ERP was not searched by group within two rounds. The
+  60-minute one (stopped at minute 17 on Orhun's request): three rounds, ERP searched by group in the third, one
+  position priced at 16:35, four still left out, 7 materials and 4 searched groups in the facts. Not checked: the
+  submission changes on the real form; the long run's submission.
+- Learned: the chain specification → catalogue groups → ERP search needs three rounds today and a 20-minute run
+  has two. The form saves a step only on "continue" and discards later steps on "back".
+- For the others: J — `docs/local-run-findings.md` has what the recorder needs from a report. I — nothing.
+- Next: one normal sandbox test run of this state.
+
 ## 2026-10-10 18:27 · Took back my edit of the working documents: Julien writes the rule about test runs
 
 - Changed: reverted commit `3a0362e`. `AGENTS.md`, `CLAUDE.md`, `docs/streams.md` and the head of

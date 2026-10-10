@@ -66,6 +66,13 @@ class TheSchedule(unittest.TestCase):
         self.assertEqual(self.minutes({**TASK, "expires_at": (now + 7200) * 1000}, now), [9.0, 9.0, 20.0])
         self.assertEqual(self.minutes(TASK, now), [9.0, 9.0, 20.0])
 
+    def test_a_longer_run_can_be_asked_for_but_never_beyond_the_platforms_time(self):
+        now = time.time()
+        with patch.dict("os.environ", {"AGENT_RUN_SECONDS": "3600"}):
+            self.assertEqual(self.minutes(TASK, now), [27.0, 27.0, 60.0])  # local run
+            self.assertEqual(self.minutes({**TASK, "expires_at": (now + 7200) * 1000}, now), [27.0, 27.0, 60.0])
+            self.assertEqual(self.minutes({**TASK, "expires_at": (now + 1200) * 1000}, now), [9.0, 9.0, 20.0])  # scored
+
     def test_a_run_close_to_its_end_plans_with_what_is_left(self):
         now = time.time()
         self.assertEqual(self.minutes({**TASK, "expires_at": (now + 300) * 1000}, now), [2.2, 2.2, 5.0])
@@ -305,6 +312,29 @@ class TheReportsAreRecordedForTheLead(unittest.IsolatedAsyncioTestCase):
         orchestrator = await self.run_with(model, investigate_for=0.2)
         self.assertEqual([p["position"] for p in orchestrator.submitted["positions"]], ["1", "2"])
         self.assertNotIn("add_facts", model.lead_calls)
+
+
+class ASecondSubmissionAttempt(unittest.IsolatedAsyncioTestCase):
+    async def test_it_is_told_to_continue_where_the_form_is(self):
+        tasks = []
+
+        class Remembers:
+            def __init__(self, model, sites, credentials, task, context, deadline, log):
+                tasks.append(task)
+
+            async def run(self):
+                return "report"
+
+        task = {**TASK, "access": [{"siteId": "portal", "url": "https://portal.example.test"}],
+                "submission": {"kind": "site", "siteId": "portal"}}
+        orchestrator = agent.Orchestrator(task, None, {"portal": FakeTab("portal", FakePage())}, None, time.time())
+        orchestrator.log = lambda text: None
+        with patch.object(agent, "SubmissionAgent", Remembers):
+            await orchestrator.submit({"decision": "bid"}, "")
+            await orchestrator.submit({"decision": "bid"}, "")
+        self.assertNotIn("EARLIER ATTEMPT", tasks[0])
+        self.assertIn("EARLIER ATTEMPT", tasks[1])
+        self.assertIn("do not go back", tasks[1])
 
 
 class TheFirstRoundIsShorter(unittest.IsolatedAsyncioTestCase):

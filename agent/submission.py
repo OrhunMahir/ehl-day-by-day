@@ -34,6 +34,11 @@ How to work:
   by its text in the same way.
 - When a step repeats (e.g. one step per position), you know its fields after the first time: from then on give
   the whole step in one call, with labels for the fields that appear later, and the button that continues.
+- Read the notices on the form before you act. Many forms save a step only when you continue and throw away the
+  later steps when you go back. On such a form never go back and never reload or reopen the form's address: go
+  forward only, even when an earlier value was not perfect. A bid with one imperfect value that is signed is worth
+  far more than a perfect one that is not.
+- If you find the form already partly entered, continue from the step it shows; do not start over.
 - A fill_form result says for every field what was set or why it failed, then shows the page as it is now. Read
   it before you go on. After a failure, continue from that field with the numbers of the new page view.
 - Enter the values of the answer exactly. Write numbers the way the form expects them (look at its examples,
@@ -147,7 +152,7 @@ def tool_schemas(sites: list[str]) -> list[dict]:
 
 class SubmissionAgent:
     def __init__(self, model, tabs: dict[str, Tab], credentials: dict[str, dict], task: str, context: str,
-                 deadline: float, max_steps: int = 80, log=print):
+                 deadline: float, max_steps: int = 400, log=print):
         self.model, self.tabs, self.task, self.context = model, tabs, task, context
         self.deadline, self.max_steps, self.log = deadline, max_steps, log
         # the sign-in helper of the browsing sub-agent, so there is one place that knows how to sign in
@@ -202,6 +207,8 @@ class SubmissionAgent:
                     result = "Error: the action did not finish in time. Look at the page again."
                 except Exception as error:  # noqa: BLE001 - the model reads the failure and decides what to do
                     result = f"Error: {str(error).splitlines()[0][:400]}"
+                if call.function.name == "fill_form":
+                    self.log("[submit] -> " + result.split("\n\n# The page now")[0].replace("\n", " | ")[:900])
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
             _forget_old_views(messages)
         self.log("[submit] stopped without finish")

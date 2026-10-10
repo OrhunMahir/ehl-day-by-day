@@ -127,7 +127,10 @@ class Orchestrator:
         self.started = started
         now = time.time()
         # Every run works with the length of a scored run: a test run expires much later, a local run never.
-        left = min(contract.seconds_left(task), SCORED_RUN_SECONDS - (now - started))
+        # AGENT_RUN_SECONDS asks for a longer run where the platform allows one, to see what the agent reaches when
+        # time is not the limit; a scored run never gets more than the platform's own time.
+        planned = float(os.environ.get("AGENT_RUN_SECONDS") or SCORED_RUN_SECONDS)
+        left = min(contract.seconds_left(task), planned - (now - started))
         self.collect_until = now + left * COLLECT_SHARE
         self.submit_from = now + left * SUBMIT_SHARE
         self.deadline = now + left
@@ -377,6 +380,9 @@ class Orchestrator:
                 "and confirm what is entered, then report.\n\nANSWER:\n"
                 + json.dumps(answer, ensure_ascii=False, indent=1) + self.left_out(answer)
                 + (f"\n\nHINTS:\n{hints}" if hints else ""))
+        if self.submitted is not None:  # an earlier attempt has left the form partly entered
+            task += ("\n\nAN EARLIER ATTEMPT has already entered part of this bid. Look at the step the form shows "
+                     "now and continue from there; do not go back and do not start over.")
         agent = SubmissionAgent(self.worker_model, sites, self.credentials, task, self.context(),
                                 deadline=self.deadline, log=self.log)
         self.submitted = answer

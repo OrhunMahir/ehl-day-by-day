@@ -1,0 +1,49 @@
+aynı anda birden fazla test çalıştırmak sonucu zayıflatır mı? kısaca
+
+---
+
+submitlemekle test dokümanı runlamanın zaman kısıtı dışında frkı var mı kısaca
+
+---
+
+Önce denetçi ajan paketi okur: geçer, işaretlenir veya reddedilir bundan kastın hile falan yapıldımı kısaca
+
+---
+
+o zaman push atmadan arkadaşımızın runın bitmesini beklerken ve onun runına zarar vermemek için localde bir test çalıştırabilriiz işe yarayım yaramadığını anlmaka için
+
+---
+
+sadece tender reference ve decisiondan puan alıyoruz diğerlerinden hep 0. Sence 2 saatlik bir run bırakıp yani timelmitsiz run bırakıp sonrasında gerçek puanımızı görüp onu optimize etmek mantıklı mı
+
+---
+
+<task-notification>
+<task-id>bxw2yv501</task-id>
+<tool-use-id>toolu_01MvyoXJgzoCJ2WKyRrY8Hgq</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/bxw2yv501.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the local run to end" completed (exit code 1: No matches found)</summary>
+</task-notification>
+
+---
+
+ben bunları arkadaşoıma atıcam .md dosyası oluştur ve bunları arkadaşa yolla dosya ingilzce olsun ve düzgün yönergeler versin
+
+---
+
+60 dakikalık koşu: yapmaya değer, ama yerelde bir kalem fiyatlandıktan sonra; ayrı bir dalda, asla submit edilmeden. tüm gün bununla uğraştık ama asla bir yolunu bulamadık bid yapması için
+
+---
+
+bu ekranda sürekli schritt 8 i tekrarlıyor sonra schitt9 a gitti sonra tekrar 8 e şimdi de 5 e kadr geri döndü bu nrmal mi
+
+---
+
+<task-notification>
+<task-id>bm0kwmdde</task-id>
+<tool-use-id>toolu_01Nyr24sZG5AnVCjZWP8oBby</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-orhun-Developer-hackathon-ehl/c02fca30-02c3-4e5e-894a-dbf47e02b93f/tasks/bm0kwmdde.output</output-file>
+<status>completed</status>
+<summary>Background command "Watch the long local run until the engine prices a first position or the run ends, then print its progress" completed (exit code 0)</summary>
+</task-notification>

@@ -669,3 +669,9 @@ The user's interrupt paused it and the watch is kept; when the user asks you to 
 ---
 
 as you can see this approach only returns the same problem. come up with a completely new Concept regarding the whole hackathon task. Build and try to make the answer as simple as possible without overcomplicating it. Ask for my guidance if needed. DO all of this on a new branch. Before implementing anything tell me what your plan is.
+
+---
+
+1. Yes the concept "three jobs, no hand-offs"
+2. Try only Qwen for now, if you believe that a stronger model would increase the quality, then use a stronger model.
+3. create stream-j-simple

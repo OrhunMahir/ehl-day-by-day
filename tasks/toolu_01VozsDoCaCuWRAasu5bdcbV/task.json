@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01VozsDoCaCuWRAasu5bdcbV",
+  "agent_id": "a84b040faddec5c4b",
+  "subagent_type": "general-purpose",
+  "task_description": "Follow and analyse sandbox run",
+  "token_usage": {
+    "input_tokens": 110,
+    "cache_creation_tokens": 202889,
+    "cache_read_tokens": 5325420,
+    "output_tokens": 3272,
+    "api_call_count": 55
+  },
+  "started_at": "2026-10-10T20:09:34.9773924+02:00",
+  "completed_at": "2026-10-10T20:39:21.9388073+02:00"
+}

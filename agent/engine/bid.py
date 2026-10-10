@@ -99,6 +99,8 @@ def evaluate(facts: Facts, allow_no_bid: bool = True) -> BidResult:
             line.pieces = None
         if req is not None and resolve.requirement_complete(req):
             line.material = resolve.select_material(facts, req, pos.position, issues)
+            if line.material is None:
+                line.material = _as_specified(facts, revision, pos, req, issues)
             if line.material is None and resolve.searched(facts, req):
                 no_match.append(pos.position)
                 issues.append(f"position {pos.position}: no active material matches requirement {req.requirement}; "
@@ -310,6 +312,24 @@ def _lead_times(facts: Facts, lines: list[Line], issues: list[str]):
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Position level
+
+
+def _as_specified(facts: Facts, revision, pos: TenderPosition, req: Requirement, issues: list[str]) -> Material | None:
+    """The material that matches the specification's own values when the requirement as amended by Q&A matches
+    none. One misread or withdrawn amendment must not turn the whole bid into a no bid (rule 3): a no bid needs the
+    specification itself to find no active material."""
+    others = [a for a in facts.amendments if norm_key(a.requirement) != norm_key(pos.requirement)]
+    if len(others) == len(facts.amendments):
+        return None  # no amendment touched this requirement: nothing to fall back to
+    stated = resolve.requirement(replace(facts, amendments=others), revision, pos.requirement, [])
+    if stated is None or not resolve.requirement_complete(stated):
+        return None
+    found = resolve.select_material(facts, stated, pos.position, [])
+    if found is not None:
+        issues.append(f"position {pos.position}: requirement {req.requirement} as amended matches no material, but "
+                      f"the specification's own values match {found.material_number}: bid with it (an amendment may be "
+                      "misread or withdrawn)")
+    return found
 
 
 def _stated_pieces(facts: Facts, ln: Line) -> int:

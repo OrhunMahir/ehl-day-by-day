@@ -2,6 +2,32 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 01:30 · stream-j-tweaks: amounts as written, setup fees per position, no hasty no bid
+
+- Test run `run_e7b86a346e4fe041` (`7f5e89d`): quality 73.1, eligible, 13:29. Position 01.01 completely right;
+  materials, quantities and packaging right everywhere; discount right. Lost points:
+  - a price per 100 pieces recorded a thousand times too low (two base prices, the bonus split, four unit prices,
+    the total);
+  - one-time setup fees from Q&A had no field (two surcharges);
+  - a stock that included inspection stock (one lead time).
+- Changed:
+  - `board.py`: a money amount given as a number with three decimals or as text like "64.853" is refused with the
+    reason; masses with a unit are converted to kg.
+  - `facts.py`: `TenderPosition.setup_fee_eur`.
+  - `engine/bid.py`: the setup fee is added to the ordinary setup fee.
+  - `engine/bid.py`: when a requirement as amended by Q&A matches no material, but the specification's own values
+    do, the position is bid with that material instead of the whole bid becoming a no bid. A local run had
+    recorded a withdrawn amendment a second time under another answer.
+  - `simple.py`: setup fees go to their field, stock is the free stock.
+- Checked:
+  - 225 unit tests pass (1 skipped); the new ones fail on the previous code.
+  - In a local run, prices came out right per piece, the setup fees of two positions were in their field, and
+    stock and masses were right.
+  - The facts of that run, priced again with the new engine: a bid with the materials that scored before, the
+    corrected base prices, surcharges and lead time (it had been a wrong no bid).
+- For the others: I: the setup fee field and the no-bid rule are in your files on this branch only.
+- Next: sandbox test of this commit.
+
 ## 2026-10-10 23:40 · stream-j-tweaks: a website that hangs gets a fresh session; the submission checks nothing
 
 - Test run `run_550974275152686b` (`0492559`) was cancelled at 12:43 (quality 0).

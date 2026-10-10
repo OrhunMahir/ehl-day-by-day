@@ -255,6 +255,27 @@ class Robustness(unittest.TestCase):
         self.assertEqual([p["position"] for p in build_bid(f)["positions"]], ["9", "10"])
 
 
+class NoBidNeedsTheSpecificationItself(unittest.TestCase):
+    """A local run: a withdrawn technical amendment was recorded again under another answer; requirement A-5 got a
+    stroke no material has, and the whole bid became a no bid."""
+
+    def test_an_amendment_that_leaves_no_match_does_not_turn_the_bid_into_a_no_bid(self):
+        from facts import Attr, TechnicalAmendment
+        f = core_facts()
+        f.searched_groups = ["G-A", "G-B"]
+        f.amendments = [TechnicalAmendment("R-2", "A", Attr.STROKE, "115", "Q9", at("2030-02-20"))]
+        result = evaluate(f)
+        self.assertEqual(result.answer["decision"], "bid")
+        self.assertEqual(pos(result.answer, "1")["material_number"], "M-A1")
+        self.assertTrue(any("as amended matches no material" in i for i in result.issues))
+
+    def test_a_specification_with_no_active_match_is_still_a_no_bid(self):
+        f = core_facts()
+        f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
+        f.searched_groups = ["G-B"]
+        self.assertEqual(evaluate(f).answer["decision"], "no_bid")
+
+
 class SetupFeeOfAPosition(unittest.TestCase):
     def test_a_one_time_setup_fee_of_a_position_is_spread_over_its_pieces_and_never_discounted(self):  # 25, 27
         plain = evaluate(core_facts()).answer

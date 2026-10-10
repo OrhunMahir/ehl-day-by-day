@@ -1,0 +1,10 @@
+1. Birleşmiş hali sandbox’ta denemek. Hazır olduğunda söyle, başlatırım.
+2. ERP verisi: tek sekme beş grubu bir turda okuyamıyor; birkaç sekme açıp grup başına bir alt-ajan. bunları yapmaya başla
+
+---
+
+sonrasında 3-4-5 i yapalım 6. yı daha sonraya bırakalım
+
+---
+
+run_0ffb32eef33e6619 bu neden failladı arka plandada kısaca bana bunu cevabını ver

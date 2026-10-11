@@ -294,7 +294,7 @@ class TheProviderOfARun(Case):
                          (simple.READER_PROVIDER, simple.READER_MODEL, simple.READER_REASONING, hosted))
         self.assertEqual((reader.client.timeout, hosted.client.timeout),
                          (simple.READER_CALL_SECONDS, llm.CALL_TIMEOUT_SECONDS))
-        self.assertIn("reasoning low", simple.described(reader))
+        self.assertIn(f"reasoning {simple.READER_REASONING}", simple.described(reader))
         self.assertIn("without thinking", simple.described(hosted))
 
     async def test_a_call_that_hangs_is_given_up_and_sent_again(self):

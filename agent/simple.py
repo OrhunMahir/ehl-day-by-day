@@ -51,7 +51,10 @@ thousand, not one hundred and eighty-six.
 
 Then keep going with what the board says is still needed and your website can answer, e.g. a search by a key that
 another website gave (search a catalogue group with at most 20 results, record every result, open the details of
-the ones whose attributes match). When nothing on your website is left for now, call wait."""
+the ones whose attributes match). When nothing on your website is left for now, call wait.
+
+Never fill in or send the tender's bid or offer form: another assistant enters the bid once the facts are complete. You
+may open it to read what it asks for."""
 JOB_STEPS = 400  # the clock ends a job long before this
 # The agents that read the websites and record the facts use a larger model with a little thinking: prices, price
 # units and validity periods were what the hosted model without thinking read wrongly or not at all. The brief call

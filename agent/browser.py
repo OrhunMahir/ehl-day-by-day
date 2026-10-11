@@ -24,6 +24,7 @@ READ_PAGES_MAX = 6  # pages per read_pages call
 READ_PAGES_EACH = 8000  # characters kept per page in read_pages
 FRAME_READ_SECONDS = 10  # reading one frame may take at most this long
 PENDING_READ_SECONDS = 2  # and this long while a page load is still waiting for the website's answer
+TITLE_SECONDS = 2  # reading the page title may take at most this long
 MAX_OBSERVATION = 24000  # characters; longer pages are cut and the model can ask for more with read_more
 # One attempt of a page load may take this long; `goto` makes two, which stays under the browsing agent's limit for
 # one action. Reading a page never requests a load again: while one hangs, the view says so and stays quick, and a
@@ -297,6 +298,8 @@ class Tab:
             except Exception as error:  # noqa: BLE001
                 reason = "it did not respond in time" if isinstance(error, asyncio.TimeoutError) else error
                 parts.append(f"--- frame {index} ({frame.url}) could not be read: {reason}")
+                if index == 0 and isinstance(error, asyncio.TimeoutError):
+                    break  # the page itself is stuck: its embedded frames would only add their own waits
                 continue
             if index == 0:
                 start, main_read = result["next"], True
@@ -307,8 +310,10 @@ class Tab:
         return parts, main_read
 
     async def _title(self):
+        # a page whose script keeps the browser busy never answers: without a limit the whole view waited until the
+        # action's time ran out (60 s, four times in a row in a test run)
         try:
-            return await self.page.title()
+            return await asyncio.wait_for(self.page.title(), timeout=TITLE_SECONDS)
         except Exception:  # noqa: BLE001
             return ""
 

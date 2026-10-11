@@ -113,6 +113,58 @@ class FakeModel:
         return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "read_more", '{"offset": 0}')]})()
 
 
+class StuckWebsiteTest(unittest.TestCase):
+    """An action that runs out of time, page views included, brings a fresh session at once; a page that is only
+    slow needs two page loads in a row, and looking again at it is never counted."""
+
+    class Reopening:
+        site_id = "shop"
+
+        def __init__(self):
+            self.page = type("P", (), {"context": type("C", (), {"browser": None})()})()
+            self.reopened = 0
+
+        async def reopen(self, browser=None):
+            self.reopened += 1
+            return "[shop] URL: https://shop.invalid/\nSign in"
+
+    STUCK = "Error: the action did not finish within 60 s; the page may be stuck. Use look to see the page."
+    UNREAD = ("[shop] URL: https://shop.invalid/inbox\nTitle: \n--- frame 0 (https://shop.invalid/inbox) could not be "
+              "read: it did not respond in time")
+    SLOW = "[shop] URL: https://shop.invalid/inbox\nTitle: \n(still loading https://shop.invalid/inbox for 6 s: ...)"
+
+    def agent(self, tab):
+        agent = BrowsingAgent(FakeModel(), {"shop": tab}, {}, "task", "context", name="a", deadline=10 ** 10,
+                              log=lambda *_: None)
+        agent.last_tab = tab
+        return agent
+
+    def test_a_page_view_that_ran_out_of_time_brings_a_fresh_session_at_once(self):
+        tab = self.Reopening()
+        said = asyncio.run(self.agent(tab)._after_action("look", {}, self.STUCK))
+        self.assertEqual(tab.reopened, 1)
+        self.assertIn("fresh session", said)
+
+    def test_a_view_of_a_page_that_did_not_respond_brings_a_fresh_session_at_once(self):
+        tab = self.Reopening()
+        asyncio.run(self.agent(tab)._after_action("goto", {"url": "/inbox"}, self.UNREAD))
+        self.assertEqual(tab.reopened, 1)
+
+    def test_a_slow_page_is_waited_for_and_two_slow_loads_in_a_row_bring_a_fresh_session(self):
+        tab = self.Reopening()
+        agent = self.agent(tab)
+
+        async def steps():
+            for _ in range(3):
+                await agent._after_action("look", {}, self.SLOW)
+            looked = tab.reopened
+            await agent._after_action("goto", {"url": "/inbox"}, self.SLOW)
+            once = tab.reopened
+            await agent._after_action("goto", {"url": "/inbox"}, self.SLOW)
+            return looked, once, tab.reopened
+        self.assertEqual(asyncio.run(steps()), (0, 0, 1))
+
+
 class WrapUpTest(unittest.TestCase):
     def setUp(self):
         Tab.homes.clear()
@@ -192,14 +244,19 @@ class HangingPageTest(unittest.TestCase):
             if calls["n"] > 1:
                 await asyncio.sleep(3600)
             return "a page"
-        tab.observe = observe
+
+        async def reopen(browser=None):  # a view that runs out of time brings a fresh session, which hangs as well
+            return "a fresh page"
+        tab.observe, tab.reopen = observe, reopen
+        tab.page.context.browser = None
 
         class LookingModel(FakeModel):
             async def chat(self, messages, tools=None, **kwargs):
                 if tools is None:
                     return type("M", (), {"content": "FOUND:\nNOT FOUND:\n- everything", "tool_calls": None})()
                 self.n += 1
-                self.seen.append(messages[-1].get("content", ""))
+                # the action's result, and after it the note that the website was opened again
+                self.seen.append("\n".join(str(m.get("content") or "") for m in messages[-2:]))
                 return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "look", "{}")]})()
         model = LookingModel()
         old = browsing.ACTION_SECONDS
@@ -387,7 +444,7 @@ class QuickStallTest(unittest.TestCase):
 
 
 class FreshSessionTest(unittest.TestCase):
-    def test_two_unanswered_loads_in_a_row_bring_a_fresh_session(self):
+    def test_a_load_that_runs_out_of_time_brings_a_fresh_session_at_once(self):
         import time
         import browsing
         Tab.homes.clear()
@@ -406,17 +463,17 @@ class FreshSessionTest(unittest.TestCase):
         tab.observe, tab.goto, tab.reopen = observe, goto, reopen
         tab.page.context.browser = "own browser"
 
-        class GoesTwice:
+        class GoesOnce:
             def __init__(self):
                 self.n, self.seen = 0, []
 
             async def chat(self, messages, tools=None, **kwargs):
                 self.n += 1
                 self.seen = [m["content"] for m in messages if m["role"] == "user"]
-                if self.n <= 2:
+                if self.n <= 1:
                     return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "goto", '{"url": "/x"}')]})()
                 return type("M", (), {"content": "", "tool_calls": [FakeCall(self.n, "finish", '{"report": "done"}')]})()
-        model = GoesTwice()
+        model = GoesOnce()
         old = browsing.ACTION_SECONDS
         browsing.ACTION_SECONDS = 0.2
         try:

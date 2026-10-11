@@ -247,6 +247,17 @@ class BrowserPagesTest(unittest.TestCase):
         self.assertIn("fresh session", view)
         self.assertIn("Sign in", view)  # a fresh session: not signed in yet
 
+    def test_a_page_whose_script_blocks_the_browser_is_reported_within_seconds(self):
+        async def check(tab, site, context):
+            await tab.page.evaluate("setTimeout(() => { while (true) {} }, 100)")
+            await asyncio.sleep(0.5)
+            started = time.time()
+            view = await tab.observe()
+            return view, time.time() - started
+        view, took = self.run_async(check)
+        self.assertLess(took, 20)  # it waited until the action's 60 s ran out before
+        self.assertIn("could not be read: it did not respond in time", view)
+
     def test_a_button_named_by_its_text_is_the_button_not_a_hint(self):
         async def check(tab, site, context):
             await self.agent(tab)._run_tool("login", {})

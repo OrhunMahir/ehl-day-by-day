@@ -2,6 +2,39 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 03:25 · stream-j-cost-time: agents never give up; a stuck page is noticed in seconds and opened again at once; the bid form is left to the submission
+
+- Test runs of this branch, both cancelled by Julien, no score:
+  - `run_0b81833e2b6e7f6d` (`1d3a42e`, 4:53): the tender portal's agent gave up at 192 s after five Qwen calls in a
+    row were cut off at 30 s; its positions were never recorded. The reading model cost $1.16 in under five minutes;
+    its cached share of input stayed at 57 %, so `prompt_cache_key` alone changed nothing visible.
+  - `run_0892de5a7c539ac8` (`4add860`, 7:06): no agent gave up and the reading model's cached share rose to 69 %
+    (each agent's prompt starts with its website). But the mailbox stopped answering right after the first search:
+    four actions in a row (page views and page loads) each waited the full 60 s before the agent opened it again in
+    a fresh session at 307 s. The tender portal's agent opened the bid form at 152 s and typed into its first step
+    during the investigation.
+- Changed:
+  - `browsing.py` (`4add860`): an agent asks the model again until its deadline instead of giving up after five
+    attempts; a call without thinking may take 90 s (a long record of positions and Q&A needs more than 30 s). Each
+    agent's system prompt starts with its website, so the provider's cache keeps each agent's history apart.
+  - `browser.py`: the page title is read with a 2 s limit, and a page that does not respond is not waited for frame
+    by frame. A page whose script keeps the browser busy now gives a view in about 12 s that says so; before, the
+    view waited until the action's 60 s ran out.
+  - `browsing.py`: an action that runs out of time, or a view of a page that did not respond, brings a fresh session
+    at once (page views included); a page that is only loading slowly still needs two page loads in a row.
+  - `simple.py`: the website agents never fill in or send the tender's bid form; they may open it to read it.
+- Checked:
+  - Local probes (scratchpad, scouting login): a mailbox search behind its unlock slider did not hang locally; a page
+    whose script blocks the browser took over 80 s to view before the change and 12.4 s after it; a page load the
+    server never answers is viewed in 2.4 s as before.
+  - Unit tests: browser pages 19, browsing agent 24 (new: a stuck action or unresponsive view brings a fresh session
+    at once, looking again at a slow page does not), simple 20, lead 26. Full suite: see the commit.
+- Learned: in the sandbox the mailbox can stop answering for one session while a fresh session works. Playwright's
+  key press waits up to 30 s for the page load it starts. The mailbox now has an unlock slider and a robot checkbox
+  in front of its search results.
+- For the others: nothing changes on `main`.
+- Next: one test run of this commit; then compare with `run_1384fd032c9d5bb2`.
+
 ## 2026-10-11 02:53 · stream-j-cost-time: a cache key per agent, the run ends when the agents are done reading, an earlier ERP search
 
 - New branch `stream-j-cost-time` from `main` (`a12df43`, the code of the 100 runs). An experiment for cost and time

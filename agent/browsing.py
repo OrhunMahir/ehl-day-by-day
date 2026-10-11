@@ -6,6 +6,7 @@ facts the model saved with `note` stay.
 """
 import asyncio
 import json
+import re
 import time
 
 from browser import Tab, origin
@@ -67,6 +68,7 @@ SHORTENED = "\n... (older page view shortened to save space; your notes keep wha
 NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
 WAIT_SECONDS = 45  # one `wait` for the shared board to change; under ACTION_SECONDS
 HUNG_BEFORE_REOPEN = 2  # page loads in a row that the website did not answer before it gets a fresh session
+STUCK_VIEW = re.compile(r"--- frame 0 \(.*?\) could not be read: it did not respond in time")
 REOPENS = 2  # fresh sessions per website and run at most
 
 
@@ -458,12 +460,18 @@ class BrowsingAgent:
     async def _after_action(self, name: str, args: dict, result: str) -> str:
         """Counts the page loads in a row a website did not answer; after HUNG_BEFORE_REOPEN of them it gets a fresh
         session, in its own browser first, then in another of the run's browsers. Returns what to tell the model."""
-        if name not in NAVIGATING or name == "look":
+        if name not in NAVIGATING:
             return ""
         tab = self.last_tab
-        hung = (result.startswith("Error: the action did not finish") or "Navigation error" in result[:600]
-                or "\n(still loading " in result[:800])
-        self.hung[tab.site_id] = self.hung.get(tab.site_id, 0) + 1 if hung else 0
+        # An action that ran out of time, or a view of a page that did not respond at all: the website is stuck and a
+        # fresh session is due at once (a test run lost four minutes to four such actions, page views among them,
+        # before the website was opened again). A page still loading is a milder sign: two in a row, and looking
+        # again at a slow page is how it is waited for.
+        stuck = result.startswith("Error: the action did not finish") or bool(STUCK_VIEW.search(result[:2000]))
+        slow = "Navigation error" in result[:600] or "\n(still loading " in result[:800]
+        if name == "look" and not stuck:
+            return ""
+        self.hung[tab.site_id] = HUNG_BEFORE_REOPEN if stuck else self.hung.get(tab.site_id, 0) + 1 if slow else 0
         if self.hung[tab.site_id] < HUNG_BEFORE_REOPEN or self.reopened.get(tab.site_id, 0) >= REOPENS:
             return ""
         self.hung[tab.site_id] = 0
@@ -478,7 +486,7 @@ class BrowsingAgent:
                 continue
             self.signed_in.discard(tab.site_id)
             self.log(f"[{self.name}] {tab.site_id} did not answer; opened again in a fresh session")
-            return ("Your website did not answer several times; it is open again in a fresh session. Sign in again "
+            return ("Your website did not answer; it is open again in a fresh session. Sign in again "
                     "if it asks, then go on.\n" + view)
         return "Your website still does not answer, not even in a fresh session. Try again later; meanwhile wait."
 

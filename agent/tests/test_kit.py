@@ -237,13 +237,15 @@ class TheProviderOfARun(Case):
                          ["xhigh", "high", "high"])
 
     async def test_a_refused_responses_request_is_asked_through_chat_completions_without_thinking(self):
-        model, server = self.openai({"/v1/responses": [(400, self.NOT_THIS_WAY)],
+        model, server = self.openai({"/v1/responses": [(400, self.NOT_THIS_WAY), (400, self.NOT_THIS_WAY)],
                                      "/v1/chat/completions": [(200, self.REPLY), (200, self.REPLY)]}, effort="low")
         self.assertEqual((await model.chat([{"role": "user", "content": "one"}], [self.LOOK])).content, "ok")
         await model.chat([{"role": "user", "content": "two"}], [self.LOOK], temperature=0.2, max_tokens=500)
+        # the first refusal may be the prompt cache key: asked once more without it, then without Responses
         self.assertEqual([request["path"] for request in server.requests],
-                         ["/v1/responses", "/v1/chat/completions", "/v1/chat/completions"])
-        first, second = server.requests[1]["body"], server.requests[2]["body"]
+                         ["/v1/responses", "/v1/responses", "/v1/chat/completions", "/v1/chat/completions"])
+        self.assertEqual(["prompt_cache_key" in request["body"] for request in server.requests[:2]], [True, False])
+        first, second = server.requests[2]["body"], server.requests[3]["body"]
         self.assertEqual((first["reasoning_effort"], second["reasoning_effort"]), ("none", "none"))
         self.assertEqual(first["tools"], [self.LOOK])
         self.assertNotIn("temperature", second)

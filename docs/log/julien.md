@@ -2,6 +2,37 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 02:53 · stream-j-cost-time: a cache key per agent, the run ends when the agents are done reading, an earlier ERP search
+
+- New branch `stream-j-cost-time` from `main` (`a12df43`, the code of the 100 runs). An experiment for cost and time
+  at the same quality; not for `main` before a test run shows 100.
+- Why, from `run_1384fd032c9d5bb2` (100 points, $1.05, 6:55):
+  - 82 % of the cost was gpt-6.1-sol, and most of that was input sent again without the cache. In 20 of its 39
+    calls only the start that all website agents share (system prompt and tools) was cached: $0.75 of its $0.86.
+  - The ERP agent waited from second 62 to 135 for its search: the engine asked for it only once the governing
+    revision named its groups.
+  - The run ended the moment the bid was complete, while two agents were still reading.
+- Changed:
+  - `llm.py` (stream O's file): every Responses request to the reading model carries `prompt_cache_key`, a digest of
+    the conversation's opening, so each agent's calls stay with the cache that holds its history. A refusal of a
+    request that carried the key drops the key once before the old fallback to chat completions without thinking.
+  - `simple.py`, `board.py`, `browsing.py`: investigations end when the bid is complete and every agent is waiting,
+    or 45 s after the bid became complete if one keeps reading. The run looks again at every record and every start
+    and end of a wait instead of every 10 s.
+  - `engine/needs.py` (stream I's file): the ERP search of the groups of every recorded revision is asked for while
+    no revision is marked current, or while the governing one names no group for a referenced requirement yet.
+  - `submission.py` (stream O's file): one prompt line, the signing code arrives as the newest message in the inbox.
+- Checked: the changed modules' unit tests pass (cache key 11, needs 14, simple 20, browsing 21, lead 26); the full
+  suite was still running at the push. Test run `run_0b81833e2b6e7f6d` started; result in the next entry.
+- Not done: a fix for a survey pop-up that covers the configurator. Under an open modal dialog a fill reports
+  success and leaves the field empty, which is why the 100 runs filled positions twice. One of its tests still
+  failed at the cut-off, so it is not on this branch.
+- Learned: OpenAI picks the cache server by the start of the prompt; agents with the same instructions and tools
+  share it, and above about 15 calls a minute their calls miss the cache. A modal dialog makes the page behind it
+  inert: typing there reports success and changes nothing.
+- For the others: O and I: your files changed on this branch only; nothing changes on `main`.
+- Next: compare the test run with `run_1384fd032c9d5bb2` (quality, cost, time, cached share of gpt input).
+
 ## 2026-10-10 23:40 · stream-j-tweaks: a website that hangs gets a fresh session; the submission checks nothing
 
 - Test run `run_550974275152686b` (`0492559`) was cancelled at 12:43 (quality 0).

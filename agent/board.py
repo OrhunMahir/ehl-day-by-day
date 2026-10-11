@@ -28,6 +28,10 @@ class Board:
         # woken only when something new is asked for, not by every record.
         self.open_items: frozenset = frozenset()
         self.work_version = 0
+        # The agents inside a wait right now, and a count of every record and every change of that set: a complete
+        # bid ends the investigations once every agent waits, and the run looks again at each change.
+        self.waiting: set[str] = set()
+        self.changes = 0
         self._changed = asyncio.Condition()
 
     def record(self, who: str, update) -> str:
@@ -52,38 +56,55 @@ class Board:
             self.work_version = self.version
         self.open_items = open_now
         self.log(f"[{who}] recorded: {summary[:240]}{' (searched_groups refused)' if refused else ''}")
+        self._wake()
+        return "Recorded. " + summary + refused
+
+    def set_waiting(self, who: str, waiting: bool) -> None:
+        """Marks agent `who` as inside a wait, or not any more; whoever waits for the board hears of it."""
+        if waiting == (who in self.waiting):
+            return
+        if waiting:
+            self.waiting.add(who)
+        else:
+            self.waiting.discard(who)
+        self._wake()
+
+    def _wake(self) -> None:
+        """Counts a change and wakes whoever waits for the board: the agents' waits and the run's end check."""
+        self.changes += 1
         try:
             asyncio.get_running_loop().create_task(self._notify())
         except RuntimeError:  # no loop running (a plain call): nobody can be waiting
             pass
-        return "Recorded. " + summary + refused
 
     async def _notify(self):
         async with self._changed:
             self._changed.notify_all()
 
-    async def wait(self, since: int, timeout: float) -> bool:
-        """Waits until the board changes after version `since`, at most `timeout` seconds. True if it did."""
-        if self.version > since:
+    async def _until(self, ready, timeout: float) -> bool:
+        """Waits until `ready()` holds, asked again at every change of the board, at most `timeout` seconds."""
+        if ready():
             return True
         try:
             async with self._changed:
-                await asyncio.wait_for(self._changed.wait_for(lambda: self.version > since), timeout=timeout)
+                await asyncio.wait_for(self._changed.wait_for(ready), timeout=timeout)
             return True
         except TimeoutError:
             return False
 
+    async def wait(self, since: int, timeout: float) -> bool:
+        """Waits until the board changes after version `since`, at most `timeout` seconds. True if it did."""
+        return await self._until(lambda: self.version > since, timeout)
+
     async def wait_for_work(self, since: int, timeout: float) -> bool:
         """Waits until the list of what is still needed has gained an item after version `since`, at most `timeout`
         seconds. True if it has."""
-        if self.work_version > since:
-            return True
-        try:
-            async with self._changed:
-                await asyncio.wait_for(self._changed.wait_for(lambda: self.work_version > since), timeout=timeout)
-            return True
-        except TimeoutError:
-            return False
+        return await self._until(lambda: self.work_version > since, timeout)
+
+    async def wait_for_change(self, since: int, timeout: float) -> bool:
+        """Waits until the board changes after change `since` (a record, or an agent starts or ends a wait), at most
+        `timeout` seconds. True if it did."""
+        return await self._until(lambda: self.changes > since, timeout)
 
     def needs(self) -> list[dict]:
         """What the bid still needs, from the engine, kind "find" first."""

@@ -123,6 +123,29 @@ class TheBoard(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(board.work_version, board.version)
         self.assertFalse(await board.wait_for_work(board.version, 0.1))  # and nothing since
 
+    async def test_an_agent_counts_as_waiting_exactly_while_it_is_inside_the_wait_tool(self):
+        board = Board(log=lambda *a: None)
+        board.record("site-a", {**START, **POSITIONS})
+        erp = BrowsingAgent(None, {"site-c": tab("site-c")}, {}, "job", "context", name="site-c",
+                            deadline=time.time() + 60, log=lambda *a: None, board=board)
+        erp.seen = board.version
+        changes = board.changes
+        waiting = asyncio.ensure_future(erp._run_tool("wait", {}))
+        self.assertTrue(await board.wait_for_change(changes, 1))  # whoever waits for the board hears of it at once
+        self.assertEqual(board.waiting, {"site-c"})
+        board.record("site-b", SPEC)  # a new open item for the ERP: its wait returns
+        self.assertIn("The board changed", await asyncio.wait_for(waiting, 1))
+        self.assertEqual(board.waiting, set())
+        cut_off = asyncio.ensure_future(erp._run_tool("wait", {}))
+        await asyncio.sleep(0.05)
+        self.assertEqual(board.waiting, {"site-c"})
+        changes = board.changes
+        cut_off.cancel()  # the investigations end while the agent waits
+        with self.assertRaises(asyncio.CancelledError):
+            await cut_off
+        self.assertEqual(board.waiting, set())
+        self.assertGreater(board.changes, changes)
+
     async def test_wait_returns_as_soon_as_another_agent_records(self):
         board = Board(log=lambda *a: None)
 
@@ -187,24 +210,138 @@ class TwoWebsitesNoHandOff(unittest.TestCase):
         self.assertEqual([m["material_number"] for m in board.builder.data["materials"]], ["M1"])
 
 
-class OnlyAsLongAsItHelps(unittest.TestCase):
-    def test_investigations_end_as_soon_as_the_bid_is_complete(self):
-        class Forever:
-            async def run(self):
+class Bid(Board):
+    """A board whose bid is complete when the test says so, without the engine. While it is not, one item is listed
+    as still needed, as the engine lists one for every gap."""
+
+    def __init__(self):
+        super().__init__(log=lambda *a: None)
+        self.is_complete, self.priced = False, 0
+
+    def needs(self):
+        return [] if self.is_complete else [{"site": "site-a", "what": "a price"}]
+
+    def complete(self):
+        self.priced += 1
+        return self.is_complete
+
+
+class Scripted(BrowsingAgent):
+    """A website agent that follows a script instead of a model: a number is that many seconds of reading, "complete"
+    and "incomplete" record what makes the bid so, "read" reads for good and "wait" calls the wait tool for good."""
+
+    def __init__(self, board, name, *script):
+        super().__init__(None, {name: tab(name)}, {}, "job", "context", name=name, deadline=time.time() + 60,
+                         log=lambda *a: None, board=board)
+        self.script = script
+
+    async def run(self):
+        for step in self.script:
+            if step == "wait":
+                while True:
+                    await self._run_tool("wait", {})
+            elif step == "read":
                 await asyncio.sleep(3600)
+            elif isinstance(step, (int, float)):
+                await asyncio.sleep(step)
+            else:
+                self.board.is_complete = step == "complete"
+                self.board.record(self.name, {})
+
+
+class OnlyAsLongAsItHelps(unittest.TestCase):
+    """The investigations end when the time is up, or once the bid is complete and every agent waits; an agent that
+    keeps reading holds a complete bid back for the grace at most."""
+
+    def run_agents(self, *scripts, collect=30, grace=30):
+        """Runs agents with these scripts (a name, then the steps); returns how long it took, the [run] lines and
+        the board."""
+        board, said = Bid(), []
 
         async def scenario():
             lead = agent.Orchestrator(TASK, None, {s: tab(s) for s in SITES}, None, time.time())
-            lead.log = lambda *a: None
-            lead.collect_until = time.time() + 600
-            board = Board(lead.builder, log=lead.log)
-            board.complete = lambda: True
+            lead.log = said.append
+            lead.collect_until = time.time() + collect
             started = time.time()
-            with patch.object(simple, "COMPLETE_CHECK_SECONDS", 0.1):
-                await simple.run_agents(lead, [Forever(), Forever()], board)
+            with patch.object(agent, "INVESTIGATION_GRACE_SECONDS", 0), \
+                    patch.object(simple, "COMPLETE_GRACE_SECONDS", grace):
+                await simple.run_agents(lead, [Scripted(board, *script) for script in scripts], board)
+            took = time.time() - started
+            await asyncio.sleep(0.05)  # the cancelled agents leave their waits
+            return took
+
+        took = asyncio.run(scenario())
+        return took, [line for line in said if line.startswith("[run]")], board
+
+    def test_a_complete_bid_ends_the_investigations_at_once_when_every_agent_waits(self):
+        took, said, board = self.run_agents(("site-a", "complete", "wait"), ("site-b", "wait"))
+        self.assertLess(took, 0.5)  # woken by the last agent's wait, not by a check every few seconds
+        self.assertIn("the bid is complete at 0 s and every agent is waiting: investigations end", said[-1])
+        self.assertEqual(board.waiting, set())  # the cancelled waits are over
+
+    def test_a_complete_bid_waits_for_an_agent_that_is_still_reading(self):
+        # a test run: the bid was complete while two agents were still reading (price scales, another revision)
+        took, said, _ = self.run_agents(("site-a", "complete", "wait"), ("site-b", 0.5, "wait"))
+        self.assertGreater(took, 0.45)
+        self.assertLess(took, 1.5)
+        self.assertIn("the bid is complete at 0 s; still reading: site-b", said[0])
+        self.assertIn("every agent is waiting", said[-1])
+
+    def test_an_agent_that_keeps_reading_holds_a_complete_bid_back_for_the_grace_only(self):
+        took, said, _ = self.run_agents(("site-a", "complete", "wait"), ("site-b", "read"), ("site-c", "wait"),
+                                        grace=0.5)
+        self.assertGreater(took, 0.45)
+        self.assertLess(took, 1.5)
+        self.assertIn("the bid has been complete since 0 s; still reading: site-b; investigations end after 0.5 s",
+                      said[-1])
+
+    def test_an_incomplete_bid_does_not_end_the_investigations(self):
+        import browsing
+        with patch.object(browsing, "WAIT_SECONDS", 0.05):  # waits that run out and start again wake the run often
+            took, said, board = self.run_agents(("site-a", "incomplete", "wait"), ("site-b", "wait"), collect=0.6,
+                                                grace=0.1)
+        self.assertGreater(took, 0.55)  # every agent waits, but something is still missing
+        self.assertIn("the time to investigate is over", said[-1])
+        self.assertGreater(board.changes, 10)
+        self.assertEqual(board.priced, 2)  # the engine is asked at the start and after the one record only
+
+    def test_a_break_in_the_complete_bid_starts_the_grace_again(self):
+        took, said, _ = self.run_agents(("site-a", "complete", 0.3, "incomplete", 0.2, "complete", "read"),
+                                        ("site-b", "read"), grace=0.4)
+        self.assertGreater(took, 0.8)  # complete again at 0.5 s, and 0.4 s from there; not 0.4 s from the start
+        self.assertLess(took, 2)
+        self.assertTrue(any("the bid is not complete any more" in line for line in said))
+        self.assertIn("investigations end after 0.4 s", said[-1])
+        # also when an item is asked for and found again before the run looks: the list of open items shows it
+        took, _, _ = self.run_agents(("site-a", "complete", 0.3, "incomplete", "complete", "read"),
+                                     ("site-b", "read"), grace=0.4)
+        self.assertGreater(took, 0.6)
+        self.assertLess(took, 2)
+
+    def test_the_investigations_end_when_every_agent_has_stopped_also_without_a_board(self):
+        took, said, _ = self.run_agents(("site-a", 0.1), ("site-b", "incomplete", 0.2))
+        self.assertGreater(took, 0.15)
+        self.assertLess(took, 1)
+        self.assertIn("every agent has stopped", said[-1])
+
+        class Stops:  # an agent of the older flows, which have no board
+            def __init__(self, name, seconds):
+                self.name, self.seconds = name, seconds
+
+            async def run(self):
+                await asyncio.sleep(self.seconds)
+
+        async def scenario(collect, seconds):
+            lead = agent.Orchestrator(TASK, None, {s: tab(s) for s in SITES}, None, time.time())
+            lead.log = lambda *a: None
+            lead.collect_until = time.time() + collect
+            started = time.time()
+            with patch.object(agent, "INVESTIGATION_GRACE_SECONDS", 0):
+                await simple.run_agents(lead, [Stops("site-a", seconds / 2), Stops("site-b", seconds)])
             return time.time() - started
 
-        self.assertLess(asyncio.run(scenario()), 2)
+        self.assertLess(asyncio.run(scenario(30, 0.2)), 1)  # until they stop
+        self.assertLess(asyncio.run(scenario(0.1, 30)), 1)  # or until the time is up
 
     def test_an_incomplete_bid_is_not_complete(self):
         board = Board(log=lambda *a: None)

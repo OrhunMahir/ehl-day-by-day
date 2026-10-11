@@ -52,7 +52,8 @@ How to work:
   placeholders and error messages). Leave a field empty when the answer has no value for it.
 - If the form has its own option to leave a position out and you were told to leave one out, use that option.
 - Follow the brief's instructions for submitting. If a signing code is needed, get it where the brief says; that
-  may be another of your websites.
+  may be another of your websites. A code you have just requested arrives as a new message: open the mailbox's
+  inbox and read the newest message first (use the mailbox's search if it has one), not older messages.
 - The websites are deliberately awkward: cookie notices, popups, error pages that work on a retry, sessions that
   expire and return you to the sign-in page (use the login tool). Never accept surveys or unrelated offers.
 - Do not change or recompute any value of the answer.

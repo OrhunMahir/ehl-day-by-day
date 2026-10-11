@@ -2,9 +2,9 @@
 results; it decides nothing itself. Sites are named by their role, since the final run's sites have other names."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
-from facts import AssignmentKind, Facts, Unit, norm_key
+from facts import AssignmentKind, Facts, SpecRevision, Unit, norm_key
 
 from . import resolve
 from .pricing import index_rate, scale_price, valid_condition
@@ -79,9 +79,10 @@ def needs(facts: Facts, result) -> list[Need]:
                              "without one the discount is 0 %", 5)
 
     revision = resolve.governing_revision(facts, [])
+    decided = sum(1 for r in facts.revisions if r.current) == 1
     if not facts.revisions:
         c.add("find", SPEC, "the specification revisions and which one is marked current", 2)
-    elif sum(1 for r in facts.revisions if r.current) != 1:
+    elif not decided:
         c.add("find", SPEC, "which specification revision the site marks as current/valid", 2)
     if revision is not None:
         # The ERP search by catalogue group needs nothing but the group: ask for it as soon as the specification is
@@ -92,6 +93,12 @@ def needs(facts: Facts, result) -> list[Need]:
         for base in relevant:
             if norm_key(base.catalogue_group) and not resolve.searched(facts, base):
                 c.add("find", ERP, _search(base.catalogue_group, revision), 10)
+        # The governing revision may be recorded before its requirements (in a test run its mark and its
+        # requirements came 70 s after another revision's groups): until it names a group for every referenced
+        # requirement, the groups the other revisions name are asked for as well.
+        named = {norm_key(r.requirement) for r in revision.requirements if norm_key(r.catalogue_group)}
+        if not decided or (wanted - named if wanted else not named):
+            _searches_before_the_mark(facts, wanted, {norm_key(r.catalogue_group) for r in relevant}, c)
 
     lines = {norm_key(ln.position): ln for ln in result.lines}
     for p in result.omitted:
@@ -160,6 +167,26 @@ def _position(facts: Facts, revision, pos, ln, c: _Collector):
             c.add("find", ERP, _search(req.catalogue_group or "(none stated)", revision), 10, p)
         return
     _material(facts, ln, c)
+
+
+def _searches_before_the_mark(facts: Facts, wanted: set[str], asked: set[str], c: _Collector):
+    """Until exactly one revision is marked current, any recorded one may still govern, and the mark may be read last
+    (in a test run the ERP agent waited 70 s for it). The groups the other revisions name for the referenced
+    requirements are asked for now, so that the ERP search does not wait for the mark. A group that does not govern
+    in the end only adds candidates: resolve.searched and best_candidate go by the governing requirement's own group,
+    so its search does not count as a search of that group without a match. Each group once, with what to match
+    from the revision the engine would take among those naming it (the latest dated)."""
+    naming: dict[str, list[SpecRevision]] = {}
+    for rev in facts.revisions:
+        for group in dict.fromkeys(norm_key(r.catalogue_group) for r in rev.requirements
+                                   if not wanted or norm_key(r.requirement) in wanted):
+            if group and group not in asked:
+                naming.setdefault(group, []).append(rev)
+    for group, revisions in naming.items():
+        rev = resolve.governing_revision(replace(facts, revisions=revisions), [])
+        base = next(r for r in rev.requirements if norm_key(r.catalogue_group) == group)
+        if not resolve.searched(facts, base):
+            c.add("find", ERP, _search(base.catalogue_group, rev), 10)
 
 
 def _search(group: str, revision) -> str:

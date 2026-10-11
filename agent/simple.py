@@ -73,9 +73,15 @@ CAREFUL_FACTS = frozenset({"materials", "setup_fees", "discount_approvals", "con
 # Investigations end here at the latest, as a share of the run (minute 11 of 20). The 51.2 run stopped at minute 9
 # with the rule mails still unread and ended after 11:44. Entering and signing five priced positions took at most
 # 487 s with the scouting logins (re-logins and stalled model calls included) and about 165 s in the sandbox, so the
-# submission keeps about 8.5 minutes. Investigations end sooner when the engine has nothing left to find.
+# submission keeps about 8.5 minutes. Investigations end sooner when the engine has nothing left to find and the
+# agents are done reading.
 COLLECT_SHARE = 0.55
-COMPLETE_CHECK_SECONDS = 10  # how often the board is asked whether the bid is complete
+# A complete bid (the engine has a value for every field) ends the investigations once every agent waits: a fact that
+# replaces an earlier one (a later discount approval, a newer revision, a withdrawn answer) may still be on a page an
+# agent is reading. In a test run two agents were still reading when the bid was complete. An agent that keeps
+# reading holds a complete bid back this long at most.
+COMPLETE_GRACE_SECONDS = 45
+CHECK_SECONDS = 2  # records, waits and agents that stop wake the run at once; this is only a fallback
 BRIEF_SECONDS = 20  # the call answers in about 4 s; one that hung for 60 s held up every agent's start
 SUBMIT_ATTEMPTS = 2
 
@@ -154,15 +160,54 @@ def site_agents(lead: lead_module.Orchestrator, board: Board, model: Model, refe
 
 
 async def run_agents(lead: lead_module.Orchestrator, agents: list[BrowsingAgent], board: Board | None = None) -> None:
-    """The agents until the time to investigate is over, or until the bid is complete: more time is only spent
-    while something is still missing."""
-    runs = [asyncio.ensure_future(agent.run()) for agent in agents]
+    """The agents until the time to investigate is over or every agent has stopped, or until the bid is complete and
+    every agent waits: more time is only spent while something is still missing or being read. An agent that keeps
+    reading holds a complete bid back COMPLETE_GRACE_SECONDS at most. The run looks again at every record, every start
+    and end of a wait and every agent that stops."""
+    runs = {asyncio.ensure_future(agent.run()): agent.name for agent in agents}
     end = lead.collect_until + lead_module.INVESTIGATION_GRACE_SECONDS
-    while time.time() < end and not all(task.done() for task in runs):
-        await asyncio.wait(runs, timeout=max(0.0, min(COMPLETE_CHECK_SECONDS, end - time.time())))
-        if board is not None and board.complete():
-            lead.log(f"[run] the bid is complete at {time.time() - lead.started:.0f} s: investigations end")
+    priced = -1  # the board's version when the engine was last asked; only a record changes its answer
+    # Since when the bid has been complete without a break, and the board's version then. An item asked for after
+    # that version is a break, also when it was found again before the run looked.
+    complete_since, complete_version = None, 0
+    while True:
+        running = [task for task in runs if not task.done()]
+        at = f"at {time.time() - lead.started:.0f} s"
+        if not running:
+            lead.log(f"[run] every agent has stopped {at}: investigations end")
             break
+        if time.time() >= end:
+            lead.log(f"[run] the time to investigate is over {at}; still running: "
+                     f"{', '.join(runs[task] for task in running)}: investigations end")
+            break
+        changes = board.changes if board is not None else 0
+        wake = min(end, time.time() + CHECK_SECONDS)
+        if board is not None:
+            reading = [runs[task] for task in running if runs[task] not in board.waiting]
+            if board.version != priced:
+                priced, before = board.version, complete_since
+                if not board.complete():
+                    complete_since = None
+                elif complete_since is None or board.work_version > complete_version:
+                    complete_since, complete_version = time.time(), board.version
+                if complete_since is None and before is not None:
+                    lead.log(f"[run] the bid is not complete any more {at}")
+                elif complete_since is not None and complete_since != before and reading:
+                    lead.log(f"[run] the bid is complete {at}; still reading: {', '.join(reading)}")
+            if complete_since is not None:
+                if not reading:
+                    lead.log(f"[run] the bid is complete {at} and every agent is waiting: investigations end")
+                    break
+                if time.time() >= complete_since + COMPLETE_GRACE_SECONDS:
+                    lead.log(f"[run] the bid has been complete since {complete_since - lead.started:.0f} s; still "
+                             f"reading: {', '.join(reading)}; investigations end after {COMPLETE_GRACE_SECONDS} s")
+                    break
+                wake = min(wake, complete_since + COMPLETE_GRACE_SECONDS)
+        timeout = max(0.0, wake - time.time())
+        watch = [asyncio.ensure_future(board.wait_for_change(changes, timeout))] if board is not None else []
+        await asyncio.wait(running + watch, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+        for task in watch:
+            task.cancel()
     for task in runs:
         task.cancel()
 

@@ -234,8 +234,14 @@ class BrowsingAgent:
             if self.board is None:
                 raise ValueError("Unknown tool wait")
             before = self.seen
-            # woken by a new open item, not by every record of the others: each waking is a model call
-            changed = await self.board.wait_for_work(before, min(WAIT_SECONDS, max(1.0, self.deadline - time.time() - 10)))
+            timeout = min(WAIT_SECONDS, max(1.0, self.deadline - time.time() - 10))
+            # woken by a new open item, not by every record of the others: each waking is a model call. While it
+            # waits, the agent is done reading: a complete bid ends the investigations once every agent waits.
+            self.board.set_waiting(self.name, True)
+            try:
+                changed = await self.board.wait_for_work(before, timeout)
+            finally:  # also when the run cancels the agent or the step's time limit cuts the wait off
+                self.board.set_waiting(self.name, False)
             if not changed:
                 return "Nothing new is needed yet. Explore your website for what the open items will need, or wait again."
             self.seen = self.board.version

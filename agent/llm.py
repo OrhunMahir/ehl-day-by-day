@@ -11,6 +11,8 @@ secret is at least 16 characters long, so the provider and the model of a run ca
 names them (`Model(provider=..., model=...)`).
 """
 import asyncio
+import hashlib
+import json
 import os
 import time
 from types import SimpleNamespace
@@ -125,7 +127,21 @@ def _responses_request(args: dict) -> dict:
         request["reasoning"] = {"effort": args["reasoning_effort"]}
     if args.get("max_completion_tokens"):
         request["max_output_tokens"] = args["max_completion_tokens"]
+    if args.get("prompt_cache_key"):
+        request["prompt_cache_key"] = args["prompt_cache_key"]
     return request
+
+
+def _cache_key(messages: list[dict]) -> str:
+    """The prompt cache key of a conversation: a digest of its instructions and the first message after them, which
+    a caller writes once at its start (a website agent's names its website and holds its first page view). Every call
+    of one conversation gets the same key, also with more messages appended; another conversation gets another."""
+    opening = []
+    for message in messages:
+        opening.append([message.get("role"), message.get("content")])
+        if message.get("role") != "system":
+            break
+    return hashlib.sha256(json.dumps(opening, default=str).encode()).hexdigest()[:16]
 
 
 class Model:
@@ -157,6 +173,7 @@ class Model:
         # refuse a request, the model is asked through chat completions without thinking instead (see `chat`).
         self.responses = self.reasons
         self.effort: str | None = None  # an effort every call is sent with, whatever the caller asked for
+        self.cache_keyed = False  # the log says once that the calls carry a prompt cache key (see `_arguments`)
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -231,12 +248,26 @@ class Model:
             args.pop("reasoning_effort", None)
         if "temperature" in self.refused:
             args.pop("temperature", None)
+        if self.responses and "prompt_cache_key" not in self.refused:
+            # The provider picks the machine that caches a prompt by the prompt's first tokens: the instructions and
+            # tools every website agent shares. Above about 15 requests a minute for one such start, requests go to
+            # machines that do not hold the agent's history, which is then paid in full (20 of the reading model's
+            # 39 calls in a test run, $0.75 of its $0.86). The key is combined with that start, so each conversation
+            # stays with the machine that holds its history; the prompt itself does not change.
+            args["prompt_cache_key"] = _cache_key(messages)
+            if not self.cache_keyed:
+                self.cache_keyed = True
+                print(f"[llm] {self.provider} calls carry one prompt cache key per conversation", flush=True)
         return args
 
     def _adjust(self, error, sent: dict) -> bool:
         """A 400 that names a parameter this model does not take: that parameter, or the effort that was sent, is
         left out from now on. True when the next request will differ from the refused one."""
         text = f"{getattr(error, 'param', None) or ''} {error}".lower()
+        if "prompt_cache_key" in text and "prompt_cache_key" in sent:
+            # only the cache is lost: the call is asked again through Responses, with the same thinking
+            self.refused.add("prompt_cache_key")
+            return True
         if "reasoning_effort" in text and "to 'none'" in text and sent.get("reasoning_effort") != "none":
             self.effort = "none"  # the interface says which effort it takes with these tools
             return True
@@ -248,7 +279,13 @@ class Model:
             refused = None
         if refused:
             self.refused.add(refused)
-        return bool(refused)
+            return True
+        if "prompt_cache_key" in sent:
+            # A refusal that names no parameter may still be the key (a proxy can word it its own way): the call is
+            # asked once more without it, with the same thinking, before the model is given up for chat completions
+            self.refused.add("prompt_cache_key")
+            return True
+        return False
 
     async def _respond(self, args: dict) -> SimpleNamespace:
         """One call through the Responses interface, for callers that speak chat completions: the request is

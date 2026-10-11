@@ -3,12 +3,15 @@ import copy
 import random
 import unittest
 from dataclasses import replace
+from datetime import date
+from decimal import Decimal as D
 
-from test_engine_base import core_facts
+from test_engine_base import core_facts, material
 from test_engine_random import invent
 from test_engine_robust import damage
 
 from engine import evaluate
+from facts import Requirement, SpecRevision
 
 
 def unexplained(result) -> list[str]:
@@ -38,6 +41,29 @@ REMOVALS = {
     "current mark": lambda f: [setattr(v, "current", None) for v in f.revisions],
     "revisions": lambda f: f.revisions.clear(),
 }
+
+
+def undecided():
+    """core_facts() before the ERP is searched and before the current mark is read. R-1 names another group for
+    requirement A than R-2 and the same one for B, the older R-0 names R-1's group for A too, and R-1 also lists a
+    requirement C that no position references."""
+    f = core_facts()
+    f.materials, f.searched_groups = [], []
+    r1 = f.revisions[0]
+    r1.requirements = [replace(r1.requirements[0], catalogue_group="G-OLD"),
+                       replace(r1.requirements[1], catalogue_group="G-B"),
+                       Requirement("C", D(32), D(100), D(100), "Flansch", None, catalogue_group="G-C")]
+    f.revisions.insert(0, SpecRevision("R-0", date=date(2030, 1, 2),
+                                       requirements=[replace(r1.requirements[0], stroke_mm=D(200))]))
+    for v in f.revisions:
+        v.current = None
+    return f
+
+
+def searches(f) -> list[str]:
+    """The catalogue groups the ERP is asked to search, one per entry."""
+    return [n["what"].split()[2].rstrip(":") for n in evaluate(f).needed()
+            if n["what"].startswith("search Kataloggruppe")]
 
 
 class Needs(unittest.TestCase):
@@ -90,6 +116,61 @@ class Needs(unittest.TestCase):
         f.materials = [m for m in f.materials if m.catalogue_group != "G-B"]
         searches = [n for n in evaluate(f).needed() if n["what"].startswith("search Kataloggruppe")]
         self.assertEqual([(n["what"].split()[2], n["positions"]) for n in searches], [("G-B:", ["2"])])
+
+    def test_groups_of_every_revision_are_searched_before_one_is_marked_current(self):
+        f = undecided()
+        self.assertEqual(sorted(searches(f)), ["G-A", "G-B", "G-OLD"])  # each group once; C is in no position
+        text = next(n["what"] for n in evaluate(f).needed() if n["what"].startswith("search Kataloggruppe G-OLD"))
+        self.assertIn("stroke 250 mm", text)  # what to match from the latest revision naming the group: R-1, not R-0
+        f.positions = []
+        self.assertEqual(sorted(searches(f)), ["G-A", "G-B", "G-C", "G-OLD"])
+
+    def test_groups_are_searched_while_the_latest_revision_is_not_read_yet(self):
+        f = undecided()
+        f.revisions[-1].requirements = []  # R-2 is listed, its requirements are not recorded yet
+        self.assertEqual(sorted(searches(f)), ["G-B", "G-OLD"])
+
+    def test_groups_are_searched_while_the_revision_marked_current_is_not_read_yet(self):
+        f = undecided()
+        f.revisions[-1].current = True  # R-2 is marked current, its requirements are not recorded yet
+        f.revisions[-1].requirements = []
+        self.assertEqual(sorted(searches(f)), ["G-B", "G-OLD"])
+
+    def test_a_searched_group_is_not_asked_again_before_the_mark(self):
+        f = undecided()
+        f.searched_groups = ["g-old"]
+        self.assertEqual(sorted(searches(f)), ["G-A", "G-B"])
+        f = undecided()
+        f.materials = [material("M-OLD", 50, 250, 160, "Flansch", "", catalogue_group="G-OLD")]
+        self.assertEqual(sorted(searches(f)), ["G-A", "G-B"])
+
+    def test_once_a_revision_is_marked_current_only_its_groups_are_searched(self):
+        f = undecided()
+        f.revisions[-1].current = True  # R-2
+        self.assertEqual(sorted(searches(f)), ["G-A", "G-B"])
+        f = undecided()
+        f.revisions[1].current = True  # R-1
+        self.assertEqual(sorted(searches(f)), ["G-B", "G-OLD"])
+
+    def test_nothing_is_searched_before_revisions_are_recorded(self):
+        f = undecided()
+        f.revisions = []
+        self.assertEqual(searches(f), [])
+        self.assertIn("the specification revisions and which one is marked current",
+                      [n["what"] for n in evaluate(f).needed()])
+
+    def test_a_search_of_a_group_that_does_not_govern_only_adds_candidates(self):
+        f = undecided()
+        f.searched_groups = ["G-OLD"]
+        f.materials = [material("M-OLD", 50, 250, 160, "Flansch", "", catalogue_group="G-OLD")]
+        f.revisions[-1].current = True  # R-2 governs: requirement A is searched in G-A, where nothing is recorded
+        result = evaluate(f)
+        self.assertEqual(result.answer["decision"], "bid")  # not a search of A's group without a match (rule 3)
+        self.assertEqual(result.answer["positions"][0]["material_number"], "")  # nor its nearest candidate
+        self.assertIn("G-A", searches(f))
+        for v in f.revisions:
+            v.current = v.revision == "R-1"  # had R-1 governed, the early search would have found its match
+        self.assertEqual(evaluate(f).answer["positions"][0]["material_number"], "M-OLD")
 
     def test_no_bid_asks_for_a_recheck(self):
         f = core_facts()

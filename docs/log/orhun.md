@@ -2,6 +2,29 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 02:22 · Branch stream-o-luna: gpt-6-luna for the records of prices only; a step Qwen does not answer goes to it
+
+- This branch starts from `main` (`a12df43`). It does not hold the shorter record schema of `stream-o-schema`.
+- Test run `run_b2b4bda2e9fe8419` of `stream-o-schema` (`0368aaa`) has no score: it was cancelled by a team member
+  after 4:29. Until then 8 calls to Qwen had run into the 30 s limit, 4 of them in a row for the tender portal's
+  agent, which lost two minutes to them. A second run of the same state was started by Orhun.
+- Changed (branch `stream-o-luna`), an experiment asked for by Orhun:
+  - `agent/llm.py` `Stepped`: with `stays=False` the second model answers only the steps for which `change_for`
+    gives a reason and the first model goes on afterwards; with `first_seconds` a step the first model has not
+    answered in time is answered by the second.
+  - `agent/simple.py` (Julien's file): the second model is `gpt-6-luna` instead of `gpt-6.1-sol`; it answers only
+    the records of careful facts (`READER_STAYS = False`); a step Qwen has not answered after 15 s goes to it.
+  - `agent/tests/test_simple.py`: tests for both.
+- Why: after its first careful record an agent made every later step with the OpenAI model, also clicks and waits;
+  about 80 such calls made most of a run's $1.05. `gpt-6-luna` cost about a fortieth of `gpt-6.1-sol` per call in
+  the test runs of the old architecture.
+- Checked: 243 unit tests pass (1 skipped). Not run in the sandbox.
+- Risks: `gpt-6-luna` as the only model of the old architecture scored 5 (a wrong decision); how well it reads
+  prices is not known. Two things change at once against `main` (the model, and when it answers), so a lower score
+  will not say which of them caused it.
+- For the others: J: `simple.py` changed as listed, on this branch only.
+- Next: one test run of this branch after the running one has ended; compare with `run_1384fd032c9d5bb2`.
+
 ## 2026-10-11 02:01 · Test run run_1384fd032c9d5bb2: quality 100 at half the cost; stream-o-cheaper goes to main
 
 - Test run `run_1384fd032c9d5bb2` (`b3387d0`): quality 100, eligible, 6:55, 178 model calls, $1.05. Every field has

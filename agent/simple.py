@@ -57,7 +57,7 @@ JOB_STEPS = 400  # the clock ends a job long before this
 # units and validity periods were what the hosted model without thinking read wrongly or not at all. The brief call
 # and the submission stay with the hosted model without thinking, which entered and signed five positions fastest.
 READER_PROVIDER = "openai"
-READER_MODEL = "gpt-6.1-sol"
+READER_MODEL = "gpt-6-luna"
 READER_REASONING = "low"
 # A step of this model took 2-5 s in a test run, but one call in twelve hung until the browsing agent's 75 s limit
 # (11 calls, a quarter of one agent's time). A call still open after this long is sent again.
@@ -67,6 +67,12 @@ READER_CALL_SECONDS = 25
 # runs. That record is asked again from the reading model. Positions, quantities, clarifications of quantities and
 # the specification's requirements were right with the hosted model in every run, so an agent whose website holds
 # only those never changes.
+# Experiment: the reading model answers only the steps that record careful facts; every other step, also after
+# such a record, stays with the hosted model. And a step the hosted model has not answered after this long goes to
+# the reading model, so a busy hosted model does not hold an agent up (in one test run an agent lost two minutes to
+# four such calls in a row).
+READER_STAYS = False
+HOSTED_STEP_SECONDS = 15
 CAREFUL_FACTS = frozenset({"materials", "setup_fees", "discount_approvals", "condition_groups", "metal_indices",
                            "packaging_tariffs", "fx_rates", "setup_pools", "project_bonuses", "end_reserves",
                            "delivery_commitments"})
@@ -143,7 +149,8 @@ def site_agents(lead: lead_module.Orchestrator, board: Board, model: Model, refe
     def model_of(site: str):
         if hosted is None or hosted is model:
             return model
-        return Stepped(hosted, model, careful_record, name=site, log=lead.log)
+        return Stepped(hosted, model, careful_record, name=site, log=lead.log, stays=READER_STAYS,
+                       first_seconds=HOSTED_STEP_SECONDS)
 
     return [BrowsingAgent(model_of(site), {site: tab}, lead.credentials,
                           JOB.format(site=site, url=urls.get(site, ""), reference=reference) + "\n\n"
@@ -209,7 +216,8 @@ async def main() -> int:
     task, token = contract.load_run()
     model = Model(thinking=False)
     reader = reading_model(model)
-    reading = described(reader) if reader is model else f"{described(model)}, then {described(reader)} for prices"
+    how = "from the first record of prices on" if READER_STAYS else "for the records of prices only"
+    reading = described(reader) if reader is model else f"{described(model)}, and {described(reader)} {how}"
     print(f"Run {task.get('run_id') or '(local scouting run)'}; websites read by {reading}; brief and "
           f"submission by {described(model)}; one agent per website: "
           f"{', '.join(a['siteId'] for a in task['access'])}", flush=True)

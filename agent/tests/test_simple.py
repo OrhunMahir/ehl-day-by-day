@@ -260,6 +260,43 @@ class TheModelOfAnAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(said), 1)
         self.assertIn("about to record materials", said[0])
 
+    async def test_without_staying_only_the_careful_records_come_from_the_reading_model(self):
+        from llm import Stepped
+        step = NS(content="", tool_calls=[call(1, "click", {"element": "3"})])
+        hasty = NS(content="", tool_calls=[call(2, "record", {"facts": ERP})])
+        careful = NS(content="", tool_calls=[call(3, "record", {"facts": ERP})])
+        onward = NS(content="", tool_calls=[call(4, "goto", {"url": "/next"})])
+        plain = NS(content="", tool_calls=[call(5, "record", {"facts": POSITIONS})])
+        hosted = self.Answers("hosted", step, hasty, onward, plain)
+        reader, said = self.Answers("reader", careful), []
+        model = Stepped(hosted, reader, simple.careful_record, name="site-c", log=said.append, stays=False)
+        answers = [await model.chat([{"role": "user", "content": "go"}], []) for _ in range(4)]
+        self.assertEqual([a is b for a, b in zip(answers, (step, careful, onward, plain))], [True] * 4)
+        self.assertEqual((hosted.asked, reader.asked, model.provider, model.changed), (4, 1, "hosted", False))
+        self.assertEqual(len(said), 1)
+
+    async def test_a_step_the_hosted_model_does_not_answer_in_time_goes_to_the_reading_model(self):
+        from llm import Stepped
+
+        class Hangs(self.Answers):
+            async def chat(self, messages, tools=None, **kwargs):
+                self.asked += 1
+                if self.asked == 1:
+                    await asyncio.sleep(5)
+                return self.messages.pop(0)
+        late = NS(content="", tool_calls=[call(1, "click", {"element": "1"})])
+        instead = NS(content="", tool_calls=[call(2, "click", {"element": "2"})])
+        next_one = NS(content="", tool_calls=[call(3, "wait", {})])
+        hosted, reader, said = Hangs("hosted", late, next_one), self.Answers("reader", instead), []
+        model = Stepped(hosted, reader, simple.careful_record, name="site-a", log=said.append, stays=False,
+                        first_seconds=0.2)
+        started = time.time()
+        self.assertIs(await model.chat([{"role": "user", "content": "go"}], []), instead)
+        self.assertLess(time.time() - started, 2)
+        hosted.messages = [next_one]
+        self.assertIs(await model.chat([{"role": "user", "content": "go"}], []), next_one)  # the hosted model again
+        self.assertIn("no answer from hosted", said[0])
+
     def test_every_agent_changes_on_its_own(self):
         lead = NS(task=TASK, tabs={site: NS(page=NS(context=NS(browser=None))) for site in SITES}, credentials={},
                   context=lambda: "context", collect_until=time.time() + 60, log=lambda *a: None)

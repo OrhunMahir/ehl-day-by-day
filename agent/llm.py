@@ -4,6 +4,7 @@
   AGENT_PROVIDER=anthropic  Claude via Anthropic's OpenAI-compatible endpoint: ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY
   AGENT_PROVIDER=openai     OpenAI: OPENAI_BASE_URL, OPENAI_API_KEY
   AGENT_PROVIDER=openrouter any OpenRouter model: LLM_PROXY_URL/openrouter/v1, OPENROUTER_API_KEY
+  AGENT_PROVIDER=deepseek   DeepSeek: LLM_PROXY_URL/deepseek/v1, DEEPSEEK_API_KEY
   AGENT_MODEL=<model id>    overrides the provider's default model
 
 In a run every base URL already points at the platform's metering proxy; your own keys go in team secrets. A team
@@ -22,6 +23,7 @@ DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-5-5",
     "openai": "gpt-6.1-sol",
     "openrouter": "anthropic/claude-sonnet-5.5",
+    "deepseek": "deepseek-v4-flash",
 }
 
 DEFAULT_PROVIDER = "qwen"
@@ -48,6 +50,8 @@ def _client_config(provider: str) -> tuple[str, str]:
         return env["OPENAI_BASE_URL"], env["OPENAI_API_KEY"]
     if provider == "openrouter":
         return env["LLM_PROXY_URL"].rstrip("/") + "/openrouter/v1", env["OPENROUTER_API_KEY"]
+    if provider == "deepseek":
+        return env["LLM_PROXY_URL"].rstrip("/") + "/deepseek/v1", env["DEEPSEEK_API_KEY"]
     raise SystemExit(f"Unknown AGENT_PROVIDER {provider!r}; use one of {', '.join(DEFAULT_MODELS)}")
 
 

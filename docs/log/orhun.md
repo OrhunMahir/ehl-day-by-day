@@ -2,6 +2,32 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 02:11 · Branch stream-o-schema: a shorter record schema for the agents; DeepSeek reachable as a provider
+
+- `main` holds the state of `run_1384fd032c9d5bb2` since pull request #12 (`a12df43`). This branch starts from it
+  and is an experiment; it is not for `main` before a test run has shown that the quality holds.
+- Changed (branch `stream-o-schema`):
+  - `agent/simple.py` (Julien's file): `compact()` shortens the record schema every agent gets with every call,
+    from about 27,100 to 16,000 characters. What repeated is said once in the schema's description: the `source`
+    object's explanation (it was written out in every record), the two sentences on numbers and dates, the "or
+    null" around every optional field. All 247 fields, every enum, every required list and every field-specific
+    description are kept; `facts.update_schema()` itself is unchanged.
+  - `agent/llm.py`: provider `deepseek` (through the run's proxy, key `DEEPSEEK_API_KEY`). Nothing selects it yet.
+    `simple.reading_model` falls back to the hosted model when the run lacks what the reading provider needs.
+  - `agent/tests/test_simple.py`, `agent/tests/test_kit.py`: tests for both.
+- Why: the schema is the largest fixed part of every call.
+- Expected gain, corrected: about a tenth of a run's cost, not the third first estimated. The platform's
+  `input_tokens` count only input that was not cached: in `run_fed0a871a9729e24` the agent's own counters show 2.23
+  million prompt tokens, the platform 0.51 million. So about three quarters of the input is cached by the provider
+  already, and the schema is part of that cached prefix.
+- Learned: the platform's proxy forwards the DeepSeek model names `deepseek-chat`, `deepseek-v4-flash` and
+  `deepseek-v3.2` and refuses `deepseek-v4` as unknown; on OpenRouter it forwards any name. The ranking counts a
+  run's cost as at least $0.01. Only Qwen and Clef are hosted free of charge; every other provider needs the
+  team's own key.
+- Checked: 245 unit tests pass (1 skipped). Not run in the sandbox.
+- For the others: J: `simple.py` changed as listed, on this branch only.
+- Next: one test run of this branch, started by Orhun; compare with `run_1384fd032c9d5bb2` (100, $1.05, 6:55).
+
 ## 2026-10-11 02:01 · Test run run_1384fd032c9d5bb2: quality 100 at half the cost; stream-o-cheaper goes to main
 
 - Test run `run_1384fd032c9d5bb2` (`b3387d0`): quality 100, eligible, 6:55, 178 model calls, $1.05. Every field has

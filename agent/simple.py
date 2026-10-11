@@ -90,6 +90,49 @@ def schema_for(names: list[str] | None = None) -> dict:
     return {**full, "properties": keep}
 
 
+# Said once for the whole schema instead of with every field (see `compact`).
+SAID_ONCE = ("Numbers: a JSON number, or text with a format that is not ambiguous (1.250 is ambiguous). Dates and "
+             "timestamps: ISO 8601 (UTC) or DD.MM.YYYY. A field you do not know is left out. Every record may carry "
+             "`source`, where it was read: site, document, date (when the record was issued: mail date and time, "
+             "revision date, Q&A date), sender (the sender's full mail address, for mails), revision, note. Only "
+             "date and sender change the result; the rest is for traceability.")
+SOURCE_FIELDS = ("site", "document", "date", "sender", "revision", "note")
+REPEATED = ("a JSON number, or text with a format that is not ambiguous (1.250 is ambiguous)",
+            "date or timestamp, ISO 8601 (UTC) or DD.MM.YYYY")
+
+
+def compact(schema: dict) -> dict:
+    """The same schema with what repeats said once. Every agent gets the schema with every call, and four fifths of
+    its text were repetitions: the `source` object written out in every record, the same two sentences on numbers
+    and dates with every such field, a "or null" around every optional field. No field, enum, required list or
+    field-specific description is dropped."""
+    def short(node):
+        if isinstance(node, list):
+            return [short(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        options = node.get("anyOf")
+        if isinstance(options, list) and {"type": "null"} in options and len(options) == 2:  # optional: left out
+            inner = short(next(o for o in options if o != {"type": "null"}))
+            extra = {k: v for k, v in node.items() if k != "anyOf"}
+            return {**inner, **short(extra)} if isinstance(inner, dict) else inner
+        out = {}
+        for key, value in node.items():
+            if key == "additionalProperties" and value is False:
+                continue
+            if key == "description" and value in REPEATED:
+                continue
+            if key == "properties" and isinstance(value, dict):
+                out[key] = {name: ({"type": "object", "properties": {f: {"type": "string"} for f in SOURCE_FIELDS}}
+                                   if name == "source" else short(rule)) for name, rule in value.items()}
+            else:
+                out[key] = short(value)
+        return out
+    out = short(schema)
+    out["description"] = (out.get("description", "") + " " + SAID_ONCE).strip()
+    return out
+
+
 async def brief_facts(lead: lead_module.Orchestrator, board: Board, model: Model) -> str:
     """The tender reference, scenario date and director address from the brief, so the engine can price at all."""
     tool = {"type": "function", "function": {"name": "record", "description": "Save what the brief states.",
@@ -131,7 +174,7 @@ def site_agents(lead: lead_module.Orchestrator, board: Board, model: Model, refe
     """One agent per website of the run, each with that website's tab only. With `hosted`, every agent starts with
     that model and changes to `model` on its own, when it comes to the facts that need careful reading."""
     urls = {a["siteId"]: a["url"] for a in lead.task["access"]}
-    schema = schema_for()
+    schema = compact(schema_for())
     browsers = []  # every browser of the run, once: a website that stops answering may be opened in another
     for tab in lead.tabs.values():
         try:
@@ -184,10 +227,13 @@ async def submit(lead: lead_module.Orchestrator) -> None:
 def reading_model(hosted: Model) -> Model:
     """The model of the agents that read the websites. Without a key for its provider it is the hosted model; with a
     key the provider turns down during the run, the hosted model takes over from that call on."""
-    if not os.environ.get(f"{READER_PROVIDER.upper()}_API_KEY") or not os.environ.get(f"{READER_PROVIDER.upper()}_BASE_URL"):
+    if not os.environ.get(f"{READER_PROVIDER.upper()}_API_KEY"):
         return hosted
-    return Model(provider=READER_PROVIDER, model=READER_MODEL, reasoning_effort=READER_REASONING, fallback=hosted,
-                 call_seconds=READER_CALL_SECONDS)
+    try:
+        return Model(provider=READER_PROVIDER, model=READER_MODEL, reasoning_effort=READER_REASONING,
+                     fallback=hosted, call_seconds=READER_CALL_SECONDS)
+    except KeyError:  # the run does not name the proxy this provider is reached through
+        return hosted
 
 
 def described(model: Model) -> str:

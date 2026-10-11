@@ -272,6 +272,64 @@ class TheModelOfAnAgent(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(a.model is reader for a in same))
 
 
+class TheSchemaAnAgentGets(unittest.TestCase):
+    """The record schema goes out with every call of every agent; what repeats in it is said once."""
+
+    def paths(self, node, at=""):
+        found = set()
+        if isinstance(node, dict):
+            for option in node.get("anyOf") or []:
+                found |= self.paths(option, at)
+            for name, rule in (node.get("properties") or {}).items():
+                found.add(f"{at}.{name}")
+                found |= self.paths(rule, f"{at}.{name}")
+            if "items" in node:
+                found |= self.paths(node["items"], at + "[]")
+        return found
+
+    def collect(self, node, key):
+        found = []
+        if isinstance(node, dict):
+            if key in node:
+                found.append(json.dumps(node[key], sort_keys=True))
+            for value in node.values():
+                found += self.collect(value, key)
+        elif isinstance(node, list):
+            for value in node:
+                found += self.collect(value, key)
+        return found
+
+    def test_no_field_enum_or_required_list_is_lost_and_it_is_much_shorter(self):
+        full = simple.schema_for()
+        short = simple.compact(simple.schema_for())
+        self.assertEqual(self.paths(short), self.paths(full))
+        self.assertEqual(sorted(self.collect(short, "enum")), sorted(self.collect(full, "enum")))
+        self.assertEqual(sorted(self.collect(short, "required")), sorted(self.collect(full, "required")))
+        self.assertLess(len(json.dumps(short)), 0.65 * len(json.dumps(full)))
+        self.assertEqual(simple.schema_for(), full)  # the full schema itself is untouched
+
+    def test_what_a_field_alone_says_stays_and_what_every_field_said_is_said_once(self):
+        short = simple.compact(simple.schema_for())
+        material = short["properties"]["materials"]["items"]["properties"]
+        self.assertIn("625 g", material["surcharge_mass_kg"]["description"])
+        self.assertIn("price per 100 pieces", json.dumps(material["conditions"]))
+        text = json.dumps(short)
+        self.assertEqual(text.count("format that is not ambiguous"), 1)
+        self.assertEqual(text.count("the sender's full mail address"), 1)
+        self.assertNotIn('"null"', text)
+        self.assertEqual(list(material["source"]["properties"]), list(simple.SOURCE_FIELDS))
+
+    def test_the_agents_get_the_short_schema_and_a_record_with_a_source_is_still_taken(self):
+        lead = NS(task=TASK, tabs={site: NS(page=NS(context=NS(browser=None))) for site in SITES}, credentials={},
+                  context=lambda: "context", collect_until=time.time() + 60, log=lambda *a: None)
+        board = Board(log=lambda *a: None)
+        [first, *_] = simple.site_agents(lead, board, NS(provider="m", model="m", thinking=None), "T-1")
+        self.assertEqual(first.record_schema, simple.compact(simple.schema_for()))
+        board.record("site-a", {**START, "positions": [{"position": "1", "quantity": 4, "requirement": "R1", "source": {
+            "site": "site-a", "document": "bill of quantities", "date": "2029-12-01T10:00:00Z", "note": "as shown"}}]})
+        self.assertEqual(len(board.builder.facts().positions), 1)
+
+
 class OneAgentPerWebsite(unittest.TestCase):
     def test_every_website_gets_one_agent_with_only_its_own_tab(self):
         lead = agent.Orchestrator(TASK, None, {s: tab(s) for s in SITES}, None, time.time())

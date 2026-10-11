@@ -313,6 +313,15 @@ class TheProviderOfARun(Case):
             self.assertEqual((await model.chat([{"role": "user", "content": "one"}])).content, "ok")
         self.assertEqual((len(hung), len(server.requests)), (1, 1))
 
+    async def test_deepseek_is_reached_through_the_runs_proxy_with_the_teams_key(self):
+        server = self.serve({"/deepseek/v1/chat/completions": [(200, self.REPLY)]})
+        with patch.dict(os.environ, {"LLM_PROXY_URL": server.url + "/", "DEEPSEEK_API_KEY": "sk-invented"}):
+            model = llm.Model(provider="deepseek")
+        self.assertEqual((await model.chat([{"role": "user", "content": "step"}], temperature=0.2)).content, "ok")
+        [request] = server.requests
+        self.assertEqual((request["body"]["model"], request["body"]["temperature"]), ("deepseek-v4-flash", 0.2))
+        self.assertEqual(request["headers"]["Authorization"], "Bearer sk-invented")
+
     async def test_outside_a_run_the_developers_platform_token_goes_in_a_header(self):
         with patch.dict(os.environ, {"ATIRA_TEAM_KEY": "token-invented"}):
             model, server = self.openai({"/v1/responses": [(200, self.ANSWER)]})

@@ -22,7 +22,7 @@ import facts
 import run as contract
 from board import Board
 from browsing import BrowsingAgent
-from llm import Model
+from llm import Model, Stepped
 
 JOB = """You work the website {site} ({url}) for the whole run, and only this website. The brief says what each
 website of this tender holds; information may also sit where you would not expect it, so look at what yours shows.
@@ -62,6 +62,14 @@ READER_REASONING = "low"
 # A step of this model took 2-5 s in a test run, but one call in twelve hung until the browsing agent's 75 s limit
 # (11 calls, a quarter of one agent's time). A call still open after this long is sent again.
 READER_CALL_SECONDS = 25
+# An agent starts with the hosted model and changes to the reading model for good when it is about to record one of
+# these facts: the ones that carry prices, rates, masses or dated rules, which the hosted model read wrongly in test
+# runs. That record is asked again from the reading model. Positions, quantities, clarifications of quantities and
+# the specification's requirements were right with the hosted model in every run, so an agent whose website holds
+# only those never changes.
+CAREFUL_FACTS = frozenset({"materials", "setup_fees", "discount_approvals", "condition_groups", "metal_indices",
+                           "packaging_tariffs", "fx_rates", "setup_pools", "project_bonuses", "end_reserves",
+                           "delivery_commitments"})
 # Investigations end here at the latest, as a share of the run (minute 11 of 20). The 51.2 run stopped at minute 9
 # with the rule mails still unread and ended after 11:44. Entering and signing five priced positions took at most
 # 487 s with the scouting logins (re-logins and stalled model calls included) and about 165 s in the sandbox, so the
@@ -102,8 +110,26 @@ async def brief_facts(lead: lead_module.Orchestrator, board: Board, model: Model
     return str(lead.builder.data.get("tender_reference") or "named in the brief")
 
 
-def site_agents(lead: lead_module.Orchestrator, board: Board, model: Model, reference: str) -> list[BrowsingAgent]:
-    """One agent per website of the run, each with that website's tab only."""
+def careful_record(message) -> str | None:
+    """Why the reading model should give this answer: it records facts that need careful reading."""
+    for call in getattr(message, "tool_calls", None) or []:
+        if call.function.name != "record":
+            continue
+        try:
+            arguments = json.loads(call.function.arguments or "{}")
+        except ValueError:
+            return "a record that cannot be read"
+        recorded = arguments.get("facts", arguments) if isinstance(arguments, dict) else {}
+        careful = sorted(CAREFUL_FACTS & set(recorded)) if isinstance(recorded, dict) else []
+        if careful:
+            return "about to record " + ", ".join(careful)
+    return None
+
+
+def site_agents(lead: lead_module.Orchestrator, board: Board, model: Model, reference: str,
+                hosted: Model | None = None) -> list[BrowsingAgent]:
+    """One agent per website of the run, each with that website's tab only. With `hosted`, every agent starts with
+    that model and changes to `model` on its own, when it comes to the facts that need careful reading."""
     urls = {a["siteId"]: a["url"] for a in lead.task["access"]}
     schema = schema_for()
     browsers = []  # every browser of the run, once: a website that stops answering may be opened in another
@@ -114,7 +140,12 @@ def site_agents(lead: lead_module.Orchestrator, board: Board, model: Model, refe
             browser = None
         if browser is not None and all(browser is not b for b in browsers):
             browsers.append(browser)
-    return [BrowsingAgent(model, {site: tab}, lead.credentials,
+    def model_of(site: str):
+        if hosted is None or hosted is model:
+            return model
+        return Stepped(hosted, model, careful_record, name=site, log=lead.log)
+
+    return [BrowsingAgent(model_of(site), {site: tab}, lead.credentials,
                           JOB.format(site=site, url=urls.get(site, ""), reference=reference) + "\n\n"
                           + lead_module.PROVENANCE, lead.context() + "\n\n" + facts.FILLING_GUIDE,
                           name=site, deadline=lead.collect_until, max_steps=JOB_STEPS, log=lead.log,
@@ -169,7 +200,7 @@ async def _run(lead: lead_module.Orchestrator, model: Model, reader: Model) -> N
     reference = await brief_facts(lead, board, model)
     lead.log(f"[run] tender {reference}; one agent per website ({', '.join(lead.tabs)}) until "
              f"{lead.collect_until - lead.started:.0f} s")
-    await run_agents(lead, site_agents(lead, board, reader, reference), board)
+    await run_agents(lead, site_agents(lead, board, reader, reference, model), board)
     await submit(lead)
 
 
@@ -178,7 +209,8 @@ async def main() -> int:
     task, token = contract.load_run()
     model = Model(thinking=False)
     reader = reading_model(model)
-    print(f"Run {task.get('run_id') or '(local scouting run)'}; websites read by {described(reader)}; brief and "
+    reading = described(reader) if reader is model else f"{described(model)}, then {described(reader)} for prices"
+    print(f"Run {task.get('run_id') or '(local scouting run)'}; websites read by {reading}; brief and "
           f"submission by {described(model)}; one agent per website: "
           f"{', '.join(a['siteId'] for a in task['access'])}", flush=True)
     async with async_playwright() as playwright:

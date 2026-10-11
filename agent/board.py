@@ -23,6 +23,11 @@ class Board:
         self.version = 0
         self.history: list[tuple[int, str, str]] = []  # version, who recorded, what (without sources)
         self.searchers: set[str] = set()  # agents that recorded materials, i.e. the results of a material search
+        # What is still needed, as it was after the last record, and the version at which that list last gained an
+        # item. Most records add no work for anybody (one more material, one more mail); an agent that waits is
+        # woken only when something new is asked for, not by every record.
+        self.open_items: frozenset = frozenset()
+        self.work_version = 0
         self._changed = asyncio.Condition()
 
     def record(self, who: str, update) -> str:
@@ -42,6 +47,10 @@ class Board:
             self.searchers.add(who)
         self.version += 1
         self.history.append((self.version, who, _compact(update)))
+        open_now = frozenset((need.get("site"), need.get("what")) for need in self.needs())
+        if open_now - self.open_items:
+            self.work_version = self.version
+        self.open_items = open_now
         self.log(f"[{who}] recorded: {summary[:240]}{' (searched_groups refused)' if refused else ''}")
         try:
             asyncio.get_running_loop().create_task(self._notify())
@@ -60,6 +69,18 @@ class Board:
         try:
             async with self._changed:
                 await asyncio.wait_for(self._changed.wait_for(lambda: self.version > since), timeout=timeout)
+            return True
+        except TimeoutError:
+            return False
+
+    async def wait_for_work(self, since: int, timeout: float) -> bool:
+        """Waits until the list of what is still needed has gained an item after version `since`, at most `timeout`
+        seconds. True if it has."""
+        if self.work_version > since:
+            return True
+        try:
+            async with self._changed:
+                await asyncio.wait_for(self._changed.wait_for(lambda: self.work_version > since), timeout=timeout)
             return True
         except TimeoutError:
             return False

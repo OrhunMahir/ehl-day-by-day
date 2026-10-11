@@ -58,7 +58,7 @@ JOB_STEPS = 400  # the clock ends a job long before this
 # and the submission stay with the hosted model without thinking, which entered and signed five positions fastest.
 READER_PROVIDER = "openai"
 READER_MODEL = "gpt-6-luna"
-READER_REASONING = "low"
+READER_REASONING = "medium"  # experiment: more thinking for the small reading model
 # A step of this model took 2-5 s in a test run, but one call in twelve hung until the browsing agent's 75 s limit
 # (11 calls, a quarter of one agent's time). A call still open after this long is sent again.
 READER_CALL_SECONDS = 25

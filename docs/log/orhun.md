@@ -2,6 +2,23 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 02:01 · Test run run_1384fd032c9d5bb2: quality 100 at half the cost; stream-o-cheaper goes to main
+
+- Test run `run_1384fd032c9d5bb2` (`b3387d0`): quality 100, eligible, 6:55, 178 model calls, $1.05. Every field has
+  full points, as in `run_f081cfe7e25825b6` (100, 7:08, $2.17), which read every website with `gpt-6.1-sol`.
+  - Three agents changed to the OpenAI model: the tender portal's at second 112 (about to record setup fees), the
+    mailbox's at 119 (discount approvals), the ERP's at 149 (materials). The supplier portal's agent stayed with
+    Qwen for the whole run.
+  - Qwen noticed the setup fees in the Q&A answers by itself; both were recorded.
+  - The bid was complete at second 233 (164 in the earlier run); the submission took 182 s (264 s earlier). The
+    submission's time varies from run to run, so the shorter total says nothing about this change.
+  - One run. The effect of the targeted waking alone is not measured: both changes were in the same run.
+- Changed: nothing in the code; this entry and the pull request to `main`.
+- Checked: 241 unit tests pass (1 skipped) at `b3387d0`; `main` has no commit this branch lacks.
+- For the others: J, I: `main` will hold this state; run `git merge origin/main` on your branches.
+- Next: an experiment branch that gives each agent a shorter record schema. No `atira submit` without Orhun's yes;
+  the submission the final would use is still the old one.
+
 ## 2026-10-11 01:48 · Branch stream-o-cheaper: agents start with Qwen and change to the OpenAI model for prices; a waiting agent is woken only by a new open item
 
 - `main` holds the state of the 100 run since pull request #11 (`108e9f3`). This branch starts from it and is an

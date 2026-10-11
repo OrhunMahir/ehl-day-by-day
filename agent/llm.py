@@ -52,13 +52,18 @@ def _client_config(provider: str) -> tuple[str, str]:
 
 
 class Stepped:
-    """The model of one agent that starts with one model and changes to another for good: at the first answer of
-    which `change_for` says why the other one should give it. That answer is thrown away and asked again from the
-    other model, so nothing of it is acted on. Callers use it like a `Model`."""
+    """The model of one agent that works with two models. The first one answers every step; an answer of which
+    `change_for` says why the other model should give it is thrown away and asked again from the other one, so
+    nothing of it is acted on. With `stays` the other model then answers every later step as well; without it the
+    first model goes on, and the other one is asked only for such answers. When the first model has not answered
+    a step within `first_seconds`, the other one answers that one step. Callers use it like a `Model`."""
 
-    def __init__(self, first: "Model", then: "Model", change_for, name: str = "", log=print):
+    def __init__(self, first: "Model", then: "Model", change_for, name: str = "", log=print, stays: bool = True,
+                 first_seconds: float | None = None):
         self.first, self.then, self.change_for, self.name, self.log = first, then, change_for, name, log
+        self.stays, self.first_seconds = stays, first_seconds
         self.changed = first is then
+        self.handed_over = 0  # answers the other model gave instead of the first one
 
     @property
     def active(self) -> "Model":
@@ -72,12 +77,22 @@ class Stepped:
     async def chat(self, messages: list[dict], tools: list[dict] | None = None, **kwargs):
         if self.changed:
             return await self.then.chat(messages, tools, **kwargs)
-        message = await self.first.chat(messages, tools, **kwargs)
+        try:
+            message = await asyncio.wait_for(self.first.chat(messages, tools, **kwargs), timeout=self.first_seconds)
+        except TimeoutError:  # a slow answer is no reason to change for good: the other model answers this step
+            self.handed_over += 1
+            self.log(f"[{self.name}] no answer from {self.first.provider} in {self.first_seconds:.0f} s: "
+                     f"{self.then.provider}/{self.then.model} answers this step")
+            return await self.then.chat(messages, tools, **kwargs)
         reason = self.change_for(message)
         if not reason:
             return message
-        self.changed = True
-        self.log(f"[{self.name}] {reason}: {self.then.provider}/{self.then.model} from here on")
+        self.handed_over += 1
+        if self.stays:
+            self.changed = True
+            self.log(f"[{self.name}] {reason}: {self.then.provider}/{self.then.model} from here on")
+        elif self.handed_over == 1:
+            self.log(f"[{self.name}] {reason}: {self.then.provider}/{self.then.model} answers such steps")
         return await self.then.chat(messages, tools, **kwargs)
 
     def usage(self) -> str:

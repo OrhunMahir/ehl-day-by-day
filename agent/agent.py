@@ -455,7 +455,12 @@ class Orchestrator:
         agent = SubmissionAgent(self.worker_model, sites, self.credentials, task, self.context(),
                                 deadline=self.deadline, log=self.log)
         self.submitted = answer
-        report = await agent.run()
+        try:
+            report = await agent.run()
+        except Exception as error:  # noqa: BLE001 - the platform closes the run the moment it accepts the bid, and
+            # the model call that was open then is refused; whether the bid is in is asked below, not guessed here
+            self.log(f"[submit] ended by {type(error).__name__}")
+            report = f"REPORT:\n(the submission ended with {type(error).__name__}: {str(error)[:300]})"
         self.accepted = await self.run_is_over()
         if self.accepted:
             return report + "\n\nThe platform has closed the run: the bid was accepted."

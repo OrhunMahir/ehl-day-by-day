@@ -2,6 +2,33 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 02:44 · Branch stream-o-qwen-guard: a step Qwen does not answer in time goes to the OpenAI model; the submission ends cleanly
+
+- Experiments since the last entry, none of them for `main`:
+  - `stream-o-schema` (shorter record schema): two test runs, both cancelled before the end
+    (`run_b2b4bda2e9fe8419`, `run_48d77dbd1cba1473`). In both the tender portal's agent ran four and five times in a
+    row into the 30 s limit of a Qwen call and the output grew. Likely cause: the schema's one sentence that every
+    record may carry a source made Qwen write a source into every item. Dropped.
+  - `stream-o-luna` (`gpt-6-luna` for the records of prices only): `run_c0a0893840c99ac6`, reasoning low: quality
+    82, 10:31, $0.54. The base price of two positions was wrong, and with it the project bonus of three, four unit
+    prices and the total. Twelve steps went to the second model because Qwen had not answered in 18 s. A run at
+    reasoning medium (`run_12c2b0a5a53794d5`) was started; its result is not in this entry.
+- Changed (branch `stream-o-qwen-guard`, from `main` at `a12df43`; models and efforts as on `main`):
+  - `agent/llm.py` `Stepped`: `first_seconds`: a step the first model has not answered in time is answered by the
+    second, that one step only. (`stays` is there too; `main`'s behaviour, staying after a careful record, is
+    the default.)
+  - `agent/simple.py` (Julien's file): website agents, the brief call and the submission give Qwen 18 s for a step
+    (8 s for the brief), then `gpt-6.1-sol` answers it. Without an OpenAI key nothing changes.
+  - `agent/agent.py`: a submission that ends with an error no longer ends the program with a traceback; whether
+    the bid is in is asked from the platform as before.
+  - `agent/tests/test_simple.py`, `agent/tests/test_kit.py`: tests.
+- Why: brief, the steps before an agent changes model, and the whole submission depend on Qwen alone, and Qwen is
+  shared by every run on the platform. On this evening it answered in 2-4 s at one time and not within 30 s at
+  another. A submission that stalls can miss the signature, which scores 0.
+- Checked: unit tests pass (count in the commit message). Not run in the sandbox.
+- For the others: J: `simple.py` changed as listed, on this branch only.
+- Next: one test run of this branch; if it holds, to `main`, and then the scored submission with Orhun's yes.
+
 ## 2026-10-11 02:01 · Test run run_1384fd032c9d5bb2: quality 100 at half the cost; stream-o-cheaper goes to main
 
 - Test run `run_1384fd032c9d5bb2` (`b3387d0`): quality 100, eligible, 6:55, 178 model calls, $1.05. Every field has

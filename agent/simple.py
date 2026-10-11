@@ -67,6 +67,13 @@ READER_CALL_SECONDS = 25
 # runs. That record is asked again from the reading model. Positions, quantities, clarifications of quantities and
 # the specification's requirements were right with the hosted model in every run, so an agent whose website holds
 # only those never changes.
+# A step the hosted model has not answered after this long is answered by the reading model, for the website agents
+# and for the submission. The hosted model is shared by every run on the platform: in test runs of one evening it
+# answered a step in 2-4 s at one time and not within 30 s at another, and a browsing agent lost over two minutes
+# to five such calls in a row. The browsing agent gives a call without thinking 30 s and the submission 45 s; this
+# limit leaves the reading model the rest of that time. The brief call has 20 s in all, so less there.
+HOSTED_STEP_SECONDS = 18
+HOSTED_BRIEF_SECONDS = 8
 CAREFUL_FACTS = frozenset({"materials", "setup_fees", "discount_approvals", "condition_groups", "metal_indices",
                            "packaging_tariffs", "fx_rates", "setup_pools", "project_bonuses", "end_reserves",
                            "delivery_commitments"})
@@ -143,7 +150,7 @@ def site_agents(lead: lead_module.Orchestrator, board: Board, model: Model, refe
     def model_of(site: str):
         if hosted is None or hosted is model:
             return model
-        return Stepped(hosted, model, careful_record, name=site, log=lead.log)
+        return Stepped(hosted, model, careful_record, name=site, log=lead.log, first_seconds=HOSTED_STEP_SECONDS)
 
     return [BrowsingAgent(model_of(site), {site: tab}, lead.credentials,
                           JOB.format(site=site, url=urls.get(site, ""), reference=reference) + "\n\n"
@@ -195,9 +202,17 @@ def described(model: Model) -> str:
     return f"{model.provider}/{model.model} {effort}"
 
 
+def guarded(hosted: Model, reader: Model, name: str, seconds: float, log=print):
+    """The hosted model for a job that never changes model for good; a step it does not answer in time goes to the
+    reading model. Without a reading model of its own it is the hosted model as it is."""
+    if reader is hosted:
+        return hosted
+    return Stepped(hosted, reader, lambda message: None, name=name, log=log, first_seconds=seconds)
+
+
 async def _run(lead: lead_module.Orchestrator, model: Model, reader: Model) -> None:
     board = Board(lead.builder, log=lead.log)
-    reference = await brief_facts(lead, board, model)
+    reference = await brief_facts(lead, board, guarded(model, reader, "brief", HOSTED_BRIEF_SECONDS, lead.log))
     lead.log(f"[run] tender {reference}; one agent per website ({', '.join(lead.tabs)}) until "
              f"{lead.collect_until - lead.started:.0f} s")
     await run_agents(lead, site_agents(lead, board, reader, reference, model), board)
@@ -222,7 +237,8 @@ async def main() -> int:
             return access["siteId"], await lead_module.open_site(access["siteId"], access["url"], page)
         # all websites at once: a slow one must not hold up the others (a sandbox run lost 80 s here)
         tabs = dict(await asyncio.gather(*(open_one(i, a) for i, a in enumerate(task["access"][:4]))))
-        lead = lead_module.Orchestrator(task, token, tabs, model, started, model)
+        lead = lead_module.Orchestrator(task, token, tabs, model, started,
+                                        guarded(model, reader, "submit", HOSTED_STEP_SECONDS))
         lead.collect_until = lead.started + (lead.deadline - lead.started) * COLLECT_SHARE
         try:
             await asyncio.wait_for(_run(lead, model, reader), timeout=lead.deadline - time.time() + 5)

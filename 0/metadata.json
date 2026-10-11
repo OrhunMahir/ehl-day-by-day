@@ -1,0 +1,99 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4M6T7H60XTJQVS3S5GQQ5V8",
+  "session_id": "2c05f60b-5bde-40ae-ac6c-81c260a01ec5",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-11T00:46:42.878446Z",
+  "branch": "stream-o-qwen-guard",
+  "checkpoints_count": 4,
+  "save_step_count": 3,
+  "files_touched": [
+    "agent/agent.py",
+    "agent/llm.py",
+    "agent/simple.py",
+    "agent/tests/test_kit.py"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "ff6eeaae80d3",
+  "checkpoint_transcript_start": 4648,
+  "transcript_lines_at_start": 4648,
+  "compact_transcript_start": 841,
+  "token_usage": {
+    "input_tokens": 42,
+    "cache_creation_tokens": 21656,
+    "cache_read_tokens": 9126935,
+    "output_tokens": 19157,
+    "api_call_count": 16
+  },
+  "session_metrics": {
+    "turn_count": 47
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-11T00:46:42.48948Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 138,
+    "human_removed": 260,
+    "total_committed": 0,
+    "total_lines_changed": 398,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 315,
+      "user_lines_removed": 397,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "agent/agent.json": 1,
+        "agent/agent.py": 71,
+        "agent/llm.py": 147,
+        "agent/tests/test_kit.py": 96
+      },
+      "user_removed_per_file": {
+        "agent/agent.json": 1,
+        "agent/agent.py": 355,
+        "agent/llm.py": 41
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 79,
+      "user_lines_removed": 6,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "agent/engine/bid.py": 4,
+        "agent/engine/needs.py": 1,
+        "agent/engine/resolve.py": 6,
+        "agent/facts.py": 16,
+        "agent/simple.py": 2,
+        "agent/tests/test_engine_advanced.py": 50
+      },
+      "user_removed_per_file": {
+        "agent/engine/bid.py": 2,
+        "agent/engine/needs.py": 1,
+        "agent/simple.py": 2,
+        "agent/tests/test_engine_advanced.py": 1
+      }
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}

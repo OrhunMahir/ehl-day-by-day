@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4M6T7H60XTJQVS3S5GQQ5V8",
+  "strategy": "manual-commit",
+  "branch": "stream-o-qwen-guard",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "agent/agent.py",
+    "agent/llm.py",
+    "agent/simple.py",
+    "agent/tests/test_kit.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 42,
+    "cache_creation_tokens": 21656,
+    "cache_read_tokens": 9126935,
+    "output_tokens": 19157,
+    "api_call_count": 16
+  }
+}

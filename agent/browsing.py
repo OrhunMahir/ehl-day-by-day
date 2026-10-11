@@ -55,15 +55,22 @@ WRAP_UP_TOKENS = 1000
 WRAP_UP_RESERVE = 45  # seconds before the deadline at which browsing stops, so the wrap-up fits inside it
 CALL_SECONDS = 75  # one model call may take at most this long before it is retried
 # a model without thinking answers a step in 2-3 s, so a call still open after this long has stalled
-# Recording many facts at once (positions, Q&A answers) takes a minute or more without thinking (Qwen writes about 40
+# Recording many facts at once (positions, Q&A answers) can take over 30 s without thinking (Qwen writes about 40
 # tokens per second): at 30 s such a record could never finish, and an agent of a test run gave up for good after five
-# cut-off attempts, before its website's positions were recorded. An agent now asks again until its deadline.
-QUICK_CALL_SECONDS = 90
+# cut-off attempts, before its website's positions were recorded. An agent now asks again until its deadline; 60 s
+# leaves room for the largest records seen without waiting long for a call that hangs.
+QUICK_CALL_SECONDS = 60
 RETRY_PAUSE_SECONDS = 2  # after a model error, before asking again
 UNNOTED_KEPT = 2  # results of the last actions without a note after them, kept for a report written in a hurry
 UNNOTED_CHARS = 5000  # of each of them
 ACTION_SECONDS = 60  # one browser action may take at most this long
 PREVIOUS_VIEW_CHARS = 4000  # the page view before the newest one is cut to this length
+# A board update comes before almost every step and lists everything still needed (often 15-30 items); kept in full,
+# the stale lists made up a large part of every later call. The newest update stays whole; an older one keeps the
+# start of each record it reported and drops its list of what was needed then.
+BOARD_UPDATE = "Board update:\n"
+OLD_RECORD_CHARS = 200
+OLD_UPDATE_NOTE = "(what was still needed then: see the newest board update)"
 SHORTENED = "\n... (older page view shortened to save space; your notes keep what mattered)"
 NOTE_EVERY = 6  # actions without a note before the agent is reminded to save what it read
 WAIT_SECONDS = 45  # one `wait` for the shared board to change; under ACTION_SECONDS
@@ -396,7 +403,8 @@ class BrowsingAgent:
                 messages.append({"role": "user", "content": f"Only {self.max_steps - step} steps left: save unsaved "
                                                             f"facts with {save}, then call finish."})
             if self.board is not None and self.board.version > self.seen:
-                messages.append({"role": "user", "content": "Board update:\n" + self.board.news(self.name, self.seen)})
+                _supersede_board_updates(messages)
+                messages.append({"role": "user", "content": BOARD_UPDATE + self.board.news(self.name, self.seen)})
                 self.seen = self.board.version
             if since_note >= NOTE_EVERY:
                 since_note = 0
@@ -572,3 +580,17 @@ class BrowsingAgent:
         for i in views[-keep:-1]:  # the previous view is kept short; only the newest one stays whole
             if len(messages[i]["content"]) > PREVIOUS_VIEW_CHARS and not messages[i]["content"].endswith(SHORTENED):
                 messages[i]["content"] = messages[i]["content"][:PREVIOUS_VIEW_CHARS] + SHORTENED
+
+
+def _supersede_board_updates(messages: list[dict]) -> None:
+    """Shortens the board updates already in the conversation before a newer one is added (see BOARD_UPDATE). Each
+    update is shortened once, so the conversation's start stays the same from one call to the next."""
+    for message in messages:
+        content = message.get("content")
+        if message["role"] != "user" or not isinstance(content, str) or not content.startswith(BOARD_UPDATE):
+            continue
+        if content.endswith(OLD_UPDATE_NOTE):
+            continue
+        records = [line[:OLD_RECORD_CHARS] for line in content.splitlines() if line.startswith("- recorded by ")]
+        message["content"] = BOARD_UPDATE + "".join(f"{line}\n" for line in records) + OLD_UPDATE_NOTE
+

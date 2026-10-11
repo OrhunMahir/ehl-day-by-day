@@ -2,6 +2,31 @@
 
 Newest entry on top. Format and rules: [AGENTS.md](../../AGENTS.md), section "Push log".
 
+## 2026-10-11 04:45 · stream-j-cost-time: shorter board updates in the history, keys recorded first, faster retries in the submission
+
+- Test run `run_33f1fbe5ee6da422` (`e5b5200`): quality 100, eligible, every field right; but 10:19 and $1.83
+  (`run_1384fd032c9d5bb2` on `main`: 6:55, $1.05).
+  - Reading: the specification's revisions were recorded only at 182 s, after every page of every revision had been
+    read, so the ERP search started at 185 s and the ERP finished last (304 s). All four agents changed to the
+    reading model; 72 of its calls ($1.66), mostly real reading and recording. Its cached share was 55 %.
+  - Submission: 315 s (182 s on `main`): two model calls never answered and held it 45 s each; at the start it
+    looked for a signing code in the mailbox before one was requested (the hint added in `1d3a42e`).
+  - The run waited 17 s after the bid was complete until every agent was waiting; no website hung.
+- Changed:
+  - `browsing.py`: a board update comes before almost every step and lists everything still needed (15-30 items);
+    before a new one is added, the older ones keep the start of each record and drop their list. A call without
+    thinking may take 60 s (90 s before; the largest records need over 30 s).
+  - `simple.py`: the website agents record what other websites wait for (positions, each revision's catalogue
+    groups, keys from Q&A answers) as soon as they have read it.
+  - `submission.py` (stream O's file): a model call is asked again after 20 s (45 s before; answered calls took at
+    most 9 s); the signing-code hint is taken out again.
+- Checked: unit tests of the changed modules pass (browsing agent 26 with 2 new, simple 20, lead 26, submission 8);
+  full suite before the run. Not checked in the sandbox yet.
+- Learned: in this setup the reading model's cache share varies between runs (55-69 %) whatever the request
+  carries, so cost is better cut by sending less per call.
+- For the others: nothing changes on `main`.
+- Next: one test run of this commit; compare with `run_1384fd032c9d5bb2` and `run_33f1fbe5ee6da422`.
+
 ## 2026-10-11 03:25 · stream-j-cost-time: agents never give up; a stuck page is noticed in seconds and opened again at once; the bid form is left to the submission
 
 - Test runs of this branch, both cancelled by Julien, no score:

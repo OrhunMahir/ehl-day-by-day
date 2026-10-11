@@ -32,6 +32,8 @@ quantities and every bidder Q&A answer (quantity changes, withdrawals, technical
 a position, keys assigned to positions); specification revisions and the current one's requirements with all attributes and catalogue groups;
 materials with their attributes, status, stock, lead times, price conditions, carton size, masses, metal index and
 setup fee; and every message naming the tender with its records. Read every page of a list and every version.
+Record what other websites wait for as soon as you have read it, before you read on: the positions, each revision's
+catalogue groups, the keys that Q&A answers assign. The rest can follow in larger records.
 
 Messages: besides discount approvals, the bid needs the rule records that messages for the tender hold, one record
 per key: end reserves per revision (Technikfreigabe), exchange rates per FX key (Devisenfixing), metal-index rates

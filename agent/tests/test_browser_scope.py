@@ -165,6 +165,32 @@ class StuckWebsiteTest(unittest.TestCase):
         self.assertEqual(asyncio.run(steps()), (0, 0, 1))
 
 
+class OlderBoardUpdatesTest(unittest.TestCase):
+    """An older board update keeps the start of its records and drops its stale list of what was needed."""
+
+    def test_only_the_newest_update_keeps_its_list(self):
+        import browsing
+        older = ("Board update:\nRecorded by the other websites' assistants:\n- recorded by shop: " + "x" * 400 +
+                 "\n\nStill needed for the bid (take on what your website can answer):\n- [ERP] search group G-1")
+        messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "task"},
+                    {"role": "user", "content": older}, {"role": "tool", "tool_call_id": "c", "content": "a page"}]
+        browsing._supersede_board_updates(messages)
+        shortened = messages[2]["content"]
+        self.assertTrue(shortened.startswith("Board update:\n- recorded by shop: xxx"))
+        self.assertNotIn("Still needed", shortened)
+        self.assertNotIn("search group G-1", shortened)
+        self.assertLessEqual(len(shortened), 300)
+        self.assertEqual([m["content"] for m in messages if m is not messages[2]], ["s", "task", "a page"])
+        browsing._supersede_board_updates(messages)  # once shortened, it stays as it is
+        self.assertEqual(messages[2]["content"], shortened)
+
+    def test_an_update_without_records_shrinks_to_a_note(self):
+        import browsing
+        messages = [{"role": "user", "content": "Board update:\nStill needed for the bid:\n- [MAIL] the discount"}]
+        browsing._supersede_board_updates(messages)
+        self.assertEqual(messages[0]["content"], "Board update:\n" + browsing.OLD_UPDATE_NOTE)
+
+
 class WrapUpTest(unittest.TestCase):
     def setUp(self):
         Tab.homes.clear()

@@ -13,7 +13,9 @@ from browsing import BrowsingAgent
 
 SIGN_NOW_SECONDS = 150  # this long before the end the agent is told to stop filling and get the bid signed
 STOP_SECONDS = 10
-MODEL_CALL_SECONDS = 45  # a step normally takes under 10 s; a call that stalls is dropped and asked again
+# a step normally takes under 10 s (at most 9 s in a test run, queue included); a call that stalls is dropped and
+# asked again: two calls of that run never answered and each held the submission for 45 s
+MODEL_CALL_SECONDS = 20
 TOOL_SECONDS = 90
 FIRST_VIEW_SECONDS = 30
 OPTION_WAIT_SECONDS = 6  # dependent dropdowns load their options after the one before them was chosen
@@ -52,8 +54,7 @@ How to work:
   placeholders and error messages). Leave a field empty when the answer has no value for it.
 - If the form has its own option to leave a position out and you were told to leave one out, use that option.
 - Follow the brief's instructions for submitting. If a signing code is needed, get it where the brief says; that
-  may be another of your websites. A code you have just requested arrives as a new message: open the mailbox's
-  inbox and read the newest message first (use the mailbox's search if it has one), not older messages.
+  may be another of your websites.
 - The websites are deliberately awkward: cookie notices, popups, error pages that work on a retry, sessions that
   expire and return you to the sign-in page (use the login tool). Never accept surveys or unrelated offers.
 - Do not change or recompute any value of the answer.

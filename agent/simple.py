@@ -69,10 +69,11 @@ READER_CALL_SECONDS = 25
 # only those never changes.
 # Experiment: the reading model answers only the steps that record careful facts; every other step, also after
 # such a record, stays with the hosted model. And a step the hosted model has not answered after this long goes to
-# the reading model, so a busy hosted model does not hold an agent up (in one test run an agent lost two minutes to
-# four such calls in a row).
+# the reading model, so a slow answer does not hold an agent up: the browsing agent gives a call without thinking
+# 30 s and then asks again from the start, and in two test runs one agent lost over two minutes to five such calls
+# in a row. The limit leaves the reading model the rest of those 30 s for its own answer.
 READER_STAYS = False
-HOSTED_STEP_SECONDS = 15
+HOSTED_STEP_SECONDS = 18
 CAREFUL_FACTS = frozenset({"materials", "setup_fees", "discount_approvals", "condition_groups", "metal_indices",
                            "packaging_tariffs", "fx_rates", "setup_pools", "project_bonuses", "end_reserves",
                            "delivery_commitments"})
